@@ -9,7 +9,7 @@ class ContentLinks {
         api ??
         const String.fromEnvironment(
           'RAFT_ORIGIN',
-          defaultValue: 'http://localhost:13041',
+          defaultValue: 'http://hugomini.tail0666f2.ts.net:15244',
         );
     if (compiled.isEmpty || Uri.tryParse(boundApi)?.origin != origin.origin) {
       return origin;
