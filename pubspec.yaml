@@ -1,7 +1,7 @@
 name: raft_flutter_workspace
 publish_to: none
 environment:
-  sdk: ^3.13.5
+  sdk: ^3.13.4
 workspace:
   - apps/raft_flutter
   - packages/raft_ui

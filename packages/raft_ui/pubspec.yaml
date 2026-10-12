@@ -2,7 +2,7 @@ name: raft_ui
 publish_to: none
 version: 0.1.0
 environment:
-  sdk: ^3.13.5
+  sdk: ^3.13.4
 resolution: workspace
 dependencies:
   flutter:

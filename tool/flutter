@@ -24,6 +24,7 @@ root = Path(__file__).resolve().parent.parent
 version = json.loads((root / '.fvmrc').read_text())['flutter']
 launcher = 'flutter.bat' if os.name == 'nt' else 'flutter'
 candidates = [Path(os.environ['RAFT_FLUTTER_BIN'])] if os.environ.get('RAFT_FLUTTER_BIN') else [
+    Path('/Users/hugo/Work/SDK/flutter/bin') / launcher,
     root / '.fvm/flutter_sdk/bin' / launcher,
     Path.home() / 'flutter-sdks/versions' / version / 'bin' / launcher,
     Path.home() / 'fvm/versions' / version / 'bin' / launcher,

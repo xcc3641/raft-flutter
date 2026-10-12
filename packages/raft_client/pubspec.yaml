@@ -2,7 +2,7 @@ name: raft_client
 publish_to: none
 version: 0.1.0
 environment:
-  sdk: ^3.13.5
+  sdk: ^3.13.4
 resolution: workspace
 dependencies:
   dio: ^5.9.0

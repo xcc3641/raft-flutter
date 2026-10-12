@@ -2,9 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>app.raft.raft_flutter.inbox_refresh</string>
+		<string>com.hugo.raftMobile.inbox_refresh</string>
 	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
@@ -19,7 +26,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>raft_flutter</string>
+	<string>Raft</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -46,7 +53,7 @@
 	<key>RaftAppGroup</key>
 	<string>$(RAFT_APP_GROUP)</string>
 	<key>RaftShareKeychainGroup</key>
-	<string>$(AppIdentifierPrefix)app.raft.raftFlutter.shareSession</string>
+	<string>$(AppIdentifierPrefix)com.hugo.raftMobile.shareSession</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
