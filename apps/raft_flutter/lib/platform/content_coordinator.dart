@@ -305,7 +305,12 @@ class NativeContentCoordinator with WidgetsBindingObserver {
         origin: ContentLinks.originFor(c.origin),
       );
       if (target != null && target.serverId == c.serverId) {
-        unawaited(navigate(target, replaceEntry: replaceInitial));
+        unawaited(
+          navigate(
+            target,
+            replaceEntry: replaceInitial,
+          ).catchError((Object e, StackTrace s) {}),
+        );
       }
     } catch (_) {
       /* Untrusted platform payloads cannot navigate. */

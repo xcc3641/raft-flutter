@@ -74,6 +74,7 @@ import 'resource_cards.dart' show resourceRelativeTime;
 import 'saved_sidebar_entry.dart';
 import 'system_notification_center.dart';
 import 'workspace_browser.dart';
+import 'public_avatar_url.dart';
 import 'management_support.dart' show managementLaunch;
 import 'sender_avatar_projection.dart';
 import '../platform/app_update.dart';
@@ -82,7 +83,6 @@ import '../platform/native_notifications.dart';
 import '../platform/system_bars.dart';
 import '../platform/keyboard_inset_diagnostics.dart';
 import '../data/feature_flag_client_facts.dart';
-import 'public_avatar_url.dart';
 
 part 'workspace_view_sidebar_menus.dart';
 part 'mobile_workspace_route.dart';

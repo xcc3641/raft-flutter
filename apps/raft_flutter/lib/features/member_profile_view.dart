@@ -10,6 +10,7 @@ import '../data/user_error.dart';
 import '../data/workspace_controller.dart';
 import '../data/workspace_entity_directory.dart';
 import 'management_support.dart';
+import 'agent_avatar_dialog.dart' show agentProfileAvatarUrl;
 import 'agent_detail_view.dart';
 import 'member_profile_rules.dart';
 import 'sender_avatar_projection.dart';
@@ -626,7 +627,10 @@ class _MemberProfileViewState extends ManagementState<MemberProfileView> {
                     RaftAvatarListRow(
                       avatar: RaftAvatarSlot(
                         name: humanDisplayName(a),
-                        avatarUrl: a['avatarUrl'] as String?,
+                        avatarUrl: agentProfileAvatarUrl(
+                          w.client.origin,
+                          a['avatarUrl'] as String?,
+                        ),
                         slot: RaftAvatarSlotContext.surfaceList,
                       ),
                       name: humanDisplayName(a),

@@ -162,7 +162,11 @@ class RaftMountedAvatarFallback extends StatelessWidget {
               color: r.placeholderForeground,
             )
           : identity == RaftMountedAvatarIdentity.agent
-          ? const SizedBox.shrink() // Existing RaftAvatarContent owns pixel art.
+          ? RaftIcon(
+              RaftGlyph.bot,
+              size: r.placeholderExtent,
+              color: r.placeholderForeground,
+            )
           : Text(
               initials.trim().isEmpty
                   ? identity == RaftMountedAvatarIdentity.server
