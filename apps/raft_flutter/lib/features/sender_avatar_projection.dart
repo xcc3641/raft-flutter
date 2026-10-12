@@ -20,11 +20,11 @@ class SenderAvatarProjection {
 
 bool raftUploadedHumanAvatar(String? value) {
   final uri = value == null ? null : Uri.tryParse(value);
-  return uri != null &&
-      RegExp(
-        r'^/(?:api/)?avatars/users/[0-9a-f]+\.webp$',
-        caseSensitive: false,
-      ).hasMatch(uri.path);
+  if (uri == null) return false;
+  return RegExp(
+    r'^/(?:api/)?avatars/users/[0-9a-f-]+\.(webp|png|jpe?g|gif)$',
+    caseSensitive: false,
+  ).hasMatch(uri.path);
 }
 
 SenderAvatarProjection projectSenderAvatar({

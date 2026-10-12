@@ -15,6 +15,7 @@ import 'agent_detail_view.dart' show agentTimeFormatter;
 import 'agent_metadata_catalog.dart';
 import 'agent_trajectory_log.dart';
 import 'computer_detail_view.dart' show computerAgentActivityText;
+import 'public_avatar_url.dart';
 
 /// shared runtimeCatalog display names, with the deprecated status suffix
 /// (formatRuntimeLabelWithStatus).
@@ -396,14 +397,20 @@ class _ProfilePreviewContentState extends State<ProfilePreviewContent> {
     if (mounted) setState(() {});
   }
 
-  Widget avatar(Map<String, dynamic>? row) =>
-      widget.avatar ??
-      RaftAvatarSlot(
-        name: '${row?['displayName'] ?? row?['name'] ?? ''}',
-        agent: widget.agent,
-        avatarUrl: row?['avatarUrl'] as String?,
-        slot: RaftAvatarSlotContext.mentionCard,
-      );
+  Widget avatar(Map<String, dynamic>? row) {
+    final rawUrl = row?['avatarUrl'] as String?;
+    final pixel = RaftAvatarSlot.pixelKey(rawUrl);
+    final resolvedUrl = pixel == null
+        ? raftPublicAvatarUrl(w.client.origin, rawUrl)
+        : rawUrl;
+    return widget.avatar ??
+        RaftAvatarSlot(
+          name: '${row?['displayName'] ?? row?['name'] ?? ''}',
+          agent: widget.agent,
+          avatarUrl: resolvedUrl,
+          slot: RaftAvatarSlotContext.mentionCard,
+        );
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -488,7 +488,10 @@ class _MemberProfileViewState extends ManagementState<MemberProfileView> {
                   RaftAvatarListRow(
                     avatar: RaftAvatarSlot(
                       name: '${a['displayName'] ?? a['name']}',
-                      avatarUrl: a['avatarUrl'] as String?,
+                      avatarUrl: raftPublicAvatarUrl(
+                        w.client.origin,
+                        a['avatarUrl'] as String?,
+                      ),
                       slot: RaftAvatarSlotContext.surfaceList,
                     ),
                     name: '${a['displayName'] ?? a['name']}',

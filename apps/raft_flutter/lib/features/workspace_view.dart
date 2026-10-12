@@ -72,6 +72,7 @@ import 'agent_avatar_projection.dart';
 import 'saved_sidebar_entry.dart';
 import 'system_notification_center.dart';
 import 'workspace_browser.dart';
+import 'public_avatar_url.dart';
 import 'management_support.dart' show managementLaunch;
 import 'sender_avatar_projection.dart';
 import '../platform/native_sharing.dart';
@@ -2740,7 +2741,10 @@ class _WorkspaceViewState extends State<WorkspaceView>
             id: server.id,
             name: server.name,
             slug: server.string('slug'),
-            avatarUrl: server.json['avatarUrl'] as String?,
+            avatarUrl: raftPublicAvatarUrl(
+              w.client.origin,
+              server.json['avatarUrl'] as String?,
+            ),
             current: server.id == w.server?.id,
             activityUnreadCount: serverUnread[server.id]?.activityUnreadCount,
             pushMuted: serverUnread[server.id]?.pushMuted ?? false,

@@ -10,6 +10,7 @@ import '../data/workspace_controller.dart';
 import '../data/workspace_entity_directory.dart';
 import '../platform/content_links.dart';
 import 'administration_model.dart';
+import 'public_avatar_url.dart';
 import 'agent_detail_view.dart' show agentTimeFormatter;
 import 'management_support.dart'
     show
@@ -245,7 +246,7 @@ class _AdminsSectionState extends State<_AdminsSection> {
       agent: p.agent,
       subtitle: p.subtitle,
       optionLabel: p.optionLabel,
-      avatarUrl: p.avatarUrl,
+      avatarUrl: raftPublicAvatarUrl(w.client.origin, p.avatarUrl),
     );
     return RaftAdminSection(
       regionKey: _region('admins'),

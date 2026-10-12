@@ -14,6 +14,7 @@ import '../data/workspace_entity_directory.dart';
 import 'agent_detail_view.dart' show sourceRuntimeDisplayNames;
 import 'agent_metadata_catalog.dart';
 import 'computer_setup_commands.dart';
+import 'public_avatar_url.dart';
 import 'runtime_usage_chip.dart';
 import '../data/runtime_account_usage.dart';
 
@@ -417,7 +418,10 @@ class _ComputerDetailPanelState extends State<ComputerDetailPanel> {
           ? RaftComputerCreator(
               name: '${creator['displayName'] ?? creator['name']}',
               handle: '${creator['name']}',
-              avatarUrl: creator['avatarUrl'] as String?,
+              avatarUrl: raftPublicAvatarUrl(
+                w.client.origin,
+                creator['avatarUrl'] as String?,
+              ),
             )
           : null,
       diskLowTitle: disk == null
@@ -428,7 +432,10 @@ class _ComputerDetailPanelState extends State<ComputerDetailPanel> {
           RaftComputerAgent(
             id: a['id'] as String,
             name: '${a['displayName'] ?? a['name'] ?? ''}',
-            avatarUrl: a['avatarUrl'] as String?,
+            avatarUrl: raftPublicAvatarUrl(
+              w.client.origin,
+              a['avatarUrl'] as String?,
+            ) ?? (a['avatarUrl'] is String && (a['avatarUrl'] as String).startsWith('pixel:') ? a['avatarUrl'] as String : null),
             subtitle: _agentSubtitle(a),
             activity: '${a['activity'] ?? 'offline'}',
             activityText: computerAgentActivityText(a),

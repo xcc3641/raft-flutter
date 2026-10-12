@@ -10,9 +10,14 @@ String? raftPublicAvatarUrl(String origin, String? value) {
         ? value
         : null;
   }
+  final path = avatar.path;
+  final validPath =
+      path.startsWith('/api/avatars/') ||
+      path.startsWith('/avatars/') ||
+      path.startsWith('/api/external-avatars/') ||
+      path.startsWith('/external-avatars/');
   if (avatar.hasAuthority ||
-      !avatar.path.startsWith('/api/avatars/') &&
-          !avatar.path.startsWith('/api/external-avatars/') ||
+      !validPath ||
       avatar.pathSegments.any((segment) => segment == '.' || segment == '..')) {
     return null;
   }
