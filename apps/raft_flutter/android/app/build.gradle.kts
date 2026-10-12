@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "app.raft.raft_flutter"
+    namespace = "com.hugo.raft_mobile"
     compileSdk = 37
     buildToolsVersion = "37.0.0"
     ndkVersion = flutter.ndkVersion
@@ -21,7 +21,7 @@ android {
         // Performance labs build an isolated test app next to the real one
         // (`-PraftApplicationIdSuffix=.linkperf`); normal builds keep the id.
         applicationId =
-            "app.raft.raft_flutter" +
+            "com.hugo.raft_mobile" +
                 ((project.findProperty("raftApplicationIdSuffix") as String?) ?: "")
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.

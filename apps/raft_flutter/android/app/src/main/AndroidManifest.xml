@@ -5,6 +5,7 @@
     <!-- Saving an image into the public Pictures folder before Android 10. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
     <application
+        android:usesCleartextTraffic="true"
         android:label="Raft"
         android:allowBackup="false"
         android:fullBackupContent="false"
@@ -18,9 +19,9 @@
         <!-- Vendor plugin may toggle only these launcher aliases. MainActivity
              stays enabled for all external intents. -->
         <meta-data android:name="flutter_dynamic_icon_plus.default_alias"
-            android:value="app.raft.raft_flutter.IconYellow" />
+            android:value="com.hugo.raft_mobile.IconYellow" />
         <meta-data android:name="flutter_dynamic_icon_plus.allowed_aliases"
-            android:value="app.raft.raft_flutter.IconYellow,app.raft.raft_flutter.IconBlue,app.raft.raft_flutter.IconGreen,app.raft.raft_flutter.IconWhite,app.raft.raft_flutter.IconPink" />
+            android:value="com.hugo.raft_mobile.IconYellow,com.hugo.raft_mobile.IconBlue,com.hugo.raft_mobile.IconGreen,com.hugo.raft_mobile.IconWhite,com.hugo.raft_mobile.IconPink" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

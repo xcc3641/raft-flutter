@@ -30,7 +30,7 @@ class NativeAppIcon extends ChangeNotifier {
   String? _name(RaftAppIconPalette choice) {
     final suffix = '${choice.name[0].toUpperCase()}${choice.name.substring(1)}';
     if (platform == TargetPlatform.android) {
-      return 'app.raft.raft_flutter.Icon$suffix';
+      return 'com.hugo.raft_mobile.Icon$suffix';
     }
     return choice == RaftAppIconPalette.yellow ? null : 'AppIcon$suffix';
   }

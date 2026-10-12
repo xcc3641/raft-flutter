@@ -9,7 +9,7 @@
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-		<string>$(AppIdentifierPrefix)app.raft.raftFlutter.shareSession</string>
+		<string>$(AppIdentifierPrefix)com.hugo.raftMobile.shareSession</string>
 	</array>
 </dict>
 </plist>

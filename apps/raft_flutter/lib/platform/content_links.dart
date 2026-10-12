@@ -40,7 +40,8 @@ class ContentLinks {
         api ??
         const String.fromEnvironment(
           'RAFT_ORIGIN',
-          defaultValue: 'https://api.raft.build',
+          'RAFT_ORIGIN',
+          defaultValue: 'http://hugomini.tail0666f2.ts.net:15244',
         );
     return _explicit(origin, compiled, boundApi) ??
         officialWebOrigin(coordinator) ??

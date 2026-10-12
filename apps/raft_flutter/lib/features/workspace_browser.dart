@@ -16,7 +16,7 @@ Uri? workspaceBrowserOrigin(
   String frontend = const String.fromEnvironment('RAFT_FRONTEND_ORIGIN'),
   String api = const String.fromEnvironment(
     'RAFT_ORIGIN',
-    defaultValue: 'https://api.raft.build',
+    defaultValue: 'http://hugomini.tail0666f2.ts.net:15244',
   ),
 }) =>
     _explicitBrowserOrigin(coordinator, frontend: frontend, api: api) ??

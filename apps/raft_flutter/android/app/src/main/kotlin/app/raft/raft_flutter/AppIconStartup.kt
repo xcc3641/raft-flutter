@@ -11,7 +11,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 internal object AppIconPalette {
     val colors = listOf("yellow", "blue", "green", "white", "pink")
     private fun component(context: Context, color: String) = ComponentName(
-        context.packageName, "app.raft.raft_flutter.Icon" + color.replaceFirstChar { it.uppercase() })
+        context.packageName, "com.hugo.raft_mobile.Icon" + color.replaceFirstChar { it.uppercase() })
     private fun enabled(context: Context, color: String): Boolean {
         return when (context.packageManager.getComponentEnabledSetting(component(context, color))) {
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true

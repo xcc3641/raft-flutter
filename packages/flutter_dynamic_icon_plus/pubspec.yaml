@@ -8,7 +8,7 @@ repository: https://github.com/chandrabezzo/flutter_dynamic_icon_plus
 issue_tracker: https://github.com/chandrabezzo/flutter_dynamic_icon_plus/issues
 
 environment:
-  sdk: ^3.13.5
+  sdk: ^3.13.4
   flutter: ">=3.3.0"
 
 dependencies:
