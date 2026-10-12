@@ -12,10 +12,12 @@ import 'package:raft_ui/raft_ui.dart';
 import '../data/user_error.dart';
 import '../data/workspace_controller.dart';
 import '../data/workspace_entity_directory.dart';
+import 'agent_avatar_dialog.dart' show agentProfileAvatarUrl;
 import 'agent_detail_view.dart' show sourceRuntimeDisplayNames;
 import 'agent_metadata_catalog.dart';
 import 'agent_metadata_projection.dart';
 import 'computer_setup_commands.dart';
+import 'public_avatar_url.dart';
 import 'runtime_usage_chip.dart';
 import '../data/runtime_account_usage.dart';
 
@@ -426,7 +428,10 @@ class _ComputerDetailPanelState extends State<ComputerDetailPanel> {
           ? RaftComputerCreator(
               name: nonEmptyOr(creator['displayName'], creator['name']),
               handle: '${creator['name']}',
-              avatarUrl: creator['avatarUrl'] as String?,
+              avatarUrl: raftPublicAvatarUrl(
+                w.client.origin,
+                creator['avatarUrl'] as String?,
+              ),
             )
           : null,
       diskLowTitle: disk == null
@@ -437,7 +442,10 @@ class _ComputerDetailPanelState extends State<ComputerDetailPanel> {
           RaftComputerAgent(
             id: a['id'] as String,
             name: agentRowName(a),
-            avatarUrl: a['avatarUrl'] as String?,
+            avatarUrl: agentProfileAvatarUrl(
+              w.client.origin,
+              a['avatarUrl'] as String?,
+            ),
             subtitle: _agentSubtitle(a),
             activity: agentRowAmbientDisplay(a).activity,
             activityText: computerAgentActivityText(a),

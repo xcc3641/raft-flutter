@@ -909,7 +909,10 @@ class _AgentDetailPanelState extends State<AgentDetailPanel> {
                       name: nonEmptyOr(creator['displayName'], creator['name']),
                       handle: '${creator['name']}',
                       human: creator['type'] == 'human',
-                      avatarUrl: creator['avatarUrl'] as String?,
+                      avatarUrl: agentProfileAvatarUrl(
+                        widget.controller.client.origin,
+                        creator['avatarUrl'] as String?,
+                      ),
                     )
                   : RaftCssText(
                       raftText(context, 'No creator assigned'),
@@ -1003,7 +1006,10 @@ class _AgentDetailPanelState extends State<AgentDetailPanel> {
                     RaftAvatarListRow(
                       avatar: RaftAvatarSlot(
                         name: agentRowName(c),
-                        avatarUrl: c['avatarUrl'] as String?,
+                        avatarUrl: agentProfileAvatarUrl(
+                          widget.controller.client.origin,
+                          c['avatarUrl'] as String?,
+                        ),
                         slot: RaftAvatarSlotContext.surfaceList,
                       ),
                       name: agentRowName(c),

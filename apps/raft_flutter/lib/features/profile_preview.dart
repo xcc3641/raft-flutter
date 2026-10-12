@@ -12,6 +12,7 @@ import '../data/runtime_config.dart';
 import '../data/workspace_controller.dart';
 import '../data/workspace_entity_directory.dart';
 import 'agent_detail_view.dart' show agentTimeFormatter;
+import 'public_avatar_url.dart';
 import 'agent_metadata_catalog.dart';
 import 'agent_trajectory_log.dart';
 import 'agent_metadata_projection.dart';
@@ -401,14 +402,19 @@ class _ProfilePreviewContentState extends State<ProfilePreviewContent> {
     if (mounted) setState(() {});
   }
 
-  Widget avatar(Map<String, dynamic>? row) =>
-      widget.avatar ??
-      RaftAvatarSlot(
-        name: '${row?['displayName'] ?? row?['name'] ?? ''}',
-        agent: widget.agent,
-        avatarUrl: row?['avatarUrl'] as String?,
-        slot: RaftAvatarSlotContext.mentionCard,
-      );
+  Widget avatar(Map<String, dynamic>? row) {
+    final rawUrl = row?['avatarUrl'] as String?;
+    final resolvedUrl = RaftAvatarSlot.pixelKey(rawUrl) == null
+        ? raftPublicAvatarUrl(w.client.origin, rawUrl)
+        : rawUrl;
+    return widget.avatar ??
+        RaftAvatarSlot(
+          name: '${row?['displayName'] ?? row?['name'] ?? ''}',
+          agent: widget.agent,
+          avatarUrl: resolvedUrl,
+          slot: RaftAvatarSlotContext.mentionCard,
+        );
+  }
 
   @override
   Widget build(BuildContext context) {

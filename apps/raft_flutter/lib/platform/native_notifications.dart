@@ -198,7 +198,9 @@ class NativeNotificationService extends ChangeNotifier {
         final result = await _plugin.initialize(
           settings: notificationInitialization,
           onDidReceiveNotificationResponse: (response) {
-            if (response.payload != null) onTap?.call(response.payload!);
+            try {
+              if (response.payload != null) onTap?.call(response.payload!);
+            } catch (_) {}
           },
         );
         // Darwin returns the authorization result, including false when all
@@ -212,7 +214,9 @@ class NativeNotificationService extends ChangeNotifier {
           final launch = await _plugin.getNotificationAppLaunchDetails();
           final payload = launch?.notificationResponse?.payload;
           if (launch?.didNotificationLaunchApp == true && payload != null) {
-            onTap?.call(payload);
+            try {
+              onTap?.call(payload);
+            } catch (_) {}
           }
         } else {
           // Desktop policy is owned by the freedesktop notification daemon.

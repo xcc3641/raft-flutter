@@ -38,11 +38,11 @@ class RaftAvatarContent extends StatelessWidget {
   static bool isUploadedHumanAvatar(String? url) {
     if (url == null) return false;
     final parsed = Uri.tryParse(url);
-    return parsed != null &&
-        RegExp(
-          r'^/(?:api/)?avatars/users/[0-9a-f]+\.webp$',
-          caseSensitive: false,
-        ).hasMatch(parsed.path);
+    if (parsed == null) return false;
+    return RegExp(
+      r'^/(?:api/)?avatars/users/[0-9a-f-]+\.(webp|png|jpe?g|gif)$',
+      caseSensitive: false,
+    ).hasMatch(parsed.path);
   }
 
   static bool _publicUrl(String? url) {
