@@ -11,7 +11,7 @@ Pod::Spec.new do |s|
   s.source           = { :path => '.' }
   s.source_files     = 'raft_updater/Sources/raft_updater/**/*.swift'
   s.dependency 'FlutterMacOS'
-  s.dependency 'Sparkle', '2.10.0'
+  s.dependency 'Sparkle', '~> 2.6'
 
   s.platform = :osx, '12.0'
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
