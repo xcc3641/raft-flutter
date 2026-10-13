@@ -7,7 +7,7 @@ import 'package:raft_flutter/platform/launch_theme.dart';
 import 'package:raft_ui/raft_ui.dart';
 
 class _IconApi extends FlutterDynamicIconPlusPlatform {
-  String? actual = 'app.raft.raft_flutter.IconYellow';
+  String? actual = 'com.hugo.raft_mobile.IconYellow';
   bool fail = false;
   @override
   Future<bool> get supportsAlternateIcons async => true;
