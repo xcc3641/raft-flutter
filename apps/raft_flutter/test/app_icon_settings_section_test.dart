@@ -21,7 +21,7 @@ void main() {
       (t) async {
         String? actual = defaultTargetPlatform == TargetPlatform.iOS
             ? null
-            : 'app.raft.raft_flutter.IconYellow';
+            : 'com.hugo.raft_mobile.IconYellow';
         final messenger =
             TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
         messenger.setMockMethodCallHandler(channel, (call) async {
@@ -56,7 +56,7 @@ void main() {
           actual,
           defaultTargetPlatform == TargetPlatform.iOS
               ? 'AppIconBlue'
-              : 'app.raft.raft_flutter.IconBlue',
+              : 'com.hugo.raft_mobile.IconBlue',
         );
         await t.tap(find.byKey(const Key('mobile-settings-back')));
         await frames(t, () {});
