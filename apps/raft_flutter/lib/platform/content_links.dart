@@ -40,7 +40,6 @@ class ContentLinks {
         api ??
         const String.fromEnvironment(
           'RAFT_ORIGIN',
-          'RAFT_ORIGIN',
           defaultValue: 'http://hugomini.tail0666f2.ts.net:15244',
         );
     return _explicit(origin, compiled, boundApi) ??
