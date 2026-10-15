@@ -14,7 +14,7 @@ topics:
   - cross-platform
 
 environment:
-  sdk: ^3.13.5
+  sdk: ^3.13.4
 
 dependencies:
   collection: ^1.17.0
