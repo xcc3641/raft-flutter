@@ -20,6 +20,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../parity_harness.dart';
 import 'thread_composer/fake_workspace.dart';
+import '../../support/app_services_fixture.dart';
 
 Map<String, dynamic> _fx(ParityContext ctx) =>
     ctx.fixtures['ext:shell'] as Map<String, dynamic>;
@@ -187,15 +188,17 @@ class _HostState extends State<_Host> {
   }
 
   @override
-  Widget build(BuildContext context) => WorkspaceView(
-    controller: w,
-    presentation: presentation,
-    appearance: RaftAppearance(
-      mode: widget.ctx.dark ? ThemeMode.dark : ThemeMode.light,
-      light: widget.ctx.family,
+  Widget build(BuildContext context) => withAppServices(
+    WorkspaceView(
+      controller: w,
+      presentation: presentation,
+      appearance: RaftAppearance(
+        mode: widget.ctx.dark ? ThemeMode.dark : ThemeMode.light,
+        light: widget.ctx.family,
+      ),
+      onAppearance: (_) async {},
+      onLogout: () async {},
     ),
-    onAppearance: (_) async {},
-    onLogout: () async {},
   );
 }
 

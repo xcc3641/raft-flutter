@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:raft_client/raft_client.dart';
 import 'package:raft_ui/raft_ui.dart';
+import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/main.dart';
 import 'package:raft_flutter/features/chat_view.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
@@ -672,7 +673,9 @@ void main() {
       );
       await storage.write('test-native-session', null);
       await storage.write(fixture['origin'], null);
-      await tester.pumpWidget(RaftApp(sessionStore: storage));
+      await tester.pumpWidget(RaftApp(
+        services: const AppServices.updatesDisabledForTestOrPreview(),
+      sessionStore: storage));
       await until(
         tester,
         () => find.byKey(const Key('login-email')).evaluate().isNotEmpty,
@@ -744,7 +747,9 @@ void main() {
       expect(await storage.read(fixture['origin']), isNotNull);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpWidget(
-        RaftApp(key: const Key('restored-app'), sessionStore: storage),
+        RaftApp(
+          services: const AppServices.updatesDisabledForTestOrPreview(),
+        key: const Key('restored-app'), sessionStore: storage),
       );
       w = await openNativeChat(tester);
       await until(

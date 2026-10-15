@@ -13,6 +13,7 @@ import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:raft_ui/test_themes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'support/app_services_fixture.dart';
 
 // Activity/Search channel preview contract: one location owns the detail
 // title, rail highlight, master list, detail body and Back, and read admission
@@ -178,14 +179,16 @@ Future<(WorkspaceController, _Client)> _mount(
   await t.pumpWidget(
     MaterialApp(
       theme: raftTheme(family, dark: dark),
-      home: WorkspaceView(
-        controller: w,
-        appearance: RaftAppearance(
-          mode: dark ? ThemeMode.dark : ThemeMode.light,
-          light: family,
+      home: withAppServices(
+        WorkspaceView(
+          controller: w,
+          appearance: RaftAppearance(
+            mode: dark ? ThemeMode.dark : ThemeMode.light,
+            light: family,
+          ),
+          onAppearance: (_) async {},
+          onLogout: () async {},
         ),
-        onAppearance: (_) async {},
-        onLogout: () async {},
       ),
     ),
   );

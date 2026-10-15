@@ -55,7 +55,6 @@ class MacOSDockUnread {
       _detach();
       _workspace = next;
       if (next != null) {
-        _activity = next.acquireActivityUnread(this)..addListener(_publish);
         _servers = SourceServerUnreadStore(next)..addListener(_publish);
         next.addListener(_sync);
         next.foregroundChanges.addListener(_foregroundChanged);
@@ -112,6 +111,11 @@ class MacOSDockUnread {
   void _sync() {
     if (_closed) return;
     final w = _workspace;
+    final activity = w?.activityUnreadIfBound;
+    if (!identical(activity, _activity)) {
+      _activity?.removeListener(_publish);
+      _activity = activity?..addListener(_publish);
+    }
     final next = w?.client.signedIn == true ? _activity?.scope : null;
     final changed = next != _scope;
     _scope = next;
@@ -180,7 +184,6 @@ class MacOSDockUnread {
     unawaited(_events?.cancel());
     _events = null;
     _activity?.removeListener(_publish);
-    _workspace?.releaseActivityUnread(this);
     _activity = null;
     _servers?.removeListener(_publish);
     _servers?.dispose();

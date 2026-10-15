@@ -16,6 +16,7 @@ import 'package:raft_flutter/features/mobile_workspace_pages.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'support/app_services_fixture.dart';
 
 /// Phone layout navigation placement: the bottom tab bar on ordinary tall
 /// phones, the desktop left rail on wide / short windows (wide foldable inner
@@ -220,12 +221,14 @@ class _Rig {
           textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
           child: child!,
         ),
-        home: WorkspaceView(
-          controller: w,
-          railSide: railSide,
-          appearance: RaftAppearance(mode: ThemeMode.light, light: family),
-          onAppearance: (_) async {},
-          onLogout: () async {},
+        home: withAppServices(
+          WorkspaceView(
+            controller: w,
+            railSide: railSide,
+            appearance: RaftAppearance(mode: ThemeMode.light, light: family),
+            onAppearance: (_) async {},
+            onLogout: () async {},
+          ),
         ),
       ),
     );

@@ -9,6 +9,7 @@ import 'package:raft_flutter/features/chat_view.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'support/app_services_fixture.dart';
 
 /// High-frequency presence events (agent heartbeats, last-seen, machine status
 /// repeats) must not rebuild the workspace, the sidebar or chat rows that do
@@ -184,11 +185,13 @@ void main() {
       await t.pumpWidget(
         MaterialApp(
           theme: raftTheme(RaftFamily.brutal),
-          home: WorkspaceView(
-            controller: w,
-            appearance: const RaftAppearance(),
-            onAppearance: (_) async {},
-            onLogout: () async {},
+          home: withAppServices(
+            WorkspaceView(
+              controller: w,
+              appearance: const RaftAppearance(),
+              onAppearance: (_) async {},
+              onLogout: () async {},
+            ),
           ),
         ),
       );

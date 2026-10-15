@@ -23,6 +23,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:raft_client/raft_client.dart';
+import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/data/device_preferences.dart';
 import 'package:raft_flutter/data/source_time_formatter.dart';
 import 'package:raft_flutter/features/root_error_boundary.dart';
@@ -299,6 +300,7 @@ Future<void> _start() async {
         child: KeyedSubtree(
           key: ValueKey(generation),
           child: app.RaftApp(
+            services: const AppServices.updatesDisabledForTestOrPreview(),
             sessionStore: store,
             createClient: (origin, store, kind) =>
                 _QaClient(origin, store, kind),

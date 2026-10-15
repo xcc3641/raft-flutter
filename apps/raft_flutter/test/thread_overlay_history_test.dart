@@ -12,6 +12,7 @@ import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'chat_focus_receipt_test.dart' show paintedMessage;
+import 'support/app_services_fixture.dart';
 
 // Mounted thread / task-overlay history contracts (Web rightPanelUrlSync and
 // mobileBackNavigation). The fake client answers every REST read from
@@ -192,11 +193,13 @@ Future<Fixture> overlayFixture(
   await t.pumpWidget(
     MaterialApp(
       theme: raftTheme(family),
-      home: WorkspaceView(
-        controller: w,
-        appearance: RaftAppearance(light: family),
-        onAppearance: (_) async {},
-        onLogout: () async {},
+      home: withAppServices(
+        WorkspaceView(
+          controller: w,
+          appearance: RaftAppearance(light: family),
+          onAppearance: (_) async {},
+          onLogout: () async {},
+        ),
       ),
     ),
   );

@@ -8,6 +8,7 @@ import 'package:raft_flutter/data/workspace_controller.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'support/app_services_fixture.dart';
 
 class _Client extends RaftClient {
   _Client()
@@ -154,11 +155,13 @@ class _Rig {
     await tester.pumpWidget(
       MaterialApp(
         theme: raftTheme(family),
-        home: WorkspaceView(
-          controller: w,
-          appearance: RaftAppearance(mode: ThemeMode.light, light: family),
-          onAppearance: (_) async {},
-          onLogout: () async {},
+        home: withAppServices(
+          WorkspaceView(
+            controller: w,
+            appearance: RaftAppearance(mode: ThemeMode.light, light: family),
+            onAppearance: (_) async {},
+            onLogout: () async {},
+          ),
         ),
       ),
     );

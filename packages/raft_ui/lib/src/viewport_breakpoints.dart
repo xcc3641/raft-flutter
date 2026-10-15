@@ -83,6 +83,10 @@ class RaftRailSideScope extends InheritedWidget {
 
 /// Set around a rail so what it opens (server menu, notification centre)
 /// goes to the side the window has room: toward the content.
+///
+/// This is not [RaftNavigationColumnScope]. That scope wraps the content
+/// column and tells a panel whether the navigation column is on the right.
+/// This one wraps only the rail.
 class RaftRailEdgeScope extends InheritedWidget {
   const RaftRailEdgeScope({
     super.key,

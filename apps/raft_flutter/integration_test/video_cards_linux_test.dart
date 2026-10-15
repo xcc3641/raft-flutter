@@ -83,13 +83,15 @@ void main() {
     });
     final sent = <String, int>{};
     final requests = <String, int>{};
+    final ranges = <String, List<String>>{};
     final server = (await tester.runAsync(() => HttpServer.bind(InternetAddress.loopbackIPv4, 0)))!;
     server.listen((request) async {
       final name = request.uri.pathSegments.last;
       final file = File('${dir.path}/$name');
       final size = file.lengthSync();
       var start = 0, end = size - 1, status = 200;
-      final range = RegExp(r'bytes=(\d*)-(\d*)').firstMatch(request.headers.value('range') ?? '');
+      final header = request.headers.value('range');
+      final range = RegExp(r'bytes=(\d*)-(\d*)').firstMatch(header ?? '');
       if (range != null) {
         if (range[1]!.isNotEmpty) start = int.parse(range[1]!);
         if (range[2]!.isNotEmpty) end = int.parse(range[2]!).clamp(0, size - 1);
@@ -100,21 +102,38 @@ void main() {
         status = 206;
       }
       requests[name] = (requests[name] ?? 0) + 1;
+      ranges.putIfAbsent(name, () => []).add(header ?? '-');
       request.response
         ..statusCode = status
         ..headers.set('accept-ranges', 'bytes')
         ..headers.contentType = ContentType('video', 'mp4')
         ..contentLength = end - start + 1;
       if (status == 206) request.response.headers.set('content-range', 'bytes $start-$end/$size');
+      // A small send buffer, so the count is what the client read. An
+      // open-ended range would otherwise fill the kernel buffer with the file.
+      final socket = await request.response.detachSocket(writeHeaders: true);
       try {
-        await for (final chunk in file.openRead(start, end + 1)) {
-          request.response.add(chunk);
+        socket.setRawOption(RawSocketOption.fromInt(1, 7, 32768));
+      } on Object {
+        // best effort
+      }
+      final reader = await file.open();
+      try {
+        await reader.setPosition(start);
+        var left = end - start + 1;
+        while (left > 0) {
+          final chunk = await reader.read(left < 16384 ? left : 16384);
+          if (chunk.isEmpty) break;
+          socket.add(chunk);
+          await socket.flush();
           sent[name] = (sent[name] ?? 0) + chunk.length;
-          await request.response.flush();
+          left -= chunk.length;
         }
-        await request.response.close();
       } on Object {
         // the reader went away
+      } finally {
+        await reader.close();
+        socket.destroy();
       }
     });
     addTearDown(() => server.close(force: true));
@@ -198,19 +217,28 @@ void main() {
       for (final name in ['portrait', 'landscape']) '$name.mp4': File('${dir.path}/$name.mp4').lengthSync(),
     };
     // ignore: avoid_print
-    print('VIDEO-CARDS-LINUX posters after ${clock.elapsedMilliseconds} ms; bytes $bytes of $sizes; requests $requests');
+    print('VIDEO-CARDS-LINUX posters after ${clock.elapsedMilliseconds} ms; bytes $bytes of $sizes; requests $requests; ranges $ranges');
     for (final name in sizes.keys) {
       expect(bytes[name] ?? 0, lessThan(sizes[name]! ~/ 4), reason: '$name: ranged reads, not the file');
     }
-    // The inline player is still there and plays on a tap (desktop keeps Web's card).
+    // Desktop keeps the inline player. The centre Play disc is hover-only
+    // (the widget test: paused, the bar is up, the big Play is not); a click
+    // on the picture plays.
     expect(find.byType(RaftInlineVideo), findsNWidgets(2));
     expect(find.byType(RaftVideoPosterCard), findsNothing);
-    final play = find.descendant(
+    final surface = find.descendant(
       of: find.byKey(const ValueKey('landscape')),
-      matching: find.byKey(const Key('inline-video-play')),
+      matching: find.byKey(const Key('inline-video-surface')),
     );
-    expect(play, findsOneWidget);
-    await tester.tap(play);
+    expect(surface, findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('landscape')),
+        matching: find.byKey(const Key('inline-video-play')),
+      ),
+      findsNothing,
+    );
+    await tester.tap(surface);
     final card = find.descendant(
       of: find.byKey(const ValueKey('landscape')),
       matching: find.byType(RaftInlineVideo),

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:raft_client/raft_client.dart';
 import 'package:raft_sync/raft_sync.dart';
 
+import 'burst_reads.dart';
 import 'announcement_store.dart';
 import 'cause_notice.dart';
 import 'message_task_cache.dart';
@@ -16,6 +17,7 @@ import 'source_channel_files_store.dart';
 import 'source_activity_unread_store.dart';
 import 'reaction_toggle.dart';
 import 'workspace_cache.dart';
+import 'workspace_composer.dart';
 import 'resource_snapshot_cache.dart';
 import 'user_activity.dart';
 import 'user_error.dart';
@@ -94,11 +96,6 @@ class UploadDraft {
   /// The accepted upload record (`POST /attachments/upload`), so an
   /// optimistic row can present the attachment before the message exists.
   Map<String, dynamic>? metadata;
-}
-
-class _SendAttempt {
-  const _SendAttempt(this.fingerprint, this.randomId);
-  final String fingerprint, randomId;
 }
 
 /// Web MessageInput `addOptimisticMessage`: the row presented from the moment
@@ -275,10 +272,15 @@ class WorkspaceController extends ChangeNotifier {
     FollowedThreadsStore? followedThreads,
     AttachmentImageByteStore? attachmentImageStore,
     AttachmentUrlCache? attachmentUrls,
+    WorkspaceComposer? composer,
   }) : _attachmentUrls = attachmentUrls ?? AttachmentUrlCache(),
        _presentationAuthority = presentationSource?.navigationAuthority,
        attachmentImageStore =
            attachmentImageStore ?? AttachmentDiskCache.installed {
+    this.composer =
+        composer ??
+        presentationSource?.composer ??
+        WorkspaceComposer(owner: this, read: _cached, write: _save);
     if (presentationSource == null) {
       _removePlayerTrim = _playerSessions.installMemoryTrim();
     }
@@ -321,6 +323,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   VoidCallback? _removeCacheClear;
+  late final WorkspaceComposer composer;
 
   /// "Clear cache": lets go of what this workspace keeps in memory and can
   /// rebuild: decoded attachment pictures nobody shows, signed attachment URLs
@@ -1321,7 +1324,7 @@ class WorkspaceController extends ChangeNotifier {
   Future<void> flushCache() {
     if (_ownsEntityDirectory) entityDirectory.flushDevice();
     _translations?.flushDevice();
-    return _cacheWrites;
+    return Future.wait([_cacheWrites, composer.flushed]);
   }
 
   /// Stops all further device writes of this workspace and completes once
@@ -1329,11 +1332,13 @@ class WorkspaceController extends ChangeNotifier {
   /// account's device data.
   Future<void> retireCache() {
     _cacheRetired = true;
-    return _cacheWrites;
+    return Future.wait([_cacheWrites, composer.flushed]);
   }
 
-  final Map<String, String> _drafts = {};
-  Map<String, String> get drafts => presentationSource?.drafts ?? _drafts;
+  Map<String, String> get drafts =>
+      !composer.ownedBy(this) && (server == null || _disposed)
+      ? const {}
+      : composer.drafts;
   final Set<String> _revokedChannels = {};
   final Set<String> _revokedServers = {};
   Object? _presentationOwner;
@@ -1389,36 +1394,21 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   SourceActivityUnreadStore? _activityUnread;
-  final _activityUnreadOwners = <Object>{};
 
-  /// One accepted inbox projection for badges, Activity and OS notifications.
+  /// This session owns one window; pages and platform adapters only borrow it.
+  /// Server selection creates it before UI; standalone views can borrow a
+  /// passive projection before selection. Neither path starts work by reading.
   SourceActivityUnreadStore get activityUnread =>
-      presentationSource?.activityUnread ??
-      (_activityUnread ??= SourceActivityUnreadStore(this));
+      _disposed
+      ? throw StateError('Workspace session is disposed.')
+      : presentationSource?.activityUnread ??
+            (_activityUnread ??= SourceActivityUnreadStore(this));
 
-  /// The shared Activity store when something already owns it; never creates
-  /// one (and so never starts its boot request).
+  /// The existing session projection; reading it never constructs or starts it.
   SourceActivityUnreadStore? get activityUnreadIfBound =>
-      presentationSource?.activityUnreadIfBound ?? _activityUnread;
-
-  SourceActivityUnreadStore acquireActivityUnread(Object owner) {
-    final source = presentationSource;
-    if (source != null) return source.acquireActivityUnread(owner);
-    _activityUnreadOwners.add(owner);
-    return activityUnread;
-  }
-
-  void releaseActivityUnread(Object owner) {
-    final source = presentationSource;
-    if (source != null) {
-      source.releaseActivityUnread(owner);
-      return;
-    }
-    if (_activityUnreadOwners.remove(owner) && _activityUnreadOwners.isEmpty) {
-      _activityUnread?.dispose();
-      _activityUnread = null;
-    }
-  }
+      _disposed
+      ? null
+      : presentationSource?.activityUnreadIfBound ?? _activityUnread;
 
   final foregroundChanges = ValueNotifier<bool>(true);
 
@@ -1461,11 +1451,8 @@ class WorkspaceController extends ChangeNotifier {
         }
       }
       _uploads.clear();
-      _attempts.clear();
+      composer.clearOwnedBy(this);
       _pendingSends.clear();
-      drafts.clear();
-      _draftRevisions.clear();
-      _draftShareTokens.clear();
       _shareHolds.clear();
       visibleIds.clear();
       _windowState.clear();
@@ -1580,46 +1567,21 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   final _queuedSendTexts = <String, String>{};
-  final _draftShareTokens = <String, Set<String>>{};
+  Map<String, Set<String>> get _draftShareTokens => composer.shareTokens;
   Future<void> _saveDraftScope(String scope, {bool requiredSuccess = false}) {
     final pending = _pendingSends[scope] ?? <_PendingSend>[];
     final files = [
       ...?_uploads[scope],
       for (final attempt in pending) ...attempt.uploads,
     ].where((f) => f.local != null).toList();
-    final text = [
-      if (files.isNotEmpty)
-        for (final p in pending) p.draft,
-      _queuedSendTexts[scope] ?? '',
-      drafts[scope] ?? '',
-    ].where((s) => s.isNotEmpty).toSet().join('\n\n');
-    return _save(
-      'draft',
+    return composer.saveDraft(
       scope,
-      text.isEmpty && files.isEmpty
-          ? null
-          : {
-              'text': text,
-              'channelId': scope,
-              'shareTokens': _draftShareTokens[scope]?.toList(),
-              'files': [
-                for (final file in files)
-                  {
-                    'ref': file.local!.reference,
-                    'id': file.id,
-                    'metadata': {
-                      for (final key in [
-                        'id',
-                        'filename',
-                        'mimeType',
-                        'sizeBytes',
-                      ])
-                        if (file.metadata?.containsKey(key) == true)
-                          key: file.metadata![key],
-                    },
-                  },
-              ],
-            },
+      pendingText: pending.map((p) => p.draft),
+      queuedText: _queuedSendTexts[scope] ?? '',
+      files: [
+        for (final file in files)
+          (local: file.local!, id: file.id, metadata: file.metadata),
+      ],
       requiredSuccess: requiredSuccess,
     );
   }
@@ -1685,74 +1647,52 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
   }
 
-  final _draftRevisions = <String, int>{};
+  Map<String, int> get _draftRevisions => composer.revisions;
   int draftRevision({bool thread = false}) =>
-      (presentationSource?._draftRevisions ?? _draftRevisions)[draftScope(
-        thread: thread,
-      )] ??
-      0;
+      _draftRevisions[draftScope(thread: thread)] ?? 0;
+  ValueListenable<int> draftChanges({bool thread = false}) =>
+      composer.changes(draftScope(thread: thread));
 
   Future<void> _restoreDraft(String scope) async {
     final generation = ledger.generation;
-    final value = await _cached('draft', scope);
-    if (generation != ledger.generation ||
-        _disposed ||
-        drafts.containsKey(scope)) {
-      return;
-    }
-    if (value is Map && value['text'] is String) {
-      drafts[scope] = value['text'];
-      if (value['shareTokens'] is List) {
-        _draftShareTokens[scope] = (value['shareTokens'] as List)
-            .whereType<String>()
-            .take(64)
-            .toSet();
-      }
-      final principal = client.user?.id;
-      final files = value['files'];
-      if (files is List &&
-          restoreSharedAttachment != null &&
-          client.user != null) {
-        for (final row in files.whereType<Map>()) {
-          if (row['ref'] is! Map) continue;
-          final file = await restoreSharedAttachment!(
-            Map<String, dynamic>.from(row['ref']),
-            client.origin,
-            principal!,
-          );
-          if (generation != ledger.generation || _disposed) return;
-          if (file == null) continue;
-          final list = _uploads[scope] ??= [];
-          if (list.any(
-            (u) =>
-                u.local != null &&
-                jsonEncode(u.local!.reference) == jsonEncode(file.reference),
-          )) {
-            continue;
-          }
-          final draft = UploadDraft.shared(file, key: _uploadKeys++);
-          if (row['id'] is String) {
-            draft.id = row['id'];
-            draft.queued = false;
-            draft.progress = 1;
-            if (row['metadata'] is Map) {
-              draft.metadata = Map<String, dynamic>.from(row['metadata']);
+    await composer.restore(
+      scope,
+      current: () => generation == ledger.generation && !_disposed,
+      restoreFiles: (files) async {
+        final principal = client.user?.id;
+        if (restoreSharedAttachment != null && client.user != null) {
+          for (final row in files) {
+            if (row['ref'] is! Map) continue;
+            final file = await restoreSharedAttachment!(
+              Map<String, dynamic>.from(row['ref']),
+              client.origin,
+              principal!,
+            );
+            if (generation != ledger.generation || _disposed) return;
+            if (file == null) continue;
+            final list = _uploads[scope] ??= [];
+            if (list.any(
+              (u) =>
+                  u.local != null &&
+                  jsonEncode(u.local!.reference) == jsonEncode(file.reference),
+            )) {
+              continue;
             }
+            final draft = UploadDraft.shared(file, key: _uploadKeys++);
+            if (row['id'] is String) {
+              draft.id = row['id'];
+              draft.queued = false;
+              draft.progress = 1;
+              if (row['metadata'] is Map) {
+                draft.metadata = Map<String, dynamic>.from(row['metadata']);
+              }
+            }
+            list.add(draft);
           }
-          list.add(draft);
         }
-      }
-      notifyListeners();
-    }
-    final attempt = await _cached('attempt', scope);
-    if (generation == ledger.generation &&
-        attempt is Map &&
-        !_attempts.containsKey(scope)) {
-      _attempts[scope] = _SendAttempt(
-        attempt['fingerprint'],
-        attempt['randomId'],
-      );
-    }
+      },
+      restored: notifyListeners,
+    );
   }
 
   String _windowAuthority() =>
@@ -1861,7 +1801,7 @@ class WorkspaceController extends ChangeNotifier {
   final Map<String, Future<void>> _reactionWrites = {};
   final Map<String, Future<void>> _viewerLoads = {};
   final Map<String, List<UploadDraft>> _uploads = {};
-  final Map<String, _SendAttempt> _attempts = {};
+  Map<String, ComposerSendAttempt> get _attempts => composer.attempts;
 
   /// Optimistic rows by draft scope, in send order.
   final Map<String, List<_PendingSend>> _pendingSends = {};
@@ -2141,7 +2081,7 @@ class WorkspaceController extends ChangeNotifier {
     if (wasOpen) channel = real;
     _putChannelRow(real);
     notifyListeners();
-    unawaited(_save('draft', pendingId, null));
+    unawaited(composer.removeStoredDraft(pendingId));
     unawaited(_saveDraftScope(real.id));
     if (wasOpen) {
       await selectChannel(
@@ -2926,7 +2866,7 @@ class WorkspaceController extends ChangeNotifier {
   Future<bool> loadServerDirectory({
     bool cachedFirst = false,
     void Function()? onCacheMiss,
-  }) async {
+  }) => _burstAt.directoryRead(() async {
     if (!ownsClient) {
       throw StateError('A borrowed editor cannot load the server directory.');
     }
@@ -2968,7 +2908,7 @@ class WorkspaceController extends ChangeNotifier {
     if (!current()) return false;
     notifyListeners();
     return true;
-  }
+  });
 
   /// Channel and DM rows saved on this device for [serverId], or null. A
   /// display seed (for example the share picker) and never an authorization
@@ -2996,7 +2936,7 @@ class WorkspaceController extends ChangeNotifier {
   /// closes); a changed role replaces the selected server's authority, which
   /// retires role-bound windows and revalidates the open channel. A failure
   /// keeps the accepted directory (offline).
-  Future<void> revalidateServerDirectory() async {
+  Future<void> revalidateServerDirectory() => _burstAt.directoryRead(() async {
     final principal = client.user?.id,
         request = ++_membershipRequest,
         revision = _membershipRevision;
@@ -3057,7 +2997,7 @@ class WorkspaceController extends ChangeNotifier {
       if (jsonEncode(fresh.json) != jsonEncode(held.json)) server = fresh;
     }
     notifyListeners();
-  }
+  });
 
   Future<void> bootstrap() async {
     final source = presentationSource;
@@ -3131,6 +3071,7 @@ class WorkspaceController extends ChangeNotifier {
     if (!canVisitSection(section)) section = 'chat';
     sidebarOrder = {};
     client.selectServer(next.id);
+    activityUnread.start();
     entityDirectory.synchronize();
     // Agents, members and computers saved on this device paint with the
     // cached channels (first workspace frame); the preload revalidates them.
@@ -3155,12 +3096,9 @@ class WorkspaceController extends ChangeNotifier {
       }
     }
     _uploads.clear();
-    _attempts.clear();
+    composer.clearOwnedBy(this);
     _pendingSends.clear();
     _localRandomIds.clear();
-    drafts.clear();
-    _draftRevisions.clear();
-    _draftShareTokens.clear();
     _shareHolds.clear();
     visibleIds.clear();
     _windowState.clear();
@@ -3697,8 +3635,6 @@ class WorkspaceController extends ChangeNotifier {
         readState.revoke(serverId, principal, scope);
       }
       if (keepShared && scope == id) continue;
-      drafts.remove(scope);
-      _draftRevisions.remove(scope);
       for (final draft in _uploads.remove(scope) ?? <UploadDraft>[]) {
         draft.cancel.cancel();
         if (draft.local != null) unawaited(_releaseSharedUploads([draft]));
@@ -3708,8 +3644,6 @@ class WorkspaceController extends ChangeNotifier {
     }
     for (final messageId in messageIds) {
       final scope = 'thread:$messageId';
-      drafts.remove(scope);
-      _draftRevisions.remove(scope);
       _attempts.remove(scope);
       _pendingSends.remove(scope);
       for (final draft in _uploads.remove(scope) ?? <UploadDraft>[]) {
@@ -3732,21 +3666,32 @@ class WorkspaceController extends ChangeNotifier {
     }
     _persistReadState();
     if (principal != null && serverId != null) {
+      // Web keeps authored text on channel removal or a refused message read.
+      // Snapshot it before the private-cache purge; never restore server files.
+      final keptDrafts = {
+        for (final scope in {
+          id,
+          ...threadIds,
+          for (final messageId in messageIds) 'thread:$messageId',
+        })
+          scope: composer.draftRecord(scope, includeShareTokens: false),
+      };
       _cacheWrites = _cacheWrites.then((_) async {
         try {
+          final sharedDraft = keepShared
+              ? await cache?.read(origin, principal, serverId, 'draft', id)
+              : null;
           for (final scope in {id, ...threadIds}) {
             await cache?.revokeChannel(origin, principal, serverId, scope);
           }
-          // The purge above removed the saved draft too: write the kept one back.
-          if (keepShared) await _saveDraftScope(id);
-          for (final messageId in messageIds) {
+          for (final entry in keptDrafts.entries) {
             await cache?.write(
               origin,
               principal,
               serverId,
               'draft',
-              'thread:$messageId',
-              null,
+              entry.key,
+              entry.key == id && keepShared ? sharedDraft : entry.value,
             );
           }
         } catch (_) {
@@ -4241,6 +4186,7 @@ class WorkspaceController extends ChangeNotifier {
   /// Source socketBridge `roomsJoined`: the server joined this socket's
   /// rooms, so missed messages can be resumed and the lists re-read.
   void _roomsJoined() {
+    SourceActivityUnreadStore.activateForRooms(this);
     _roomsJoinedPending = false;
     if (ledger.watermark > BigInt.zero) client.resume(ledger.watermark);
     // A reconnect and a resume can both ask within a second; the tail read a
@@ -4255,14 +4201,9 @@ class WorkspaceController extends ChangeNotifier {
   /// Server reads started by events and by returning to the foreground (not
   /// by the person asking) are skipped while the last one is this fresh.
   static const _burstFreshness = Duration(seconds: 15);
-  final Map<String, DateTime> _burstAt = {};
-  bool _due(String name, {Duration freshness = _burstFreshness}) {
-    final now = DateTime.now();
-    final last = _burstAt[name];
-    if (last != null && now.difference(last) < freshness) return false;
-    _burstAt[name] = now;
-    return true;
-  }
+  final _burstAt = BurstReads();
+  bool _due(String name, {Duration freshness = _burstFreshness}) =>
+      _burstAt.due(name, freshness);
 
   /// Source `recordHeartbeat`: a server seq past the ledger watermark means
   /// a push was missed; the visible scopes read their gap.
@@ -4319,7 +4260,7 @@ class WorkspaceController extends ChangeNotifier {
     // directory is re-read. On a desktop the engine reports window focus as
     // inactive/resumed, so this also runs when the window regains focus.
     if (_due('membership', freshness: _membershipResumeFreshness)) {
-      unawaited(recoverMembership());
+      unawaited(recoverMembership(coalesce: true));
     }
   }
 
@@ -4531,11 +4472,13 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> recoverMembership() async {
+  /// With [coalesce] (a refresh nobody asked for), a directory read already in
+  /// flight stands in for it: starting another would retire that read.
+  Future<void> recoverMembership({bool coalesce = false}) async {
     if (presentationSource != null) {
       return presentationSource!.recoverMembership();
     }
-    if (!ownsClient) return;
+    if (!ownsClient || coalesce && _burstAt.directoryReading) return;
     final generation = client.generation,
         request = ++_membershipRequest,
         revision = _membershipRevision;
@@ -5386,12 +5329,12 @@ class WorkspaceController extends ChangeNotifier {
     final freshAttempt =
         retained == null ||
         retained.fingerprint != fingerprint ||
-        (_pendingSends[scope]?.any((p) => p.randomId == retained.randomId) ??
-            false);
+        retained.inFlight;
     final attempt = freshAttempt
-        ? _SendAttempt(fingerprint, randomId ?? client.newRandomId())
+        ? ComposerSendAttempt(fingerprint, randomId ?? client.newRandomId())
         : retained;
     _attempts[scope] = attempt;
+    attempt.inFlight = true;
     final sentId = attempt.randomId;
     // Web MessageInput: the optimistic row appears and the composer's files
     // leave with it before any request; a failure gives both back.
@@ -5444,6 +5387,7 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
 
     void settle() {
+      attempt.inFlight = false;
       final list = _pendingSends[scope];
       list?.remove(pending);
       if (list != null && list.isEmpty) _pendingSends.remove(scope);
@@ -5493,11 +5437,7 @@ class WorkspaceController extends ChangeNotifier {
       final id = thread ? await ensureThread() : intendedChannel;
       if (id == null || !currentSend()) return fail();
       if (freshAttempt) {
-        await _save('attempt', scope, {
-          'fingerprint': fingerprint,
-          'randomId': sentId,
-          'channelId': channel?.id,
-        });
+        await composer.saveAttempt(scope, attempt, channelId: channel?.id);
       }
       if (!currentSend()) return fail();
       final sent = await client.sendWithReceipt(
@@ -5516,7 +5456,7 @@ class WorkspaceController extends ChangeNotifier {
       }
       if (_attempts[scope]?.randomId == sentId) {
         _attempts.remove(scope);
-        _save('attempt', scope, null);
+        composer.saveAttempt(scope, null);
       }
       if (!currentSend()) {
         notifyListeners();
@@ -5744,12 +5684,7 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
     Future<void> restoreCurrentDraft() async {
       final scope = 'thread:$parentMessageId';
-      final value = await _cached('draft', scope);
-      if (!current() || drafts.containsKey(scope)) return;
-      if (value is Map && value['text'] is String) {
-        drafts[scope] = value['text'];
-        notifyListeners();
-      }
+      if (await composer.restoreText(scope, current)) notifyListeners();
     }
 
     unawaited(restoreCurrentDraft());
@@ -6848,7 +6783,7 @@ class WorkspaceController extends ChangeNotifier {
       // not repeat the whole refresh burst each time: what was read less than
       // [_burstFreshness] ago is still fresh, and the resume sync below
       // brings messages up to date.
-      if (_due('membership')) recoverMembership();
+      if (_due('membership')) recoverMembership(coalesce: true);
       if (_due('syncFlag')) refreshMessageSyncFlag();
       if (_due('sidebar')) loadSidebar();
       // A reconnect refreshes agents and members in place; the first connect
@@ -7033,6 +6968,7 @@ class WorkspaceController extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    composer.disposeOwnedBy(this);
     if (_ownsEntityDirectory) {
       removeListener(_entityAuthorityChanged);
       entityDirectory.dispose();
@@ -7064,7 +7000,7 @@ class WorkspaceController extends ChangeNotifier {
     _uploads.clear();
     subscription.cancel();
     _activityUnread?.dispose();
-    _activityUnreadOwners.clear();
+    _activityUnread = null;
     foregroundChanges.dispose();
     resumes.dispose();
     if (ownsClient) client.dispose();

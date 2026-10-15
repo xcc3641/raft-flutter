@@ -271,10 +271,11 @@ class LabRecorder {
     String scenario,
     Future<Map<String, Object?>?> Function() action, {
     String kind = 'continuous',
+    bool warmup = false,
   }) async {
     await settle(t);
     probe.reset();
-    await sampler.send('start', {'theme': theme, 'scenario': scenario});
+    await sampler.send('start', {'theme': theme, 'scenario': scenario, 'warmup': warmup});
     if (phases) {
       FlutterTimeline.debugCollectionEnabled = true;
       FlutterTimeline.debugReset();
@@ -296,6 +297,9 @@ class LabRecorder {
     clock.stop();
     final ticks1 = cpuTicks();
     final threadCpu1 = threadCpuSeconds();
+    // The host reads /proc here, before timeline collection. Collection walks
+    // every build, layout and paint on the UI thread and is not part of the scene.
+    await sampler.send('cpu', {'theme': theme, 'scenario': scenario});
     final blocks = phases ? FlutterTimeline.debugCollect().timedBlocks : const <TimedBlock>[];
     if (phases) FlutterTimeline.debugCollectionEnabled = false;
     // Engine timings are delivered in batches; wait for the tail.
@@ -345,10 +349,14 @@ class LabRecorder {
         if (block.end > busyEnd) busyEnd = block.end;
         cursor++;
       }
+      final work = phases ? _workCounts(blocks, b.toDouble(), limit.toDouble()) : const <String, int>{};
       frameRows.add({
         // UI thread busy time for this frame: build start to the end of its
         // last pipeline block (>= the engine build duration).
         'uit': phases ? (busyEnd - b).round() : f.buildDuration.inMicroseconds,
+        if (phases) 'builds': work['builds'],
+        if (phases) 'layouts': work['layouts'],
+        if (phases) 'paints': work['paints'],
         'n': f.frameNumber,
         'v': tl(f, ui.FramePhase.vsyncStart),
         'b': b,
@@ -371,6 +379,11 @@ class LabRecorder {
     await sampler.send('end', {
       'theme': theme, 'scenario': scenario, 'startUs': start, 'endUs': end,
       'uiWindows': uiWindows, 'rasterWindows': rasterWindows,
+      // Build start, UI span, raster start, raster span. The host reads
+      // timeline tdur against these clocks.
+      'frames': [
+        for (final f in frameRows) [f['b'], f['uit'], f['rs'], f['r']],
+      ],
     });
     final view = binding.platformDispatcher.views.first;
     final record = <String, Object?>{
@@ -405,6 +418,46 @@ class LabRecorder {
     await sampler.send('result', {'record': jsonEncode(record)});
     return record;
   }
+}
+
+const _pipelineWork = {
+  'BUILD': 'builds',
+  'LAYOUT': 'layouts',
+  'LAYOUT (root)': 'layouts',
+  'PAINT': 'paints',
+  'PAINT (root)': 'paints',
+};
+
+/// Builds, layouts and paints whose timeline event starts in [start, end).
+///
+/// The three profile switches emit one event per widget build, render-object
+/// layout and render-object paint. Each event is attributed to the pipeline
+/// phase that contains it (`BUILD`, `LAYOUT`, `PAINT`), so a build is not
+/// counted as a layout when the names collide.
+Map<String, int> _workCounts(List<TimedBlock> blocks, double start, double end) {
+  final counts = {'builds': 0, 'layouts': 0, 'paints': 0};
+  String? phaseAt(double t) {
+    String? kind;
+    var span = double.infinity;
+    for (final block in blocks) {
+      final name = _pipelineWork[block.name];
+      if (name == null || t < block.start || t > block.end) continue;
+      final width = block.end - block.start;
+      if (width < span) {
+        span = width;
+        kind = name;
+      }
+    }
+    return kind;
+  }
+
+  for (final block in blocks) {
+    if (_pipelineWork.containsKey(block.name)) continue;
+    if (block.start < start || block.start >= end) continue;
+    final kind = phaseAt(block.start);
+    if (kind != null) counts[kind] = counts[kind]! + 1;
+  }
+  return counts;
 }
 
 /// Waits real time. The fully-live binding schedules frames exactly as the

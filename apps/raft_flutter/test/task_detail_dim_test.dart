@@ -11,6 +11,7 @@ import 'package:raft_ui/test_themes.dart';
 
 import 'task_surface_test.dart' show modernTask, taskRoutes, flush;
 import 'workspace_source_location_contract_test.dart' show pageFixture;
+import 'support/app_services_fixture.dart';
 
 /// Regression: the task modal painted its box shadow in a *foreground*
 /// decoration, i.e. over the whole surface. The summed alpha (about 13% black
@@ -48,14 +49,16 @@ void main() {
             child: MaterialApp(
               debugShowCheckedModeBanner: false,
               theme: raftTheme(family, dark: dark),
-              home: WorkspaceView(
-                controller: w,
-                appearance: RaftAppearance(
-                  mode: dark ? ThemeMode.dark : ThemeMode.light,
-                  light: family,
+              home: withAppServices(
+                WorkspaceView(
+                  controller: w,
+                  appearance: RaftAppearance(
+                    mode: dark ? ThemeMode.dark : ThemeMode.light,
+                    light: family,
+                  ),
+                  onAppearance: (_) async {},
+                  onLogout: () async {},
                 ),
-                onAppearance: (_) async {},
-                onLogout: () async {},
               ),
             ),
           ),

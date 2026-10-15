@@ -16,6 +16,7 @@ import 'chat_focus_receipt_test.dart' show paintedMessage;
 import 'message_context_transition_test.dart' show row;
 import 'message_presentation_test.dart' show fixture, MessageAdapter;
 import 'workspace_activity_activation_test.dart' show channelRow;
+import 'support/app_services_fixture.dart';
 
 // The held transport returns a real HTTP 404 response. Completing an error
 // future across WidgetTester's real/FakeAsync error zones is not an HTTP test.
@@ -83,11 +84,13 @@ Future<void> mountPage(
   await tester.pumpWidget(
     MaterialApp(
       theme: raftTheme(family, dark: dark),
-      home: WorkspaceView(
-        controller: w,
-        appearance: RaftAppearance(light: family),
-        onAppearance: (_) async {},
-        onLogout: () async {},
+      home: withAppServices(
+        WorkspaceView(
+          controller: w,
+          appearance: RaftAppearance(light: family),
+          onAppearance: (_) async {},
+          onLogout: () async {},
+        ),
       ),
     ),
   );

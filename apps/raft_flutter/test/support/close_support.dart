@@ -7,6 +7,7 @@ import 'package:raft_ui/raft_ui.dart';
 
 import '../message_presentation_test.dart' show MessageAdapter;
 import '../workspace_source_location_contract_test.dart' show pageFixture;
+import 'app_services_fixture.dart';
 
 /// The three widths every closable surface is checked at: phone, foldable
 /// (inner display of a fold, a wide layout) and desktop.
@@ -106,11 +107,13 @@ Future<(WorkspaceController, MessageAdapter)> mountWorkspace(
   await t.pumpWidget(
     MaterialApp(
       theme: raftTheme(family).copyWith(platform: platform),
-      home: WorkspaceView(
-        controller: w,
-        appearance: RaftAppearance(light: family),
-        onAppearance: (_) async {},
-        onLogout: () async {},
+      home: withAppServices(
+        WorkspaceView(
+          controller: w,
+          appearance: RaftAppearance(light: family),
+          onAppearance: (_) async {},
+          onLogout: () async {},
+        ),
       ),
     ),
   );

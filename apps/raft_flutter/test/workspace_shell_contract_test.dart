@@ -14,6 +14,7 @@ import 'package:raft_ui/test_themes.dart';
 
 import 'workspace_source_location_contract_test.dart' show pageFixture, frames;
 import 'flutter_test_config.dart' show leakDebt;
+import 'support/app_services_fixture.dart';
 
 // Source 26f77ef LeftRail649–771 + Sidebar922–1019/3840–3848/4554–4561.
 // Every test mounts WorkspaceView and activates real product handlers.
@@ -31,12 +32,14 @@ Future<void> mountShell(
   await t.pumpWidget(
     MaterialApp(
       theme: raftTheme(family, dark: dark),
-      home: WorkspaceView(
-        controller: w,
-        appearance: RaftAppearance(light: family),
-        onAppearance: (_) async {},
-        onLogout: () async {},
-        presentation: presentation,
+      home: withAppServices(
+        WorkspaceView(
+          controller: w,
+          appearance: RaftAppearance(light: family),
+          onAppearance: (_) async {},
+          onLogout: () async {},
+          presentation: presentation,
+        ),
       ),
     ),
   );
@@ -224,6 +227,12 @@ void main() {
       '[K08c] $family/$dark actual available workspace toggle is lg gated and retains location/draft',
       (t) async {
         final (w, api) = await pageFixture(t, section: 'chat');
+        // Entering the grid reads this available channel. An unconfigured
+        // fixture returns 404, which correctly revokes shared private drafts.
+        api.routes['GET /messages/channel/c1'] = (_) => {
+          'messages': <dynamic>[],
+          'hasMore': false,
+        };
         api.routes['GET /agents'] = (_) => [];
         api.routes['GET /servers/s1/members'] = (_) => [];
         w.drafts['c1'] = 'Keep this editor';

@@ -30,12 +30,9 @@ class WorkspaceGridSessions extends ChangeNotifier {
   final threadRefs = <String, WorkspaceGridThreadRef>{};
   final callbacks = <String, VoidCallback>{};
   final admitted = <String>{};
-  final draftBaseline = <String, Map<String, String>>{};
-  final draftRevisions = <String, int>{};
   final presentationOwner = Object();
   late String scope;
   bool ended = false;
-  bool draftsChanged = false;
 
   String get authority => jsonEncode([
     identityHashCode(parent.client),
@@ -91,6 +88,7 @@ class WorkspaceGridSessions extends ChangeNotifier {
       ownsClient: false,
       entityDirectory: parent.entityDirectory,
       followedThreads: parent.followedThreads,
+      composer: parent.composer,
     );
     child.server = parent.server;
     child.channel = row;
@@ -100,19 +98,16 @@ class WorkspaceGridSessions extends ChangeNotifier {
     child.connected = parent.connected;
     child.syncCoreMessagesEnabled = parent.syncCoreMessagesEnabled;
     child.ledger.switchServer(parent.server!.id);
-    child.drafts.addAll(parent.drafts);
     child.foreground = false;
     child.setConversationPresentation(
       presentationOwner,
       main: false,
       thread: false,
     );
-    draftBaseline[id] = {...child.drafts};
     controllers[id] = child;
     if (threadRef != null) threadRefs[id] = threadRef;
     void changed() {
       if (ended || controllers[id] != child || authority != scope) return;
-      transferDrafts(id, child);
       notifyListeners();
     }
 
@@ -142,42 +137,6 @@ class WorkspaceGridSessions extends ChangeNotifier {
     return child;
   }
 
-  void transferDrafts(String id, WorkspaceController child) {
-    if (scope != authority || ended) return;
-    final baseline = draftBaseline[id]!;
-    for (final entry in child.drafts.entries) {
-      if (baseline[entry.key] == entry.value) continue;
-      baseline[entry.key] = entry.value;
-      parent.drafts[entry.key] = entry.value;
-      // Cache write is scoped by the root's current principal/server. It does
-      // not replace or clear another conversation's editor.
-      if (parent.draftScope() == entry.key) {
-        parent.saveDraft(entry.value);
-      } else if (parent.draftScope(thread: true) == entry.key) {
-        parent.saveDraft(entry.value, thread: true);
-      }
-      draftsChanged = true;
-    }
-  }
-
-  /// A phone-width classic editor can change a draft while the grid is
-  /// retained offstage. Import only when this child has not diverged from its
-  /// last transferred draft; never overwrite an independently changed child.
-  void restoreParentDrafts() {
-    if (ended || scope != authority) return;
-    for (final entry in controllers.entries) {
-      final child = entry.value;
-      final key = child.draftScope(thread: threadRefs.containsKey(entry.key));
-      if (key == null) continue;
-      final baseline = draftBaseline[entry.key]!;
-      final current = child.drafts[key] ?? '';
-      final stored = parent.drafts[key] ?? '';
-      if (current != (baseline[key] ?? '') || current == stored) continue;
-      child.drafts[key] = baseline[key] = stored;
-      draftRevisions.update(entry.key, (n) => n + 1, ifAbsent: () => 1);
-    }
-  }
-
   void present(Set<String> ids) {
     admitted
       ..clear()
@@ -192,14 +151,11 @@ class WorkspaceGridSessions extends ChangeNotifier {
     }
   }
 
-  void close(String id, {bool transfer = true}) {
+  void close(String id) {
     final child = controllers.remove(id);
     if (child == null) return;
-    if (transfer && scope == authority) transferDrafts(id, child);
     child.removeListener(callbacks.remove(id)!);
     threadRefs.remove(id);
-    draftBaseline.remove(id);
-    draftRevisions.remove(id);
     // Retire the accepted private projection before detaching its listeners.
     // Owned dialogs/image leases see authority loss even though the shared
     // authenticated client intentionally remains alive for other panels.
@@ -207,7 +163,6 @@ class WorkspaceGridSessions extends ChangeNotifier {
     child.channel = null;
     child.threadParent = null;
     child.threadChannelId = null;
-    child.drafts.clear();
     child.visibleIds.clear();
     child.ledger.switchServer(null);
     child.foreground = false;
@@ -218,10 +173,10 @@ class WorkspaceGridSessions extends ChangeNotifier {
   void synchronize() {
     if (ended) return;
     if (authority != scope) {
-      // Invalidation clears, rather than transferring, private old drafts.
+      // Retire every borrowed editor; the root retains draft ownership.
       scope = authority;
       for (final id in controllers.keys.toList()) {
-        close(id, transfer: false);
+        close(id);
       }
       notifyListeners();
       return;

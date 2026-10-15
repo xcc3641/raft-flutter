@@ -99,7 +99,7 @@ class LaunchThemeResourcesTest(unittest.TestCase):
         self.assertIn(f'const val CHANNEL = "{channel}"', kotlin)
         # Both sides read the appearance under the same preference keys.
         prefs = (APP / 'lib/data/device_preferences.dart').read_text()
-        main = (APP / 'lib/main.dart').read_text()
+        main = (APP / 'lib/app_root.dart').read_text()
         for key in ('raft.mode', 'raft.light'):
             self.assertIn(f"'{key}'", prefs)
             self.assertIn(f'"flutter.{key}"', kotlin)

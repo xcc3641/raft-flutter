@@ -20,7 +20,6 @@ class WorkspaceGridView extends StatefulWidget {
     required this.route,
     required this.routeBody,
     required this.active,
-    this.onDraftsChanged,
     this.onRouteSelected,
     required this.onViewBilling,
   });
@@ -32,7 +31,6 @@ class WorkspaceGridView extends StatefulWidget {
   /// The plan banners' "View Billing" link in every panel (Web
   /// `nav.toSettings("billing")`).
   final VoidCallback onViewBilling;
-  final VoidCallback? onDraftsChanged;
   final ValueChanged<String>? onRouteSelected;
   @override
   State<WorkspaceGridView> createState() => WorkspaceGridViewState();
@@ -110,8 +108,6 @@ class WorkspaceGridViewState extends State<WorkspaceGridView> {
       activeGroup = groupIds.first;
     }
     followRoute();
-    if (oldWidget.active && !widget.active) flushDrafts();
-    if (!oldWidget.active && widget.active) sessions.restoreParentDrafts();
   }
 
   void followRoute() {
@@ -170,25 +166,8 @@ class WorkspaceGridViewState extends State<WorkspaceGridView> {
     return true;
   }
 
-  bool flushDrafts() {
-    for (final entry in sessions.controllers.entries) {
-      sessions.transferDrafts(entry.key, entry.value);
-    }
-    if (sessions.draftsChanged) {
-      sessions.draftsChanged = false;
-      widget.onDraftsChanged?.call();
-      return true;
-    }
-    return false;
-  }
-
   @override
   void dispose() {
-    // Transfer while the same scope is still current, before releasing children.
-    // The root host decides whether a retained classic editor needs hydration.
-    for (final entry in sessions.controllers.entries) {
-      sessions.transferDrafts(entry.key, entry.value);
-    }
     sessions.removeListener(changed);
     sessions.dispose();
     super.dispose();
@@ -288,9 +267,7 @@ class WorkspaceGridViewState extends State<WorkspaceGridView> {
                           onViewBilling: widget.onViewBilling,
                         )
                       : _Conversation(
-                          key: ValueKey(
-                            'grid-conversation-$id-${sessions.draftRevisions[id] ?? 0}',
-                          ),
+                          key: ValueKey('grid-conversation-$id'),
                           // ignore: raft_lints/avoid_render_index_assertion -- Guarded by `sessions.controllers[id] == null ? SizedBox.shrink : ...` in the same expression.
                           controller: sessions.controllers[id]!,
                           onViewBilling: widget.onViewBilling,

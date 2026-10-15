@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:raft_client/raft_client.dart';
+import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/data/device_preferences.dart';
 import 'package:raft_flutter/data/mobile_tabbar_preferences.dart';
 import 'package:raft_flutter/data/source_time_formatter.dart';
@@ -185,6 +186,7 @@ Future<void> main() async {
   });
   runApp(
     app.RaftApp(
+      services: const AppServices.updatesDisabledForTestOrPreview(),
       sessionStore: client.sessionStore,
       createClient: (_, _, _) => client,
       initialLocation: Uri(

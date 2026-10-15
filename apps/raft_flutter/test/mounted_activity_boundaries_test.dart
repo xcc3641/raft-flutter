@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show fixture;
 import 'workspace_activity_activation_test.dart' show channelRow, message;
+import 'support/app_services_fixture.dart';
 
 Future<void> flush(WidgetTester t) async {
   await t.runAsync(
@@ -34,11 +35,13 @@ Future<void> mount(
   await t.pumpWidget(
     MaterialApp(
       theme: raftTheme(family, dark: dark),
-      home: WorkspaceView(
-        controller: w,
-        appearance: const RaftAppearance(),
-        onAppearance: (_) async {},
-        onLogout: () async {},
+      home: withAppServices(
+        WorkspaceView(
+          controller: w,
+          appearance: const RaftAppearance(),
+          onAppearance: (_) async {},
+          onLogout: () async {},
+        ),
       ),
     ),
   );

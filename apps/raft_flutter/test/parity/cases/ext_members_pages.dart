@@ -30,6 +30,7 @@ import 'ext_members_pages_keys.g.dart';
 import 'members_settings/runtime_forms.dart' show msRuntimeForms;
 import 'fixture_when.dart';
 import 'screens/screen_fixture.dart';
+import '../../support/app_services_fixture.dart';
 
 const _serverId = 'visual-server';
 
@@ -141,14 +142,16 @@ class _ShellState extends State<_Shell> {
   }
 
   @override
-  Widget build(BuildContext context) => WorkspaceView(
-    controller: w,
-    appearance: RaftAppearance(
-      mode: widget.ctx.dark ? ThemeMode.dark : ThemeMode.light,
-      light: widget.ctx.family,
+  Widget build(BuildContext context) => withAppServices(
+    WorkspaceView(
+      controller: w,
+      appearance: RaftAppearance(
+        mode: widget.ctx.dark ? ThemeMode.dark : ThemeMode.light,
+        light: widget.ctx.family,
+      ),
+      onAppearance: (_) async {},
+      onLogout: () async {},
     ),
-    onAppearance: (_) async {},
-    onLogout: () async {},
   );
 }
 

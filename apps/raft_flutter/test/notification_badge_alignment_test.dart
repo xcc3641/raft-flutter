@@ -8,6 +8,7 @@ import 'package:raft_client/raft_client.dart';
 import 'package:raft_flutter/data/activity_attention.dart';
 import 'package:raft_flutter/data/workspace_controller.dart';
 import 'package:raft_flutter/platform/macos_dock_unread.dart';
+import 'package:raft_flutter/platform/desktop_inbox_notifications.dart';
 import 'package:raft_flutter/platform/native_notifications.dart';
 import 'package:raft_flutter/platform/notification_reconciler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -129,14 +130,17 @@ class FixtureClient extends RaftClient {
   }
 
   Object settings = {'serverPushMode': 'all', 'serverPushMuted': false};
+  final requests = <String>[];
   List<Object> summary = [];
   @override
-  Future<dynamic> get(String path, {Map<String, dynamic>? query}) async =>
-      path == '/servers/unread-summary'
-      ? summary
-      : path.endsWith('/notification-settings')
-      ? settings
-      : {'items': []};
+  Future<dynamic> get(String path, {Map<String, dynamic>? query}) async {
+    requests.add(path);
+    if (path == '/servers/unread-summary') return summary;
+    if (path.endsWith('/notification-settings')) {
+      return settings;
+    }
+    return {'items': []};
+  }
 }
 
 Map<String, Object?> row(
@@ -232,12 +236,10 @@ Future<BadgeRig> rig({TargetPlatform platform = TargetPlatform.android}) async {
   await service.bind('https://fixture.invalid\nalice\ns1');
   await service.requestEnable(true);
   final reconciler = NotificationReconciler(notifications: service);
-  // The workspace view owns the shared Activity store; the reconciler follows.
-  final owner = Object();
-  w.acquireActivityUnread(owner);
+  // The session owns the projection; the reconciler only follows.
+  w.activityUnread;
   addTearDown(() {
     reconciler.dispose();
-    w.releaseActivityUnread(owner);
     service.dispose();
     w.dispose();
   });
@@ -532,44 +534,78 @@ void main() {
     });
   });
 
-  test(
-    'the reconciler never creates the Activity store nor keeps it alive',
-    () async {
-      SharedPreferences.setMockInitialValues({});
-      final client = FixtureClient();
-      final w = WorkspaceController(client)
-        ..server = RaftRecord({'id': 's1', 'role': 'owner'});
-      final service = NativeNotificationService(
-        plugin: FixturePlugin(),
-        platform: TargetPlatform.android,
-      );
-      final reconciler = NotificationReconciler(notifications: service);
-      addTearDown(() {
-        reconciler.dispose();
-        service.dispose();
-        w.dispose();
-      });
-      reconciler.bind(w);
+  test('the reconciler borrows a passive session projection', () async {
+    SharedPreferences.setMockInitialValues({});
+    final client = FixtureClient();
+    final w = WorkspaceController(client)
+      ..server = RaftRecord({'id': 's1', 'role': 'owner'});
+    final store = w.activityUnread;
+    final service = NativeNotificationService(
+      plugin: FixturePlugin(),
+      platform: TargetPlatform.android,
+    );
+    final reconciler = NotificationReconciler(notifications: service);
+    addTearDown(() {
+      reconciler.dispose();
+      service.dispose();
+      w.dispose();
+    });
+    reconciler.bind(w);
+    w.notifyListeners();
+    await reconciler.settled;
+    expect(w.activityUnreadIfBound, same(store));
+    expect(store.hasAcceptedWindow, isFalse);
+    reconciler.dispose();
+    expect(w.activityUnreadIfBound, same(store));
+    store.acceptWindow({'items': [], 'totalUnreadCount': 3}, scope: store.scope);
+    expect(store.totalUnreadCount, 3);
+    w.dispose();
+    expect(w.activityUnreadIfBound, isNull);
+    expect(store.hasAcceptedWindow, isFalse);
+  });
+
+  testWidgets('notification followers do not create or activate Activity', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final client = FixtureClient();
+    final w = WorkspaceController(client)
+      ..server = RaftRecord({'id': 's1', 'role': 'owner'});
+    final service = NativeNotificationService(
+      plugin: FixturePlugin(),
+      platform: TargetPlatform.android,
+    );
+    final desktop = DesktopInboxNotifications(notifications: service)..bind(w);
+    final reconciler = NotificationReconciler(notifications: service)..bind(w);
+    final badge = MacOSDockUnread(
+      platform: TargetPlatform.iOS,
+      write: (_) async {},
+    )..bind(w);
+    try {
+      await tester.pump(const Duration(seconds: 3));
+      expect(w.activityUnreadIfBound, isNull);
+      expect(client.requests, isEmpty);
+      final store = w.activityUnread;
       w.notifyListeners();
-      await reconciler.settled;
-      expect(
-        w.activityUnreadIfBound,
-        isNull,
-        reason: 'no boot request started',
-      );
-      final owner = Object();
-      w.acquireActivityUnread(owner);
-      w.notifyListeners();
-      w.releaseActivityUnread(owner);
-      expect(w.activityUnreadIfBound, isNull, reason: 'the view alone owns it');
-    },
-  );
+      await tester.pump(const Duration(seconds: 3));
+      expect(w.activityUnreadIfBound, same(store));
+      expect(client.requests.where((path) => path == '/channels/inbox'), isEmpty);
+      expect(store.hasAcceptedWindow, isFalse);
+    } finally {
+      desktop.dispose();
+      reconciler.dispose();
+      await badge.dispose();
+      service.dispose();
+      w.dispose();
+    }
+  });
 
   group('app icon badge (iOS)', () {
     test('follows the Activity badge on every change', () async {
       final client = FixtureClient();
       final w = WorkspaceController(client)
         ..server = RaftRecord({'id': 's1', 'role': 'owner'});
+      w.activityUnread;
       addTearDown(w.dispose);
       client.summary = [
         {'serverId': 's1', 'unreadCount': 99, 'activityUnreadCount': 7},

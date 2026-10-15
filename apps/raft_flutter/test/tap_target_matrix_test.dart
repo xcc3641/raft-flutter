@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'message_presentation_test.dart' show MessageAdapter;
 import 'task_surface_test.dart' show flush, modernTask, taskRoutes;
 import 'workspace_source_location_contract_test.dart' show pageFixture;
+import 'support/app_services_fixture.dart';
 
 // Tap-target matrix: every message container (host) x every element Web makes
 // interactive. Each cell taps the real widget and asserts the visible effect
@@ -243,11 +244,13 @@ Future<Ctx> mount(WidgetTester t, TapHost host) async {
         platform: host.touch ? TargetPlatform.android : TargetPlatform.macOS,
       ),
       navigatorObservers: [observer],
-      home: WorkspaceView(
-        controller: w,
-        appearance: const RaftAppearance(),
-        onAppearance: (_) async {},
-        onLogout: () async {},
+      home: withAppServices(
+        WorkspaceView(
+          controller: w,
+          appearance: const RaftAppearance(),
+          onAppearance: (_) async {},
+          onLogout: () async {},
+        ),
       ),
     ),
   );
@@ -468,11 +471,13 @@ void main() {
                     ? TargetPlatform.android
                     : TargetPlatform.macOS,
               ),
-              home: WorkspaceView(
-                controller: w,
-                appearance: const RaftAppearance(),
-                onAppearance: (_) async {},
-                onLogout: () async {},
+              home: withAppServices(
+                WorkspaceView(
+                  controller: w,
+                  appearance: const RaftAppearance(),
+                  onAppearance: (_) async {},
+                  onLogout: () async {},
+                ),
               ),
             ),
           );

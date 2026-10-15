@@ -13,6 +13,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:raft_client/raft_client.dart';
+import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/data/device_preferences.dart';
 import 'package:raft_flutter/data/source_time_formatter.dart';
 import 'package:raft_flutter/main.dart' as app;
@@ -132,12 +133,15 @@ Future<void> main() async {
   final dir = await Directory.systemTemp.createTemp('raft-avatar-profile-');
   runApp(
     app.RaftApp(
+      services: AppServices.withUpdates(
+        AppUpdateService.forThisBuild(
+          origin: _origin.isEmpty ? null : Uri.parse(_origin),
+        )..start(),
+      ),
+      ownsAppUpdate: true,
       sessionStore: client.sessionStore,
       createClient: (_, _, _) => client,
       initialLocation: Uri(path: _start),
-      appUpdate: AppUpdateService.forThisBuild(
-        origin: _origin.isEmpty ? null : Uri.parse(_origin),
-      )..start(),
       nativeContent: LabNavigationContent(),
       nativeSharing: NativeSharing(supported: false),
       openWorkspaceCache: () async =>

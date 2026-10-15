@@ -22,6 +22,7 @@ import 'package:raft_ui/raft_ui.dart';
 
 import 'flutter_test_config.dart' show leakDebt;
 import 'workspace_source_location_contract_test.dart' show frames, pageFixture;
+import 'support/app_services_fixture.dart';
 
 /// Destinations only one layout lists on purpose (Sidebar.tsx mobileInline:
 /// the phone has a bottom-bar choice and a Computers row; desktop has a
@@ -101,15 +102,17 @@ Future<WorkspaceController> _mount(
   await t.pumpWidget(
     MaterialApp(
       theme: raftTheme(RaftFamily.elegant),
-      home: WorkspaceView(
-        controller: w,
-        appearance: const RaftAppearance(light: RaftFamily.elegant),
-        onAppearance: (_) async {},
-        onLogout: () async {},
-        notifications: services.notifications,
-        presentation: services.presentation,
-        mobileTabbar: services.mobileTabbar,
-        appUpdate: services.appUpdate,
+      home: withAppServices(
+        WorkspaceView(
+          controller: w,
+          appearance: const RaftAppearance(light: RaftFamily.elegant),
+          onAppearance: (_) async {},
+          onLogout: () async {},
+          notifications: services.notifications,
+          presentation: services.presentation,
+          mobileTabbar: services.mobileTabbar,
+        ),
+        update: services.appUpdate,
       ),
     ),
   );

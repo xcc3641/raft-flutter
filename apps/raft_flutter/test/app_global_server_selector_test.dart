@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_client/raft_client.dart';
+import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/data/workspace_cache.dart';
 import 'package:raft_flutter/data/workspace_controller.dart';
 import 'package:raft_flutter/features/app_root_router.dart';
@@ -360,13 +361,15 @@ class RootFixture {
     }
     await t.pumpWidget(
       RaftApp(
+        services: appUpdate == null
+            ? const AppServices.updatesDisabledForTestOrPreview()
+            : AppServices.withUpdates(appUpdate),
         sessionStore: sessions,
         initialLocation: uri ?? Uri(path: '/'),
         nativeContent: contentOverride ?? content,
         nativeSharing: sharing ?? NativeSharing(supported: false),
         nativeSessionOwner: sessionOwner,
         onStartupReady: onStartupReady,
-        appUpdate: appUpdate,
         openWorkspaceCache: () async => cache,
         createClient: (origin, store, kind) =>
             client = RootClient(origin, store, kind, adapter),

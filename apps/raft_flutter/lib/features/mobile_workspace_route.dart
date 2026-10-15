@@ -106,7 +106,6 @@ class _MobileWorkspaceRouteState extends State<_MobileWorkspaceRoute> {
         railSide: host.railSideStore,
         onChooseServer: host.widget.onChooseServer,
         onSwitchServer: host.widget.onSwitchServer,
-        appUpdate: host.widget.appUpdate,
       );
     }
     return IgnorePointer(
@@ -135,7 +134,6 @@ class _MobileWorkspaceContent extends WorkspaceView {
     super.railSide,
     super.onChooseServer,
     super.onSwitchServer,
-    super.appUpdate,
   }) : super(mobileRoutePage: true);
 }
 
@@ -153,6 +151,7 @@ class _MobilePageController extends WorkspaceController {
         entityDirectory: source.entityDirectory,
         followedThreads: source.followedThreads,
         attachmentImageStore: source.attachmentImageStore,
+        composer: source.composer,
       );
   final _MobilePageNavigation pageNavigation;
   @override

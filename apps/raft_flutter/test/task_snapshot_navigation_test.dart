@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_client/raft_client.dart';
+import 'package:raft_flutter/data/resource_snapshot_cache.dart';
 import 'package:raft_flutter/data/task_board_reconcile.dart';
 import 'package:raft_flutter/data/workspace_controller.dart';
 import 'package:raft_flutter/features/resource_view.dart';
@@ -97,6 +98,7 @@ void main() {
   );
   List lane(dynamic state, String status) => state.lanes[status] as List;
   final spinner = find.byType(CircularProgressIndicator);
+  ServerTaskSlot? window() => w.resourceSnapshots.serverTasks;
 
   Future<dynamic> mountBoard(WidgetTester tester) async {
     await tester.pumpWidget(page());
@@ -118,6 +120,9 @@ void main() {
       final cached = lane(state, 'todo')[45];
       await tester.pumpWidget(away());
       await tester.pumpAndSettle();
+      // The workspace page leaves its board on the session, not in the tasks slot.
+      expect(w.resourceSnapshots.read('tasks', state.identityAuthority), isNull);
+      expect(window(), isNotNull);
       final requests = w.taskQueries.length;
       w.hold = Completer<void>();
       await tester.pumpWidget(page());
@@ -294,15 +299,175 @@ void main() {
     await tester.pumpAndSettle();
     expect(lane(state, 'todo'), hasLength(30));
     await tester.pumpWidget(away());
-    expect(
-      w.resourceSnapshots.read('tasks', state.identityAuthority),
-      isNotNull,
-    );
+    expect(w.resourceSnapshots.read('tasks', state.identityAuthority), isNull);
+    expect(window()?.snapshot.identity, state.identityAuthority);
     unawaited(w.selectServer(RaftRecord({'id': 's2', 'role': 'owner'})));
     w.server = RaftRecord({'id': 's1', 'role': 'member'});
     client.selectServer('s1');
     expect(w.resourceSnapshots.read('tasks', state.identityAuthority), isNull);
+    expect(w.resourceSnapshots.serverTasks, isNull);
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('a task event while the page is away patches one card and does not fetch', (
+    tester,
+  ) async {
+    await mountBoard(tester);
+    await tester.pumpWidget(away());
+    await tester.pumpAndSettle();
+    final requests = w.taskQueries.length;
+    client.emit('task:updated', {
+      'channelId': 'c1',
+      'task': {...taskRow(80, 'todo'), 'title': 'Patched away'},
+    });
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(w.taskQueries, hasLength(requests));
+    expect(window()?.needsRevalidate, isFalse);
+    w.hold = Completer<void>();
+    await tester.pumpWidget(page());
+    expect(find.text('Patched away'), findsOneWidget);
+    expect(spinner, findsNothing);
+    expect(w.taskQueries, hasLength(requests + raftTaskStatuses.length));
+    w.hold!.complete();
+    w.hold = null;
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('reconnect and an unnamed task while away only mark the window', (
+    tester,
+  ) async {
+    await mountBoard(tester);
+    await tester.pumpWidget(away());
+    await tester.pumpAndSettle();
+    final requests = w.taskQueries.length;
+    client.emit('connected', null);
+    client.emit('task:updated', {'channelId': 'c1'});
+    client.emit('task:updated', {
+      'serverId': 'other',
+      'task': {...taskRow(80, 'todo'), 'title': 'Other server'},
+    });
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(w.taskQueries, hasLength(requests));
+    expect(window()?.needsRevalidate, isTrue);
+    expect(find.text('Other server'), findsNothing);
+    w.hold = Completer<void>();
+    await tester.pumpWidget(page());
+    expect(find.text('Task 80'), findsOneWidget);
+    expect(find.text('Other server'), findsNothing);
+    expect(window()?.needsRevalidate, isFalse);
+    expect(w.taskQueries, hasLength(requests + raftTaskStatuses.length));
+    w.hold!.complete();
+    w.hold = null;
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('a late revalidation cannot rewrite the board after the page leaves', (
+    tester,
+  ) async {
+    await mountBoard(tester);
+    await tester.pumpWidget(away());
+    await tester.pumpAndSettle();
+    w.hold = Completer<void>();
+    await tester.pumpWidget(page());
+    await tester.pump();
+    w.tasks[0] = {...w.tasks[0], 'title': 'Should not land'};
+    await tester.pumpWidget(away());
+    await tester.pump();
+    w.hold!.complete();
+    w.hold = null;
+    await tester.pumpAndSettle();
+    expect(
+      window()?.snapshot.rows.any((row) => row['title'] == 'Should not land'),
+      isFalse,
+    );
+    w.hold = Completer<void>();
+    await tester.pumpWidget(page());
+    expect(find.text('Task 80'), findsOneWidget);
+    expect(find.text('Should not land'), findsNothing);
+    w.hold!.complete();
+    w.hold = null;
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('a channel lost while away is absent on the first frame', (
+    tester,
+  ) async {
+    await mountBoard(tester);
+    await tester.pumpWidget(away());
+    await tester.pumpAndSettle();
+    final requests = w.taskQueries.length;
+    w.channels = [
+      w.channels.first,
+      RaftChannel({
+        'id': 'c2',
+        'name': 'Secret',
+        'joined': false,
+        'isPrivate': true,
+      }),
+    ];
+    w.hold = Completer<void>();
+    await tester.pumpWidget(page());
+    final dynamic state = tester.state(find.byType(ResourceView));
+    expect(lane(state, 'todo'), hasLength(59));
+    expect(lane(state, 'todo').any((row) => row['id'] == 't79'), isFalse);
+    expect(w.taskQueries, hasLength(requests + raftTaskStatuses.length));
+    w.hold!.complete();
+    w.hold = null;
+    await tester.pumpAndSettle();
+    expect(w.taskQueries, hasLength(requests + raftTaskStatuses.length));
+  });
+
+  testWidgets('logout drops the board and a later event cannot recreate it', (
+    tester,
+  ) async {
+    await mountBoard(tester);
+    await tester.pumpWidget(away());
+    await tester.pumpAndSettle();
+    final requests = w.taskQueries.length;
+    w.revokeServer('s1');
+    expect(w.resourceSnapshots.serverTasks, isNull);
+    client.emit('task:updated', {
+      'task': {...taskRow(80, 'todo'), 'title': 'After logout'},
+    });
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(w.resourceSnapshots.serverTasks, isNull);
+    expect(w.taskQueries, hasLength(requests));
+    w.server = RaftRecord({'id': 's1', 'role': 'owner'});
+    client.selectServer('s1');
+    w.channels = [
+      RaftChannel({'id': 'c1', 'name': 'General', 'joined': true}),
+      RaftChannel({
+        'id': 'c2',
+        'name': 'Secret',
+        'joined': true,
+        'isPrivate': true,
+      }),
+    ];
+    w.hold = Completer<void>();
+    await tester.pumpWidget(page());
+    expect(find.text('Task 80'), findsNothing);
+    expect(find.text('After logout'), findsNothing);
+    w.hold!.complete();
+    w.hold = null;
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('an account change does not show the previous board', (
+    tester,
+  ) async {
+    await mountBoard(tester);
+    await tester.pumpWidget(away());
+    await tester.pumpAndSettle();
+    client.user = RaftRecord({'id': 'bob'});
+    w.hold = Completer<void>();
+    await tester.pumpWidget(page());
+    await tester.pump();
+    expect(find.text('Task 80'), findsNothing);
+    expect(w.resourceSnapshots.serverTasks, isNull);
+    w.hold!.complete();
+    w.hold = null;
+    await tester.pumpAndSettle();
+    expect(find.text('Task 80'), findsWidgets);
   });
 
   testWidgets('a mounted role change resets the board', (tester) async {

@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_flutter/data/workspace_controller.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
 
 import 'app_global_server_selector_test.dart' show RootFixture;
 import 'mobile_back_history_test.dart' show finishBackTransition;
+import 'activity_open_clears_new_test.dart' show activityRow;
 
 WorkspaceController currentPage(WidgetTester tester) => tester
     .widgetList<WorkspaceView>(
@@ -19,6 +21,78 @@ WorkspaceController currentPage(WidgetTester tester) => tester
     );
 
 void main() {
+  for (final theme in ['brutal', 'elegant-dark']) {
+    testWidgets('phone Chat and Activity share the live draft owner $theme', (tester) async {
+      final f = RootFixture();
+      f.overrides['GET /channels/inbox'] = (_) => {
+        'items': [{
+          ...activityRow('channel', unread: 0, seq: '1'),
+          'channelId': 'ca', 'channelName': 'general-a',
+          'lastMessageId': 'ma', 'firstUnreadMessageId': null,
+        }],
+        'hasMore': false, 'totalCount': 1, 'totalUnreadCount': 0,
+      };
+      f.overrides['POST /channels/ca/read-all'] = (_) => {
+        'maxReadSeq': 1, 'readStateVersion': 1,
+      };
+      await f.mount(tester, theme, 390, uri: Uri.parse('/s/alpha/channel/ca'));
+      await f.flush(tester);
+      await finishBackTransition(tester);
+      final source = f.workspace(tester);
+      final chat = currentPage(tester);
+      Finder field() => find.descendant(
+        of: find.byKey(const ValueKey('compose-ca')),
+        matching: find.byType(TextField),
+      );
+      List<WorkspaceController> pages() => tester.widgetList<WorkspaceView>(
+        find.byWidgetPredicate((widget) => widget is WorkspaceView, skipOffstage: false),
+      ).map((widget) => widget.controller).where((page) => page.presentationSource != null).toList();
+      void shared(String text) {
+        final retained = pages();
+        expect(retained.length, greaterThanOrEqualTo(2));
+        for (final page in retained) {
+          expect(identical(page.composer, source.composer), isTrue);
+          expect(page.drafts['ca'], text);
+        }
+      }
+      expect(identical(chat.composer, source.composer), isTrue);
+      await tester.enterText(field(), 'From normal Chat 草稿');
+      await tester.pump();
+      shared('From normal Chat 草稿');
+      tester.testTextInput.hide();
+      await tester.tap(find.byKey(const Key('mobile-detail-back')));
+      await f.flush(tester);
+      await finishBackTransition(tester);
+      await tester.tap(find.byKey(const Key('nav-activity')));
+      await f.flush(tester);
+      await finishBackTransition(tester);
+      expect(currentPage(tester).location.route.name, 'activity');
+      await tester.tap(find.byKey(const ValueKey('activity-channel-ca')));
+      await f.flush(tester);
+      await finishBackTransition(tester);
+      final detail = currentPage(tester);
+      expect(detail.channel?.id, 'ca');
+      expect(identical(detail.composer, source.composer), isTrue);
+      expect(tester.widget<TextField>(field()).controller!.text, 'From normal Chat 草稿');
+      await tester.enterText(field(), 'Edited through Activity 活动');
+      await tester.pump();
+      shared('Edited through Activity 活动');
+      expect(source.drafts['ca'], 'Edited through Activity 活动');
+      tester.testTextInput.hide();
+      for (var level = 0; level < 2; level++) {
+        await tester.binding.handlePopRoute();
+        await f.flush(tester);
+        await finishBackTransition(tester);
+      }
+      await tester.tap(find.byKey(const ValueKey('sidebar-channel-ca')));
+      await f.flush(tester);
+      await finishBackTransition(tester);
+      expect(tester.widget<TextField>(field()).controller!.text, 'Edited through Activity 活动');
+      shared('Edited through Activity 活动');
+      await f.close(tester);
+    });
+  }
+
   testWidgets(
     'Live routes share accepted rows and pending sends; drafts retain their channel',
     (tester) async {

@@ -112,7 +112,8 @@ void main() {
               controller: workspace,
               section: 'activity',
               onMessage: (_, _) async {},
-              onActivityWindowAccepted: acceptedWindows.add,
+              onActivityWindowAccepted: (window, {firstPage = false}) =>
+                  acceptedWindows.add(window),
             ),
           ),
         ),

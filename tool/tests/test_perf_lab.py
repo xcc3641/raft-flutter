@@ -95,6 +95,128 @@ class SummaryTest(unittest.TestCase):
             self.assertIn('fontFallback 80.0%', text)
             self.assertIn('| steady-scroll | brutal-light | 3 |', text)
 
+    def test_keyboard_windows_ignore_the_pause(self):
+        r = record('keyboard', ui=[2, 20, 9, 2, 3], kind='keyboard', keyboardCycles=1)
+        for frame, builds, layouts, paints in zip(r['frames'], (5000, 900, 800, 1, 2), (9, 40, 30, 1, 1), (9, 20, 18, 1, 1)):
+            frame['builds'] = builds
+            frame['layouts'] = layouts
+            frame['paints'] = paints
+        r['frames'][1]['r'] = 18000
+        r['frames'][2]['r'] = 9000
+        f = r['frames']
+        r['keyboard'] = [
+            {'direction': 'open', 't0': f[1]['b'], 't1': f[2]['b'], 'cpuUs': 1200},
+            {'direction': 'close', 't0': f[2]['b'], 't1': f[3]['b'], 'cpuUs': 800},
+        ]
+        row = lab.summarize_record(r)
+        k = row['keyboard']
+        self.assertEqual(k['frames'], 2)
+        self.assertEqual(k['worstUiMs'], 20.0)
+        self.assertEqual(k['worstRasterMs'], 18.0)
+        self.assertEqual(k['over8Ui'], 2)
+        self.assertEqual(k['over16Ui'], 1)
+        self.assertEqual(k['over8Raster'], 2)
+        self.assertEqual(k['over16Raster'], 1)
+        self.assertEqual(k['builds'], {'sum': 1700, 'max': 900, 'mean': 850.0})
+        self.assertEqual(k['layouts'], {'sum': 70, 'max': 40, 'mean': 35.0})
+        self.assertEqual(k['paints'], {'sum': 38, 'max': 20, 'mean': 19.0})
+        self.assertEqual(k['uiThreadCpuUs'], 2000)
+        text = lab.markdown({'run': 'kb', 'env': {}, 'hello': {}, 'scenarios': [row], 'gate60Passed': False})
+        self.assertIn('Soft keyboard', text)
+        self.assertIn('850.0', text)
+        self.assertIn('35.0', text)
+        self.assertIn('19.0', text)
+        self.assertIn('a reference, not a gate', text)
+        self.assertNotIn('1700/900', text)
+
+    def test_keyboard_thread_time_joins_animation_frames_only(self):
+        r = record('keyboard', ui=[4, 5], kind='keyboard')
+        f = r['frames']
+        r['keyboard'] = [{'direction': 'open', 't0': f[0]['b'], 't1': f[1]['b'] + 1, 'cpuUs': 100}]
+        attribution = {
+            'threadTime': {
+                'collected': True,
+                'uiThreads': ['io.flutter.1.ui'],
+                'rasterThreads': ['io.flutter.1.raster'],
+                'uiEvents': 4, 'uiEventsWithTdur': 4, 'uiEventsWithTts': 4,
+                'rasterEvents': 4, 'rasterEventsWithTdur': 0, 'rasterEventsWithTts': 0,
+            },
+            'frameThreadTime': [
+                {'b': f[0]['b'], 'uiCpuUs': 1500, 'uiEvent': 'Animator::BeginFrame', 'rasterEvent': 'Rasterizer::Draw'},
+                {'b': f[1]['b'], 'uiCpuUs': 2500, 'uiEvent': 'Animator::BeginFrame'},
+            ],
+        }
+        row = lab.summarize_record(r, attribution)
+        self.assertEqual(row['keyboard']['uiCpuUs']['p50'], 1500)
+        self.assertNotIn('rasterCpuUs', row['keyboard'])
+        text = lab.markdown({'run': 'kb', 'env': {}, 'hello': {}, 'scenarios': [row], 'gate60Passed': True})
+        self.assertIn('raster thread has 4 events and no tdur', text)
+        self.assertIn('UI median 1.5 ms CPU', text)
+
+    def test_proc_scene_cpu_names_its_source(self):
+        r = record('keyboard', ui=[4, 5], kind='keyboard')
+        f = r['frames']
+        r['keyboard'] = [{'direction': 'open', 't0': f[0]['b'], 't1': f[1]['b'] + 1}]
+        attribution = {
+            'procThreadCpu': {
+                'source': 'proc-schedstat',
+                'collected': True,
+                'clkTck': 100,
+                'ui': {'tid': 10, 'comm': 'lutter.linkperf', 'matchedBy': 'main-thread', 'ticks': 12, 'ms': 120.0},
+                'raster': {'tid': 11, 'comm': '1.raster', 'matchedBy': 'name', 'ticks': 8, 'ms': 80.0},
+            },
+        }
+        row = lab.summarize_record(r, attribution)
+        text = lab.markdown({'run': 'kb', 'env': {}, 'hello': {}, 'scenarios': [row], 'gate60Passed': True})
+        self.assertIn('scene CPU from /proc schedstat, not timeline tts', text)
+        self.assertIn('UI 120.0 ms (main thread `lutter.linkperf`', text)
+        self.assertIn('raster 80.0 ms (`1.raster`)', text)
+
+    def test_keyboard_count_change_does_not_change_the_comparison(self):
+        def scenario(builds):
+            r = record('keyboard', ui=[20, 9], kind='keyboard', keyboardCycles=1)
+            for frame, count in zip(r['frames'], builds):
+                frame['builds'] = count
+                frame['layouts'] = 10
+                frame['paints'] = 4
+            f = r['frames']
+            r['keyboard'] = [{'direction': 'open', 't0': f[0]['b'] - 1, 't1': f[-1]['b'] + 10, 'cpuUs': 1500}]
+            return lab.summarize_record(r)
+
+        before = {'hello': {'fixtureVersion': 'v1'}, 'env': {}, 'scenarios': [scenario([900, 800])]}
+        after = {'hello': {'fixtureVersion': 'v1'}, 'env': {}, 'scenarios': [scenario([3, 2])]}
+        better = lab.compare(before, after)
+        self.assertEqual(better['rows'][0]['regressions'], [])
+        self.assertEqual(better['rows'][0]['improvements'], [])
+        self.assertEqual(better['regressions'], 0)
+        worse = lab.compare(after, before)
+        self.assertEqual(worse['rows'][0]['regressions'], [])
+        self.assertEqual(worse['rows'][0]['improvements'], [])
+        self.assertEqual(worse['regressions'], 0)
+        self.assertEqual(better['rows'][0]['metrics']['keyboard.builds'][0]['mean'], 850)
+        self.assertEqual(better['rows'][0]['metrics']['keyboard.builds'][1]['mean'], 2.5)
+        text = lab.compare_markdown(better, 'before', 'after')
+        self.assertIn('850.0→2.5', text)
+        self.assertIn('a reference, not a gate', text)
+        self.assertNotIn('deterministic check', text)
+
+    def test_paired_ratio_interval(self):
+        same = [(10, 10)] * 12
+        ci = lab.paired_ratio_ci(same, samples=200)
+        self.assertEqual(lab.ratio_verdict(ci, high_limit=1.03, low_limit=0.97), 'same')
+        slower = [(10, 12)] * 12
+        slow_ci = lab.paired_ratio_ci(slower, samples=200)
+        self.assertEqual(lab.ratio_verdict(slow_ci), 'regression')
+        self.assertEqual(lab.ratio_verdict({'low': 0.98, 'high': 1.08}), 'uncertain')
+        self.assertEqual(lab.ratio_verdict({'low': 0.90, 'high': 1.02}), 'pass')
+        self.assertEqual(lab.paired_ratio_ci([])['rounds'], 0)
+        self.assertEqual(lab.ratio_verdict(lab.paired_ratio_ci([])), 'no-data')
+        same_batches = [([10, 100], [10, 100])] * 8
+        cluster = lab.cluster_ratio_ci(same_batches, samples=200)
+        self.assertEqual(cluster['pairs'], 8)
+        self.assertEqual(lab.ratio_verdict(cluster, high_limit=1.03, low_limit=0.97), 'same')
+        self.assertEqual(lab.cluster_ratio_ci([])['pairs'], 0)
+
 
 class AndroidRunSafetyTest(unittest.TestCase):
     def test_changed_official_app_fails_even_when_metric_comparison_passes(self):

@@ -669,6 +669,23 @@ def run_gate(check_env, emit, started):
     if not results['workspace-pub-get.txt']:
         raise SystemExit('check-project: `flutter pub get --enforce-lockfile` failed; see .local/workspace-pub-get.txt.')
 
+    # Fail in seconds on hotspot growth, before warming assets or launching
+    # any Dart test shards. The AST scanner needs only the resolved workspace.
+    results['structure-audit.txt'] = run_logged(
+        [*tool_command('structure-audit'), '--check'], root,
+        local / 'structure-audit.txt', check_env) == 0
+    if not results['structure-audit.txt']:
+        message = 'Hotspot structure audit failed; no Dart tests started. See .local/structure-audit.txt.\n'
+        (local / 'check-summary.txt').write_text(message, encoding='utf-8')
+        (local / 'engineering-run.json').write_text(json.dumps({
+            'sourceHash': source_hash, 'completed': False, 'checks': results,
+            'stoppedEarly': {'reason': 'structure-audit', 'message': message},
+            'shards': [], 'failedTests': [],
+        }), encoding='utf-8')
+        sys.stderr.write(message)
+        return {'ok': False, 'failures': [], 'stop': None, 'changed': False,
+                'failed_checks': ['structure-audit.txt']}
+
     clear_unit_test_assets(root)
     # Rebuild the test assets (shaders, asset bundle) once before the shards
     # start so no shard has to. This does not stop the native_assets.json race:
@@ -750,7 +767,7 @@ def run_gate(check_env, emit, started):
                          'error': watch.compile['lines'][0] if watch.compile['lines'] else 'failed to load'})
     tests_passed = all(s['passed'] for s in shards) and bool(shards)
     results['all-project-tests.txt'] = tests_passed
-    ordered = {key: results[key] for key in ['workspace-pub-get.txt', 'host-collector-tests.txt', 'bindings-generator-pub-get.txt', 'raft-lints-pub-get.txt', 'all-project-tests.txt', 'analyze-all.txt', 'raft-lints.txt']}
+    ordered = {key: results[key] for key in ['workspace-pub-get.txt', 'structure-audit.txt', 'host-collector-tests.txt', 'bindings-generator-pub-get.txt', 'raft-lints-pub-get.txt', 'all-project-tests.txt', 'analyze-all.txt', 'raft-lints.txt']}
     ordered.update({key: value for key, value in results.items() if key.startswith('test-shard-')})
     results = ordered
 
@@ -837,7 +854,7 @@ def with_run_tmp(env, path):
 
 
 def main():
-    check_env = dict(os.environ, PYTHONUTF8='1')
+    check_env = dict(os.environ, PYTHONUTF8='1', RAFT_PROJECT_GATE='1')
     if '--all-themes' in sys.argv[1:]:
         check_env['RAFT_TEST_ALL_THEMES'] = '1'
     elif sys.argv[1:]:

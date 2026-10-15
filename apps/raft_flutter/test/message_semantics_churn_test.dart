@@ -13,6 +13,7 @@ import 'package:raft_flutter/features/message_timeline.dart';
 
 import 'flutter_test_config.dart' show RaftTestBinding;
 import 'message_presentation_test.dart' show fixture;
+import 'support/app_services_fixture.dart';
 
 /// Counts the semantics nodes each frame sends to the engine.
 class _Counts {
@@ -279,11 +280,13 @@ void main() {
       await t.pumpWidget(
         MaterialApp(
           theme: raftTheme(RaftFamily.brutal),
-          home: WorkspaceView(
-            controller: w,
-            appearance: const RaftAppearance(),
-            onAppearance: (_) async {},
-            onLogout: () async {},
+          home: withAppServices(
+            WorkspaceView(
+              controller: w,
+              appearance: const RaftAppearance(),
+              onAppearance: (_) async {},
+              onLogout: () async {},
+            ),
           ),
         ),
       );

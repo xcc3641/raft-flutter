@@ -73,6 +73,9 @@ class SavedCountStore extends ChangeNotifier {
     return _ids.contains(messageId);
   }
 
+  /// Ids known to be saved. A copy, so a caller cannot edit the store's set.
+  Set<String> get savedIds => Set<String>.of(_ids);
+
   /// Message ids a loaded Saved result discloses (Source `loadSaved` adds
   /// every entry to `savedIds`).
   void know(Iterable<String> messageIds) {

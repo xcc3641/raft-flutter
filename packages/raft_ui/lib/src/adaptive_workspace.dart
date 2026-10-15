@@ -415,10 +415,13 @@ class _RaftAdaptiveWorkspaceState extends State<RaftAdaptiveWorkspace> {
               if (!onRight) navigationRail(t, railWidth, onRight),
               if (!onRight) navigationSidebar(t, sidebarColor, sidebarBorder),
               Expanded(
-                child: conversation(
-                  split: sideThread,
-                  threadSize: actualThread,
-                  conversationWidth: conversationWidth,
+                child: RaftNavigationColumnScope(
+                  onRight: onRight,
+                  child: conversation(
+                    split: sideThread,
+                    threadSize: actualThread,
+                    conversationWidth: conversationWidth,
+                  ),
                 ),
               ),
               SizedBox(width: widget.trailingExtent),

@@ -84,6 +84,24 @@ abstract final class RaftPanelEdge {
     RaftPanelEdgeStyle style = RaftPanelEdgeStyle.attachedPanel,
   ]) => leftFor(RaftTokens.of(context), presentationOf(context), style);
 
+  /// The Activity panel's divider against the navigation column.
+  ///
+  /// On the left this is [left]. When [RaftNavigationColumnScope] says the
+  /// column is on the right, the column already draws the divider that faces
+  /// the content, so this returns null. Painting [left] there puts a 1px line
+  /// on the window's far edge.
+  ///
+  /// Settings, the task thread and the channel drawers stay on [left]. Their
+  /// line is a column divider or the drawer's own leading edge. It does not
+  /// sit on the window when the navigation column is on the right.
+  static Border? besideNavigation(
+    BuildContext context, [
+    RaftPanelEdgeStyle style = RaftPanelEdgeStyle.activityInbox,
+  ]) {
+    if (RaftNavigationColumnScope.onRightOf(context)) return null;
+    return left(context, style);
+  }
+
   /// [left] for an explicit [presentation].
   static Border? leftFor(
     RaftTokens t,
@@ -112,6 +130,37 @@ abstract final class RaftPanelEdge {
       ),
     );
   }
+}
+
+/// Published by the desktop shell around the content column.
+///
+/// [onRight] is true when the navigation column sits on the physical right.
+/// It is false when that column is on the left, and when no shell has
+/// published a side. [RaftPanelEdge.besideNavigation] reads it.
+///
+/// [RaftRailEdgeScope] is the other "on the right" flag. That scope wraps
+/// the rail, and menus the rail opens read it so they open toward the
+/// content. This scope wraps the content column. The two subtrees do not
+/// overlap. Do not read one in place of the other.
+class RaftNavigationColumnScope extends InheritedWidget {
+  const RaftNavigationColumnScope({
+    super.key,
+    required this.onRight,
+    required super.child,
+  });
+
+  /// The navigation column sits on the physical right.
+  final bool onRight;
+
+  static bool onRightOf(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<RaftNavigationColumnScope>()
+          ?.onRight ??
+      false;
+
+  @override
+  bool updateShouldNotify(RaftNavigationColumnScope oldWidget) =>
+      onRight != oldWidget.onRight;
 }
 
 /// The master column of a master/detail layout: [RaftPanelEdge.masterRight]

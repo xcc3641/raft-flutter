@@ -201,7 +201,6 @@ void main() {
     final child = sessions.open('c1')!;
     await tick();
     child.saveDraft('grid draft');
-    sessions.transferDrafts('c1', child);
     expect(w.drafts['c1'], 'grid draft');
     child.saveDraft('private departed draft');
     var privateProjectionRetired = false;
@@ -229,7 +228,8 @@ void main() {
     });
     await tick();
     expect(child.messages, isEmpty);
-    expect(w.drafts['c1'], 'grid draft');
+    // Retiring a borrowed editor cannot erase the session's latest draft.
+    expect(w.drafts['c1'], 'private departed draft');
     expect(w.client.user?.id, 'alice');
     sessions.dispose();
     w.dispose();

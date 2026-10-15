@@ -3535,137 +3535,140 @@ class _RaftChatViewState extends State<RaftChatView>
           else if (channelFooter != null)
             channelFooter
           else
-            RaftComposer(
-              // Web MessageInput drag-and-drop, paste and keyboard images.
-              frame: (_, composer, enabled) => ComposerFileDropTarget(
-                controller: w,
-                thread: widget.thread,
-                active: () =>
-                    enabled && presentationActive && currentComposer(),
-                child: composer,
-              ),
-              onPasteAttachments: () => pasteComposerAttachments(
-                context,
-                w,
-                thread: widget.thread,
-                active: () => presentationActive && currentComposer(),
-              ),
-              onContentInserted: (content) => insertComposerContent(
-                context,
-                w,
-                content,
-                thread: widget.thread,
-                active: () => presentationActive && currentComposer(),
-              ),
-              clearOnSubmit: true,
-              accessoryRow: composerAccessory(),
-              autofocus:
-                  widget.thread &&
-                  RaftDensityScope.of(context) == RaftDensity.desktop,
-              canAutofocus: () =>
-                  presentationActive &&
-                  currentComposer() &&
-                  w.client.user != null &&
-                  w.can('viewChannel', resource: w.channel),
-              handle: composerHandle,
-              initialDraft: w.drafts[w.draftScope(thread: widget.thread)] ?? '',
-              draftRevision: w.draftRevision(thread: widget.thread),
-              onDraftChanged: (text) {
-                if (currentComposer()) w.saveDraft(text, thread: widget.thread);
-              },
-              key: ValueKey(
-                'compose-${widget.thread ? w.threadParentMessageId : w.channel?.id}',
-              ),
-              taskAction: !widget.thread && w.channel?.type != 'thread'
-                  ? RaftComposerTaskToggle(
-                      key: const Key('composer-as-task'),
-                      checked: alsoCreateTask,
-                      label: raftText(context, 'As Task'),
-                      onChanged:
-                          presentationActive &&
-                              currentComposer() &&
-                              !w.conversationPaused &&
-                              w.channel?.archived != true
-                          ? (checked) => setState(() {
-                              taskChoiceRevision++;
-                              alsoCreateTask = checked;
-                            })
-                          : null,
-                    )
-                  : null,
-              onAttach: () {
-                if (presentationActive && currentComposer()) attach();
-              },
-              onImagePick: () {
-                if (presentationActive && currentComposer()) {
-                  attach(mediaOnly: true);
-                }
-              },
-              hasAttachments: w.uploads(thread: widget.thread).isNotEmpty,
-              attachments: composerAttachmentsFor(
-                context,
-                w,
-                thread: widget.thread,
-                onPreview: previewDraftImage,
-              ),
-              submitSpinner: w
-                  .uploads(thread: widget.thread)
-                  .any(
-                    (d) =>
-                        d.checking ||
-                        (d.error == null && d.id == null && !d.queued),
-                  ),
-              // Web MessageInput `conversionBlocked`: the composer stays and
-              // Send is disabled with the conversion notice as its title.
-              submitTooltip: w.conversationPaused
-                  ? raftText(context, 'Channel conversion in progress')
-                  : composerSendBlockTitle(
-                      context,
-                      w.uploads(thread: widget.thread),
+            ValueListenableBuilder<int>(
+              valueListenable: w.draftChanges(thread: widget.thread),
+              builder: (context, revision, _) => RaftComposer(
+                // Web MessageInput drag-and-drop, paste and keyboard images.
+                frame: (_, composer, enabled) => ComposerFileDropTarget(
+                  controller: w,
+                  thread: widget.thread,
+                  active: () =>
+                      enabled && presentationActive && currentComposer(),
+                  child: composer,
+                ),
+                onPasteAttachments: () => pasteComposerAttachments(
+                  context,
+                  w,
+                  thread: widget.thread,
+                  active: () => presentationActive && currentComposer(),
+                ),
+                onContentInserted: (content) => insertComposerContent(
+                  context,
+                  w,
+                  content,
+                  thread: widget.thread,
+                  active: () => presentationActive && currentComposer(),
+                ),
+                clearOnSubmit: true,
+                accessoryRow: composerAccessory(),
+                autofocus:
+                    widget.thread &&
+                    RaftDensityScope.of(context) == RaftDensity.desktop,
+                canAutofocus: () =>
+                    presentationActive &&
+                    currentComposer() &&
+                    w.client.user != null &&
+                    w.can('viewChannel', resource: w.channel),
+                handle: composerHandle,
+                initialDraft: w.drafts[w.draftScope(thread: widget.thread)] ?? '',
+                draftRevision: revision + w.draftRevision(thread: widget.thread),
+                onDraftChanged: (text) {
+                  if (currentComposer()) w.saveDraft(text, thread: widget.thread);
+                },
+                key: ValueKey(
+                  'compose-${widget.thread ? w.threadParentMessageId : w.channel?.id}',
+                ),
+                taskAction: !widget.thread && w.channel?.type != 'thread'
+                    ? RaftComposerTaskToggle(
+                        key: const Key('composer-as-task'),
+                        checked: alsoCreateTask,
+                        label: raftText(context, 'As Task'),
+                        onChanged:
+                            presentationActive &&
+                                currentComposer() &&
+                                !w.conversationPaused &&
+                                w.channel?.archived != true
+                            ? (checked) => setState(() {
+                                taskChoiceRevision++;
+                                alsoCreateTask = checked;
+                              })
+                            : null,
+                      )
+                    : null,
+                onAttach: () {
+                  if (presentationActive && currentComposer()) attach();
+                },
+                onImagePick: () {
+                  if (presentationActive && currentComposer()) {
+                    attach(mediaOnly: true);
+                  }
+                },
+                hasAttachments: w.uploads(thread: widget.thread).isNotEmpty,
+                attachments: composerAttachmentsFor(
+                  context,
+                  w,
+                  thread: widget.thread,
+                  onPreview: previewDraftImage,
+                ),
+                submitSpinner: w
+                    .uploads(thread: widget.thread)
+                    .any(
+                      (d) =>
+                          d.checking ||
+                          (d.error == null && d.id == null && !d.queued),
                     ),
-              onSendBlocked: w.conversationPaused
-                  ? null
-                  : () => raiseComposerSendBlockNotice(
-                      context,
-                      w,
-                      thread: widget.thread,
-                    ),
-              hint: widget.thread
-                  ? raftText(context, 'Message thread')
-                  : w.channel?.type == 'dm'
-                  // Web ChatPanel: a DM composer reads `Message @<peer>`.
-                  ? raftFormat(context, 'Message @{name}', {
-                      'name': w.channel!.string(
-                        'peerDisplayName',
-                        w.channel!.string('peerName', w.channel!.name),
+                // Web MessageInput `conversionBlocked`: the composer stays and
+                // Send is disabled with the conversion notice as its title.
+                submitTooltip: w.conversationPaused
+                    ? raftText(context, 'Channel conversion in progress')
+                    : composerSendBlockTitle(
+                        context,
+                        w.uploads(thread: widget.thread),
                       ),
-                    })
-                  : raftFormat(context, 'Message #{name}', {
-                      'name': w.channel?.name ?? '',
-                    }),
-              enabled:
-                  presentationActive &&
-                  (widget.thread
-                      ? w.threadParentMessageId != null &&
-                            w.threadSourceChannel?.archived != true &&
-                            w.threadSourceChannel?.joined == true
-                      : w.channel?.archived != true),
-              canSend:
-                  !w.conversationPaused &&
-                  !w.sharedBlocked(thread: widget.thread) &&
-                  w.uploadsReady(thread: widget.thread),
-              suggestions: composerDirectory.suggestions,
-              onSuggestionsRequested: (prefix) {
-                if (presentationActive && currentComposer()) {
-                  composerDirectory.request(prefix);
-                }
-              },
-              onForceTaskSendWithMentions: !widget.thread
-                  ? (text, mentions) =>
-                        sendCurrent(text, mentions, forceTask: true)
-                  : null,
-              onSendWithMentions: sendCurrent,
-              onSend: (text) => sendCurrent(text, const []),
+                onSendBlocked: w.conversationPaused
+                    ? null
+                    : () => raiseComposerSendBlockNotice(
+                        context,
+                        w,
+                        thread: widget.thread,
+                      ),
+                hint: widget.thread
+                    ? raftText(context, 'Message thread')
+                    : w.channel?.type == 'dm'
+                    // Web ChatPanel: a DM composer reads `Message @<peer>`.
+                    ? raftFormat(context, 'Message @{name}', {
+                        'name': w.channel!.string(
+                          'peerDisplayName',
+                          w.channel!.string('peerName', w.channel!.name),
+                        ),
+                      })
+                    : raftFormat(context, 'Message #{name}', {
+                        'name': w.channel?.name ?? '',
+                      }),
+                enabled:
+                    presentationActive &&
+                    (widget.thread
+                        ? w.threadParentMessageId != null &&
+                              w.threadSourceChannel?.archived != true &&
+                              w.threadSourceChannel?.joined == true
+                        : w.channel?.archived != true),
+                canSend:
+                    !w.conversationPaused &&
+                    !w.sharedBlocked(thread: widget.thread) &&
+                    w.uploadsReady(thread: widget.thread),
+                suggestions: composerDirectory.suggestions,
+                onSuggestionsRequested: (prefix) {
+                  if (presentationActive && currentComposer()) {
+                    composerDirectory.request(prefix);
+                  }
+                },
+                onForceTaskSendWithMentions: !widget.thread
+                    ? (text, mentions) =>
+                          sendCurrent(text, mentions, forceTask: true)
+                    : null,
+                onSendWithMentions: sendCurrent,
+                onSend: (text) => sendCurrent(text, const []),
+              ),
             ),
         ],
       ),

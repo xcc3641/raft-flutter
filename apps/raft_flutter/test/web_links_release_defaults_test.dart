@@ -197,12 +197,12 @@ void main() {
         (line) => !line.trimLeft().startsWith('//'),
       );
       if (!lines.any(web.hasMatch)) continue;
-      // main.dart builds in-app router locations (Uri(path: '/s/..')), not
+      // app_root.dart builds in-app router locations (Uri(path: '/s/..')), not
       // browser URLs; app_update.dart builds GitHub release asset URLs.
       final text = lines.join('\n');
       if (!text.contains('ContentLinks') &&
           !text.contains('webOrigin') &&
-          !file.path.endsWith('main.dart') &&
+          !file.path.endsWith('app_root.dart') &&
           !file.path.endsWith('app_update.dart')) {
         offenders.add(file.path);
       }

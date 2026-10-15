@@ -20,6 +20,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'primary_route_tabs_fixture.dart';
 
 import 'package:raft_flutter/features/source_channel_files_view.dart';
+import '../test/support/app_services_fixture.dart';
 
 class _PublicClient extends RaftClient {
   _PublicClient(this.fixture)
@@ -178,11 +179,13 @@ void main() {
                 ),
               ),
             ),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );

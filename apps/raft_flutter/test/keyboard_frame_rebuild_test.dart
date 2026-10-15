@@ -10,6 +10,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/data/workspace_controller.dart';
 import 'package:raft_flutter/features/chat_view.dart';
 import 'package:raft_flutter/main.dart' as app;
@@ -28,6 +29,7 @@ const _prose =
 /// padding has settled (only `viewInsets` changes).
 const _mustStayQuiet = [
   'WorkspaceView',
+  '_MobileWorkspaceContent',
   'RaftMessageTimeline',
   'RaftMessageTile',
   'RaftMessageRow',
@@ -105,6 +107,7 @@ void main() {
         final content = LabNavigationContent();
         await tester.pumpWidget(
           app.RaftApp(
+            services: const AppServices.updatesDisabledForTestOrPreview(),
             sessionStore: client.sessionStore,
             createClient: (_, _, _) => client,
             initialLocation: Uri(path: '/s/lab'),

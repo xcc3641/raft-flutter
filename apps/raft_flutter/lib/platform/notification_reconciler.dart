@@ -40,7 +40,7 @@ class NotificationReconciler {
   bool _closed = false, _dirty = false;
   Future<void>? _running;
   int _epoch = 0;
-  ({DateTime at, Object? value, String scope})? _settings;
+  ({DateTime at, Object? value, Object scope})? _settings;
 
   /// Notification settings are read again after this long.
   static const settingsFreshness = Duration(seconds: 30);
@@ -64,9 +64,7 @@ class NotificationReconciler {
     _attach();
   }
 
-  /// Follows the Activity store the workspace view already owns. It neither
-  /// creates one (and so never starts its boot request) nor keeps one alive:
-  /// until a view binds it there is nothing accepted to reconcile with.
+  /// Borrows the session's existing projection without creating or starting it.
   void _attach() {
     final w = _workspace;
     if (_closed || w == null) return;
@@ -119,7 +117,15 @@ class NotificationReconciler {
     if (!store.hasAcceptedWindow) return;
     final total = store.totalUnreadCount!;
     final rows = store.acceptedRows;
-    bool stale() => _closed || epoch != _epoch || !identical(_workspace, w);
+    final scope = store.scope, authority = store.authorityEpoch;
+    bool stale() =>
+        _closed ||
+        epoch != _epoch ||
+        !identical(_workspace, w) ||
+        !identical(w.activityUnreadIfBound, store) ||
+        scope != store.scope ||
+        authority != store.authorityEpoch ||
+        !store.hasAcceptedWindow;
 
     final live = notifications.liveUnread;
     final read = <String>[];
@@ -226,7 +232,12 @@ class NotificationReconciler {
   /// `all`, `mentions`, or null when the member muted this server's push or
   /// the setting cannot be read.
   Future<String?> _pushMode(WorkspaceController w) async {
-    final scope = notificationScope(w.client);
+    Object currentScope() => (
+      notificationScope(w.client),
+      w.activityUnreadIfBound?.scope,
+      w.activityUnreadIfBound?.authorityEpoch,
+    );
+    final scope = currentScope();
     final cached = _settings;
     Object? value;
     if (cached != null &&
@@ -237,7 +248,11 @@ class NotificationReconciler {
       value = await w.sharedQuery(
         '/servers/${w.client.serverId}/notification-settings',
       );
-      _settings = (at: _clock(), value: value, scope: scope);
+      if (!_closed &&
+          identical(_workspace, w) &&
+          scope == currentScope()) {
+        _settings = (at: _clock(), value: value, scope: scope);
+      }
     }
     if (value is! Map || value['serverPushMuted'] == true) return null;
     final mode = value['serverPushMode'];

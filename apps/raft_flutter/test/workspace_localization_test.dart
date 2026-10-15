@@ -6,6 +6,7 @@ import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show fixture;
+import 'support/app_services_fixture.dart';
 
 void main() {
   testWidgets(
@@ -20,13 +21,15 @@ void main() {
       addTearDown(w.dispose);
       w.section = 'settings';
       RaftAppearance? changed;
-      final workspace = WorkspaceView(
-        controller: w,
-        appearance: const RaftAppearance(),
-        onAppearance: (value) async {
-          changed = value;
-        },
-        onLogout: () async {},
+      final workspace = withAppServices(
+        WorkspaceView(
+          controller: w,
+          appearance: const RaftAppearance(),
+          onAppearance: (value) async {
+            changed = value;
+          },
+          onLogout: () async {},
+        ),
       );
       Widget application(Locale locale) => MaterialApp(
         locale: locale,

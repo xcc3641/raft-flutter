@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'message_presentation_test.dart' show fixture;
 import 'workspace_activity_activation_test.dart'
     show channelRow, message, threadRow;
+import 'support/app_services_fixture.dart';
 
 /// ThreadsInbox.tsx:1104-1175: opening an Activity entry fills the content slot
 /// beside the Activity list; the page never gains a full-width channel header
@@ -81,11 +82,13 @@ void main() {
           await tester.pumpWidget(
             MaterialApp(
               theme: raftTheme(family, dark: dark),
-              home: WorkspaceView(
-                controller: w,
-                appearance: RaftAppearance(light: family),
-                onAppearance: (_) async {},
-                onLogout: () async {},
+              home: withAppServices(
+                WorkspaceView(
+                  controller: w,
+                  appearance: RaftAppearance(light: family),
+                  onAppearance: (_) async {},
+                  onLogout: () async {},
+                ),
               ),
             ),
           );

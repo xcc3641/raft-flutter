@@ -19,6 +19,7 @@ import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show MessageAdapter;
+import 'support/app_services_fixture.dart';
 
 class _Client extends RaftClient {
   _Client(MessageAdapter adapter)
@@ -290,7 +291,7 @@ void main() {
         api.routes['GET /channels/inbox'] = (_) => _window([
           serverHasIt ? _row('c1', 'm7', 7, 3) : _row('c1', 'm6', 6, 2),
         ]);
-        final store = SourceActivityUnreadStore(w);
+        final store = w.activityUnread..start();
         client.ingress.add(const RaftEvent('rooms:joined', null));
         await _drain(tester);
         expect(store.totalUnreadCount, 2);
@@ -340,7 +341,7 @@ void main() {
       addTearDown(w.dispose);
       api.routes['GET /channels/inbox'] = (_) =>
           _window([_row('c1', 'm6', 6, 2)]);
-      final store = SourceActivityUnreadStore(w);
+      final store = w.activityUnread..start();
       client.ingress.add(const RaftEvent('rooms:joined', null));
       await _drain(tester);
       final before = _inbox(api).length;
@@ -376,7 +377,7 @@ void main() {
         api.routes['GET /channels/inbox'] = (_) => _window([
           serverHasIt ? _row('c1', 'm7', 7, 3) : _row('c1', 'm6', 6, 2),
         ]);
-        final store = SourceActivityUnreadStore(w);
+        final store = w.activityUnread..start();
         client.ingress.add(const RaftEvent('rooms:joined', null));
         await _drain(tester);
 
@@ -426,7 +427,7 @@ void main() {
         addTearDown(w.dispose);
         api.routes['GET /channels/inbox'] = (_) =>
             _window([_row('c1', 'm6', 6, 2)]);
-        final store = SourceActivityUnreadStore(w);
+        final store = w.activityUnread..start();
         client.ingress.add(const RaftEvent('rooms:joined', null));
         await _drain(tester);
         await tester.pump(const Duration(seconds: 6));
@@ -474,11 +475,13 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             theme: raftTheme(RaftFamily.elegant, dark: false),
-            home: WorkspaceView(
-              controller: w,
-              appearance: const RaftAppearance(light: RaftFamily.elegant),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: const RaftAppearance(light: RaftFamily.elegant),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );
@@ -572,8 +575,7 @@ void main() {
       api.routes['GET /channels/inbox'] = (_) => _window([
         serverHasIt ? _row('c1', 'm7', 7, 3) : _row('c1', 'm6', 6, 2),
       ]);
-      final owner = Object();
-      final store = w.acquireActivityUnread(owner);
+      final store = w.activityUnread..start();
       client.ingress.add(const RaftEvent('rooms:joined', null));
       await _drain(tester);
 
@@ -607,7 +609,7 @@ void main() {
       await to(1550);
       expect(store.totalUnreadCount, 3);
       expect(n.sent, hasLength(1), reason: 'shown once the window had it');
-      w.releaseActivityUnread(owner);
+      w.dispose();
     });
 
     testWidgets('is shown at the cap when the window never lists it', (
@@ -617,8 +619,7 @@ void main() {
       final (w, api, client, n, _) = await open(tester);
       api.routes['GET /channels/inbox'] = (_) =>
           _window([_row('c1', 'm6', 6, 2)]);
-      final owner = Object();
-      w.acquireActivityUnread(owner);
+      w.activityUnread.start();
       client.ingress.add(const RaftEvent('rooms:joined', null));
       await _drain(tester);
 
@@ -637,7 +638,7 @@ void main() {
       expect(n.sent, isEmpty, reason: 'still waiting for the window');
       await to(1600);
       expect(n.sent, hasLength(1), reason: 'never held past the cap');
-      w.releaseActivityUnread(owner);
+      w.dispose();
       // Three checks of the alert, plus the convergence reads.
       expect(
         api.calls
@@ -670,8 +671,7 @@ void main() {
       final (w, api, client, n, _) = await open(tester);
       api.routes['GET /channels/inbox'] = (_) =>
           _window([_row('c1', 'm6', 6, 2)]);
-      final owner = Object();
-      w.acquireActivityUnread(owner);
+      w.activityUnread.start();
       client.ingress.add(const RaftEvent('rooms:joined', null));
       await _drain(tester);
       client.ingress.add(const RaftEvent('notification:push', push));
@@ -681,7 +681,7 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
       await _drain(tester);
       expect(n.sent, isEmpty);
-      w.releaseActivityUnread(owner);
+      w.dispose();
     });
   });
 }

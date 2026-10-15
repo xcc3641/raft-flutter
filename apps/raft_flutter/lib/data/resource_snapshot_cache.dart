@@ -73,6 +73,37 @@ class ResourceSnapshot extends PageSnapshot {
 
   /// Other recently accepted filter/query windows, by request shape.
   final Map<String, ResourceViewWindow> viewWindows;
+
+  /// Rows and view windows changed. Every other accepted field stays.
+  ResourceSnapshot replaceRows({
+    required List<Map<String, dynamic>> rows,
+    required int? totalCount,
+    required Map<String, ResourceViewWindow> viewWindows,
+  }) => ResourceSnapshot(
+    identity: identity,
+    enabledActivity: enabledActivity,
+    view: view,
+    rows: rows,
+    hasMore: hasMore,
+    filter: filter,
+    activeActivityFilter: activeActivityFilter,
+    query: query,
+    channelId: channelId,
+    direction: direction,
+    totalCount: totalCount,
+    totalUnreadCount: totalUnreadCount,
+    activityAllCount: activityAllCount,
+    savedActivityTotal: savedActivityTotal,
+    activityGroups: activityGroups,
+    acceptedActivityItems: acceptedActivityItems,
+    savedActivityItems: savedActivityItems,
+    doneActivityItems: doneActivityItems,
+    channelAccess: channelAccess,
+    scrollOffset: scrollOffset,
+    viewWindows: viewWindows,
+    sectionScrollOffsets: sectionScrollOffsets,
+    inboxSerial: inboxSerial,
+  );
 }
 
 /// Tasks page snapshot (Source taskStore serverTasks + serverTaskPages):
@@ -109,10 +140,80 @@ class TaskSnapshot extends PageSnapshot {
   final Set<String> channels, creators, assignees, collapsed;
   final Map<String, Map<String, dynamic>> channelAccess;
   final double listOffset, boardOffset;
+
+  TaskSnapshot withRows(List<Map<String, dynamic>> rows, int? totalCount) =>
+      TaskSnapshot(
+        identity: identity,
+        layout: layout,
+        view: view,
+        filter: filter,
+        rows: rows,
+        cursor: cursor,
+        hasMore: hasMore,
+        totalCount: totalCount,
+        lanes: lanes,
+        laneCursors: laneCursors,
+        channels: channels,
+        creators: creators,
+        assignees: assignees,
+        collapsed: collapsed,
+        channelAccess: channelAccess,
+        listOffset: listOffset,
+        boardOffset: boardOffset,
+      );
+}
+
+/// Workspace Tasks window stored on the session cache.
+///
+/// The concrete window lives in another library. This type is the part the
+/// cache and the page both use, so neither side stores it as [Object].
+abstract interface class ServerTaskSlot {
+  TaskSnapshot get snapshot;
+  bool get needsRevalidate;
+  set needsRevalidate(bool value);
+  int get attached;
+  void attach();
+  void detach();
 }
 
 class ResourceSnapshotCache {
   final _snapshots = <String, PageSnapshot>{};
+
+  /// The workspace Tasks window. Not the `tasks` snapshot slot.
+  ServerTaskSlot? serverTasks;
+  void Function()? _releaseServerTasks;
+
+  /// [release] runs when this window is replaced or the cache is cleared.
+  void keepServerTasks(ServerTaskSlot window, void Function() release) {
+    if (!identical(serverTasks, window)) _releaseServerTasks?.call();
+    serverTasks = window;
+    _releaseServerTasks = release;
+  }
+
+  void dropServerTasks() {
+    final release = _releaseServerTasks;
+    _releaseServerTasks = null;
+    serverTasks = null;
+    release?.call();
+  }
+
+  /// The workspace Saved window. Not the `saved` snapshot slot.
+  ServerSavedSlot? serverSaved;
+  void Function()? _releaseServerSaved;
+
+  /// [release] runs when this window is replaced or the cache is cleared.
+  void keepServerSaved(ServerSavedSlot window, void Function() release) {
+    if (!identical(serverSaved, window)) _releaseServerSaved?.call();
+    serverSaved = window;
+    _releaseServerSaved = release;
+  }
+
+  void dropServerSaved() {
+    final release = _releaseServerSaved;
+    _releaseServerSaved = null;
+    serverSaved = null;
+    release?.call();
+  }
 
   /// The [T] snapshot of [section] accepted under exactly [identity], if any.
   T? read<T extends PageSnapshot>(String section, String identity) {
@@ -129,7 +230,24 @@ class ResourceSnapshotCache {
   void remove(String section) => _snapshots.remove(section);
 
   /// Server or account switch: no page snapshot survives.
-  void clear() => _snapshots.clear();
+  void clear() {
+    dropServerTasks();
+    dropServerSaved();
+    _snapshots.clear();
+  }
+}
+
+/// Workspace Saved window stored on the session cache.
+///
+/// The concrete window lives in another library. This type is the part the
+/// cache and the page both use, so neither side stores it as [Object].
+abstract interface class ServerSavedSlot {
+  ResourceSnapshot get snapshot;
+  bool get needsRevalidate;
+  set needsRevalidate(bool value);
+  int get attached;
+  void attach();
+  void detach();
 }
 
 /// A management or settings page's accepted projection (the page's own data

@@ -9,6 +9,7 @@ import 'package:raft_ui/test_themes.dart';
 
 import 'workspace_source_location_contract_test.dart' show pageFixture, frames;
 import 'workspace_shell_contract_test.dart' show retire;
+import 'support/app_services_fixture.dart';
 
 void main() {
   for (final (family, dark) in raftThemeMatrix([
@@ -49,12 +50,14 @@ void main() {
         await t.pumpWidget(
           MaterialApp(
             theme: raftTheme(family, dark: dark),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
-              onChooseServer: () {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+                onChooseServer: () {},
+              ),
             ),
           ),
         );
@@ -117,12 +120,14 @@ void main() {
         await t.pumpWidget(
           MaterialApp(
             theme: raftTheme(family, dark: dark),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
-              onChooseServer: () => choose++,
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+                onChooseServer: () => choose++,
+              ),
             ),
           ),
         );
@@ -175,12 +180,14 @@ void main() {
         await t.pumpWidget(
           MaterialApp(
             theme: raftTheme(family, dark: dark),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
-              onChooseServer: () {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+                onChooseServer: () {},
+              ),
             ),
           ),
         );

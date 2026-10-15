@@ -22,6 +22,7 @@ import 'chat_focus_receipt_test.dart' show paintedMessage;
 import 'message_presentation_test.dart' show MessageAdapter;
 import 'workspace_activity_activation_test.dart'
     show channelRow, threadRow, message;
+import 'support/app_services_fixture.dart';
 
 // Mounted Source 26f77ef contract ports. Every case uses the actual WorkspaceView,
 // its ResourceView/headers and local held transport. Model-only ports remain in
@@ -102,11 +103,13 @@ Future<void> mountPage(
   await tester.pumpWidget(
     MaterialApp(
       theme: raftTheme(family, dark: dark),
-      home: WorkspaceView(
-        controller: w,
-        appearance: RaftAppearance(light: family),
-        onAppearance: (_) async {},
-        onLogout: () async {},
+      home: withAppServices(
+        WorkspaceView(
+          controller: w,
+          appearance: RaftAppearance(light: family),
+          onAppearance: (_) async {},
+          onLogout: () async {},
+        ),
       ),
     ),
   );
@@ -838,6 +841,9 @@ void main() {
         );
         await frames(tester, () {});
         await tester.pumpWidget(const SizedBox());
+        // The fixture owns the session, which now outlives its last page.
+        // Retire it before the widget test checks for pending timers.
+        w.dispose();
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
       },

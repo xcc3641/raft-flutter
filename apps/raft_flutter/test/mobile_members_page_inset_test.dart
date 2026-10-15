@@ -11,6 +11,7 @@ import 'package:raft_ui/raft_ui.dart';
 
 import 'task_surface_test.dart' show flush;
 import 'workspace_channel_settings_identity_test.dart' show settingsFixture;
+import 'support/app_services_fixture.dart';
 
 const _dpr = 2.625;
 const _gesturePx = 48.0;
@@ -55,11 +56,13 @@ void main() {
           MaterialApp(
             theme: raftTheme(family, dark: dark),
             navigatorObservers: [PrivateRouteGuard()],
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );

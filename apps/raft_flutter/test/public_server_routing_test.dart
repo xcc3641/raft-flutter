@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_ui/raft_ui.dart' show RaftServerAccessDeniedPage;
+import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/features/auth_view.dart';
 import 'package:raft_flutter/features/global_server_selector.dart';
 import 'package:raft_flutter/features/public_server_view.dart';
@@ -55,6 +56,7 @@ Future<RootFixture> _signedOut(WidgetTester t, String path) async {
   };
   await t.pumpWidget(
     RaftApp(
+      services: const AppServices.updatesDisabledForTestOrPreview(),
       sessionStore: f.sessions,
       initialLocation: Uri(path: path),
       nativeContent: f.content,
@@ -107,6 +109,7 @@ void main() {
     // No route for the readback: the adapter answers 404.
     await t.pumpWidget(
       RaftApp(
+        services: const AppServices.updatesDisabledForTestOrPreview(),
         sessionStore: f.sessions,
         initialLocation: Uri(path: '/s/gone'),
         nativeContent: f.content,

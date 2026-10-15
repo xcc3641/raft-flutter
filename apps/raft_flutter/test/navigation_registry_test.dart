@@ -25,6 +25,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show MessageAdapter, fixture;
 import 'flutter_test_config.dart' show leakDebt;
+import 'support/app_services_fixture.dart';
 
 class _Notifications extends NativeNotificationService {
   _Notifications() {
@@ -281,12 +282,14 @@ void main() {
 
       Widget view() => MaterialApp(
         theme: raftTheme(RaftFamily.brutal),
-        home: WorkspaceView(
-          controller: w,
-          appearance: RaftAppearance(light: RaftFamily.brutal),
-          onAppearance: (_) async {},
-          onLogout: () async {},
-          notifications: notifications,
+        home: withAppServices(
+          WorkspaceView(
+            controller: w,
+            appearance: RaftAppearance(light: RaftFamily.brutal),
+            onAppearance: (_) async {},
+            onLogout: () async {},
+            notifications: notifications,
+          ),
         ),
       );
 
@@ -596,11 +599,13 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: raftTheme(RaftFamily.brutal),
-          home: WorkspaceView(
-            controller: w,
-            appearance: RaftAppearance(light: RaftFamily.brutal),
-            onAppearance: (_) async {},
-            onLogout: () async {},
+          home: withAppServices(
+            WorkspaceView(
+              controller: w,
+              appearance: RaftAppearance(light: RaftFamily.brutal),
+              onAppearance: (_) async {},
+              onLogout: () async {},
+            ),
           ),
         ),
       );
@@ -767,11 +772,13 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: raftTheme(RaftFamily.brutal),
-          home: WorkspaceView(
-            controller: w,
-            appearance: RaftAppearance(light: RaftFamily.brutal),
-            onAppearance: (_) async {},
-            onLogout: () async {},
+          home: withAppServices(
+            WorkspaceView(
+              controller: w,
+              appearance: RaftAppearance(light: RaftFamily.brutal),
+              onAppearance: (_) async {},
+              onLogout: () async {},
+            ),
           ),
         ),
       );

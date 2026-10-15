@@ -11,6 +11,7 @@ import 'package:raft_flutter/features/member_graph_view.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'support/app_services_fixture.dart';
 
 Map<String, dynamic> _human(String id, String name, List<String> channels) => {
   'type': 'human',
@@ -276,14 +277,16 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: raftTheme(RaftFamily.brutal),
-        home: WorkspaceView(
-          controller: w,
-          appearance: const RaftAppearance(
-            mode: ThemeMode.light,
-            light: RaftFamily.brutal,
+        home: withAppServices(
+          WorkspaceView(
+            controller: w,
+            appearance: const RaftAppearance(
+              mode: ThemeMode.light,
+              light: RaftFamily.brutal,
+            ),
+            onAppearance: (_) async {},
+            onLogout: () async {},
           ),
-          onAppearance: (_) async {},
-          onLogout: () async {},
         ),
       ),
     );

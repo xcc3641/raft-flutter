@@ -41,6 +41,7 @@ class _Client extends RaftClient {
   final client = _Client();
   final w = WorkspaceController(client)
     ..server = RaftRecord({'id': 's1', 'role': 'owner'});
+  w.activityUnread;
   addTearDown(w.dispose);
   return (w, client);
 }

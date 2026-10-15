@@ -14,6 +14,7 @@ import 'activity_incremental_refresh_test.dart'
         channelRow,
         shown,
         skeleton;
+import 'support/app_services_fixture.dart';
 
 /// The Activity badge and the Activity list read one accepted inbox window
 /// (Web's inboxStore): whatever lit the badge is already in the list when it
@@ -52,17 +53,20 @@ void main() {
             addTearDown(tester.view.reset);
             await tester.runAsync(() => client.login('fixture', 'fixture'));
             client.selectServer('s1');
+            w.activityUnread.start();
             w.loading = false;
             w.section = 'chat';
             w.inbox = [for (var i = 0; i < 5; i++) channelRow(i)];
             await tester.pumpWidget(
               MaterialApp(
                 theme: raftTheme(family, dark: dark),
-                home: WorkspaceView(
-                  controller: w,
-                  appearance: RaftAppearance(light: family),
-                  onAppearance: (_) async {},
-                  onLogout: () async {},
+                home: withAppServices(
+                  WorkspaceView(
+                    controller: w,
+                    appearance: RaftAppearance(light: family),
+                    onAppearance: (_) async {},
+                    onLogout: () async {},
+                  ),
                 ),
               ),
             );

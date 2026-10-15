@@ -751,7 +751,8 @@ void main() {
       w.servers = [w.server!];
       if (size.width >= 768) return SurfaceProbe(isOpen: () => true);
       // The state class is private; its switcher entry point is public.
-      final state = t.state(find.byType(WorkspaceView)) as dynamic;
+      final state =
+          t.state(find.byType(WorkspaceView)) as dynamic;
       unawaited(state.showWorkspaceSwitcher() as Future<void>);
       await frames(t, 25);
       return SurfaceProbe(

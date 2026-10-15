@@ -30,6 +30,7 @@ import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_flutter/platform/native_notifications.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../test/support/app_services_fixture.dart';
 
 /// Fixture client: identical lookup rule to web-runtime.mjs `lookup()`.
 class DesktopFixtureClient extends RaftClient {
@@ -253,18 +254,20 @@ void main() {
                 ),
               ),
             ),
-            home: WorkspaceView(
-              controller: w,
-              presentation: presentation,
-              appearance: RaftAppearance(
-                mode: dark ? ThemeMode.dark : ThemeMode.light,
-                light: family,
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                presentation: presentation,
+                appearance: RaftAppearance(
+                  mode: dark ? ThemeMode.dark : ThemeMode.light,
+                  light: family,
+                ),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+                // Production always passes the native service (main.dart:276);
+                // it gates the Settings > Notifications tab.
+                notifications: notifications,
               ),
-              onAppearance: (_) async {},
-              onLogout: () async {},
-              // Production always passes the native service (main.dart:276);
-              // it gates the Settings > Notifications tab.
-              notifications: notifications,
             ),
           ),
         );

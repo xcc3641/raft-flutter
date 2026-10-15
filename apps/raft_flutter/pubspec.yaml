@@ -49,7 +49,8 @@ dependencies:
   intl: ^0.20.3
   timezone: ^0.11.1
   html: ^0.15.6
-  media_kit: ^1.2.6
+  media_kit:
+    path: ../../packages/media_kit
   media_kit_video: ^2.0.1
   # Windows and Linux play through media_kit/libmpv with bundled FFmpeg (system
   # codecs there are optional or missing: Windows Media Foundation needs the

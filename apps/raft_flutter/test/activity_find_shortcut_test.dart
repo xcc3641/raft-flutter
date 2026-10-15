@@ -11,6 +11,7 @@ import 'package:raft_flutter/features/activity_find_scope.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'support/app_services_fixture.dart';
 
 // Activity find (Cmd+F on Apple platforms, Ctrl+F elsewhere) on the mounted
 // 1200x800 desktop WorkspaceView with activity_sidebar_inbox_v0 enabled, with
@@ -188,14 +189,16 @@ Future<(WorkspaceController, _Client)> _mount(
     w.dispose();
     await client.stream.close();
   });
-  final workspace = WorkspaceView(
-    controller: w,
-    appearance: RaftAppearance(
-      mode: dark ? ThemeMode.dark : ThemeMode.light,
-      light: family,
+  final workspace = withAppServices(
+    WorkspaceView(
+      controller: w,
+      appearance: RaftAppearance(
+        mode: dark ? ThemeMode.dark : ThemeMode.light,
+        light: family,
+      ),
+      onAppearance: (_) async {},
+      onLogout: () async {},
     ),
-    onAppearance: (_) async {},
-    onLogout: () async {},
   );
   await t.pumpWidget(
     MaterialApp(

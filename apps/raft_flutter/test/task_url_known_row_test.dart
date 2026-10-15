@@ -10,6 +10,7 @@ import 'package:raft_ui/raft_ui.dart';
 
 import 'task_surface_test.dart' show modernTask, taskRoutes, flush;
 import 'workspace_source_location_contract_test.dart' show pageFixture;
+import 'support/app_services_fixture.dart';
 
 void main() {
   for (final warm in [true, false]) {
@@ -45,11 +46,13 @@ void main() {
         await t.pumpWidget(
           MaterialApp(
             theme: raftTheme(RaftFamily.elegant),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: RaftFamily.elegant),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: RaftFamily.elegant),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );

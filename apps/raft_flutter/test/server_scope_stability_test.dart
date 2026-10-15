@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show MessageAdapter;
 import 'source_feedback_store_test.dart' as fb;
+import 'support/app_services_fixture.dart';
 
 /// Server-level data (agents, members, Saved total, live activity) belongs to
 /// the server identity, not the open channel: switching or joining channels
@@ -148,11 +149,13 @@ void main() {
       await t.pumpWidget(
         MaterialApp(
           theme: raftTheme(RaftFamily.elegant),
-          home: WorkspaceView(
-            controller: w,
-            appearance: const RaftAppearance(light: RaftFamily.elegant),
-            onAppearance: (_) async {},
-            onLogout: () async {},
+          home: withAppServices(
+            WorkspaceView(
+              controller: w,
+              appearance: const RaftAppearance(light: RaftFamily.elegant),
+              onAppearance: (_) async {},
+              onLogout: () async {},
+            ),
           ),
         ),
       );

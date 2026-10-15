@@ -9,6 +9,7 @@ import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:raft_ui/test_themes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'support/app_services_fixture.dart';
 
 const _agents = <Map<String, dynamic>>[
   {
@@ -120,11 +121,13 @@ void main() {
           await tester.pumpWidget(
             MaterialApp(
               theme: raftTheme(family, dark: dark),
-              home: WorkspaceView(
-                controller: w,
-                appearance: RaftAppearance(light: family),
-                onAppearance: (_) async {},
-                onLogout: () async {},
+              home: withAppServices(
+                WorkspaceView(
+                  controller: w,
+                  appearance: RaftAppearance(light: family),
+                  onAppearance: (_) async {},
+                  onLogout: () async {},
+                ),
               ),
             ),
           );

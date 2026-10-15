@@ -43,6 +43,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../parity_harness.dart';
 import 'screens/screen_fixture.dart';
+import '../../support/app_services_fixture.dart';
 
 final Map<String, ParityCase> screenCases = {
   'screens.auth.login.signing': _loginSigning,
@@ -287,11 +288,13 @@ final ParityCase _humanProfile = ParityCase(
 );
 
 Widget _workspaceView(ParityContext ctx, WorkspaceController w) =>
-    WorkspaceView(
-      controller: w,
-      appearance: RaftAppearance(light: ctx.family),
-      onAppearance: (_) async {},
-      onLogout: () async {},
+    withAppServices(
+      WorkspaceView(
+        controller: w,
+        appearance: RaftAppearance(light: ctx.family),
+        onAppearance: (_) async {},
+        onLogout: () async {},
+      ),
     );
 
 final ParityCase _serverDangerModal = ParityCase(

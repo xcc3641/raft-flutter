@@ -16,12 +16,13 @@ import 'message_context_transition_test.dart' show row;
 import 'task_surface_test.dart' show modernTask, taskRoutes, flush;
 import 'workspace_task_parent_hydration_test.dart'
     show parentFixture, ParentAdapter, ParentClient;
+import 'support/app_services_fixture.dart';
 
 const tabId = 'thread:c1:task-parent';
 final threadTab = find.byKey(const ValueKey('editor-tab-$tabId'));
 final channelTab = find.byKey(const ValueKey('editor-tab-c1'));
 final badge = find.byKey(const ValueKey('message-task-task-parent'));
-final channelBody = find.byKey(const ValueKey('grid-conversation-c1-0'));
+final channelBody = find.byKey(const ValueKey('grid-conversation-c1'));
 final threadBody = find.byKey(const ValueKey('grid-thread-$tabId'));
 Finder editor(Finder host) => find.descendant(
   of: host,
@@ -70,11 +71,13 @@ Future<WorkspaceGridViewState> mountGrid(
   await t.pumpWidget(
     MaterialApp(
       theme: raftTheme(family, dark: dark),
-      home: WorkspaceView(
-        controller: w,
-        appearance: RaftAppearance(light: family),
-        onAppearance: (_) async {},
-        onLogout: () async {},
+      home: withAppServices(
+        WorkspaceView(
+          controller: w,
+          appearance: RaftAppearance(light: family),
+          onAppearance: (_) async {},
+          onLogout: () async {},
+        ),
       ),
     ),
   );

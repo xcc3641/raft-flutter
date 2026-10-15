@@ -20,6 +20,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/data/device_preferences.dart';
 import 'package:raft_flutter/data/mobile_tabbar_preferences.dart';
 import 'package:raft_flutter/data/source_time_formatter.dart';
@@ -200,6 +201,7 @@ Future<void> main() async {
   final dir = await Directory.systemTemp.createTemp('raft-attach-only-');
   runApp(
     app.RaftApp(
+      services: const AppServices.updatesDisabledForTestOrPreview(),
       sessionStore: client.sessionStore,
       createClient: (_, _, _) => client,
       initialLocation: Uri(path: '/s/lab/channel/ps'),

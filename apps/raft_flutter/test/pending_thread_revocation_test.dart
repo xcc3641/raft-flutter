@@ -201,7 +201,7 @@ void main() {
           expect(w.replies, isEmpty);
           expect(w.ledger.messages('thread-1'), isEmpty);
           expect(w.visibleIds.containsKey('thread-1'), false);
-          expect(w.drafts.containsKey('thread:parent'), false);
+          expect(w.drafts['thread:parent'], 'Private parent draft');
           expect(w.readState.state('s1', 'alice', 'thread-1'), isNull);
           expect(threadAttachment.cancel.cancelled, true);
           expect(
@@ -216,7 +216,11 @@ void main() {
               'draft',
               'thread:parent',
             ),
-            isNull,
+            allOf(
+              containsPair('text', 'Private parent draft'),
+              containsPair('files', isEmpty),
+              containsPair('shareTokens', isNull),
+            ),
           );
           final frontiers = await db.read(
             w.client.origin,
@@ -276,7 +280,11 @@ void main() {
               'draft',
               'thread:parent',
             ),
-            isNull,
+            allOf(
+              containsPair('text', 'Private parent draft'),
+              containsPair('files', isEmpty),
+              containsPair('shareTokens', isNull),
+            ),
           );
         } else {
           expect(w.presentedThreadParent?.id, 'parent');

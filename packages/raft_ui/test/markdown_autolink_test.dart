@@ -40,6 +40,30 @@ String _flat(String source) => _render(source)
     )
     .replaceAll(RegExp(r'^<p>|</p>$'), '');
 
+/// Fastest of [samples] parses, each repeating [repeats] times.
+/// One sample lies when the machine stalls mid-measurement; the minimum
+/// does not. Repeats keep a short input above one scheduling slice.
+int _fastestParse(String source, {int samples = 5, int repeats = 1}) {
+  var best = 1 << 62;
+  for (var i = 0; i < samples; i++) {
+    final watch = Stopwatch()..start();
+    for (var n = 0; n < repeats; n++) {
+      _parse(source);
+    }
+    watch.stop();
+    final micros = watch.elapsedMicroseconds;
+    if (micros < best) best = micros;
+  }
+  return best;
+}
+
+/// How many parses put [source] near 10ms on its fastest probe.
+int _repeatsFor(String source) {
+  final probe = _fastestParse(source, samples: 3);
+  if (probe >= 10000) return 1;
+  return (10000 / (probe == 0 ? 1 : probe)).ceil().clamp(1, 200);
+}
+
 List<({String text, String href})> _links(List<md.Node> nodes) => [
   for (final n in nodes)
     if (n is md.Element) ...[
@@ -238,20 +262,18 @@ void main() {
   test('a long CJK paragraph with many URLs parses in linear time', () {
     final unit =
         '链接：https://docs.raft.build/p/xyz?a=1&b=2。再看（www.example.com/a）和https://a.com/x_(y)，好。';
-    final text = List.filled(3000, unit).join();
-    final big = Stopwatch()..start();
-    final links = _links(_parse(text));
-    big.stop();
-    expect(links, hasLength(9000));
-    // Twice the input must not cost much more than twice the time.
-    final small = Stopwatch()..start();
-    _parse(List.filled(1500, unit).join());
-    small.stop();
-    expect(big.elapsedMilliseconds, lessThan(5000));
+    const copies = 1500;
     expect(
-      big.elapsedMicroseconds,
-      lessThan(small.elapsedMicroseconds * 5 + 50000),
+      _links(_parse(List.filled(copies, unit).join())),
+      hasLength(copies * 3),
     );
+    // 4x input. Quadratic would be about 16x. Keep the fastest sample of
+    // each size so a stall on one run is not the measurement.
+    final n = _fastestParse(List.filled(copies, unit).join());
+    final four = _fastestParse(List.filled(copies * 4, unit).join());
+    print('autolink-linear N=$n us 4N=$four us');
+    expect(n, greaterThan(0));
+    expect(four, lessThan(n * 8), reason: '4N ${four}us, N ${n}us');
   });
 
   test('pathological runs do not blow up', () {
@@ -263,9 +285,20 @@ void main() {
       'https://${',' * 50000}好',
       '${'https://，' * 20000}',
     ]) {
-      final w = Stopwatch()..start();
-      _parse(s);
-      expect(w.elapsedMilliseconds, lessThan(3000), reason: s.substring(0, 20));
+      final quarter = s.substring(0, s.length ~/ 4);
+      final repeats = _repeatsFor(quarter);
+      final n = _fastestParse(quarter, repeats: repeats);
+      final four = _fastestParse(s, repeats: repeats);
+      print(
+        'autolink-pathological ${s.substring(0, 12)} '
+        'x$repeats N=$n us 4N=$four us',
+      );
+      expect(n, greaterThan(0), reason: s.substring(0, 20));
+      expect(
+        four,
+        lessThan(n * 8),
+        reason: '${s.substring(0, 20)} 4N ${four}us, N ${n}us',
+      );
     }
   });
 

@@ -37,6 +37,7 @@ import 'support/close_registry_viewers.dart';
 import 'support/close_runner.dart';
 import 'support/close_support.dart';
 import 'support/close_surface.dart';
+import 'support/app_services_fixture.dart';
 
 class _Client extends RaftClient {
   _Client()
@@ -147,11 +148,13 @@ Future<WorkspaceController> openTask(
   await t.pumpWidget(
     MaterialApp(
       theme: raftTheme(RaftFamily.elegant),
-      home: WorkspaceView(
-        controller: w,
-        appearance: RaftAppearance(light: RaftFamily.elegant),
-        onAppearance: (_) async {},
-        onLogout: () async {},
+      home: withAppServices(
+        WorkspaceView(
+          controller: w,
+          appearance: RaftAppearance(light: RaftFamily.elegant),
+          onAppearance: (_) async {},
+          onLogout: () async {},
+        ),
       ),
     ),
   );

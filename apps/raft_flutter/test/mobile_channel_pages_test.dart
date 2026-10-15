@@ -12,6 +12,7 @@ import 'package:raft_ui/test_themes.dart';
 
 import 'workspace_channel_settings_identity_test.dart' show settingsFixture;
 import 'task_surface_test.dart' show flush;
+import 'support/app_services_fixture.dart';
 
 void main() {
   for (final (family, dark) in raftThemeMatrix([
@@ -50,11 +51,13 @@ void main() {
           MaterialApp(
             theme: raftTheme(family, dark: dark),
             navigatorObservers: [PrivateRouteGuard()],
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );

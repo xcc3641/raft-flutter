@@ -10,6 +10,7 @@ import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_flutter/platform/local_network_access.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'support/app_services_fixture.dart';
 
 class _Client extends RaftClient {
   _Client()
@@ -101,14 +102,16 @@ void main() {
           MaterialApp(
             theme: raftTheme(RaftFamily.elegant),
             builder: (context, child) => RaftToastHost(child: child!),
-            home: WorkspaceView(
-              controller: w,
-              appearance: const RaftAppearance(
-                mode: ThemeMode.light,
-                light: RaftFamily.elegant,
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: const RaftAppearance(
+                  mode: ThemeMode.light,
+                  light: RaftFamily.elegant,
+                ),
+                onAppearance: (_) async {},
+                onLogout: () async {},
               ),
-              onAppearance: (_) async {},
-              onLogout: () async {},
             ),
           ),
         );

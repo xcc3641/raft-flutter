@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import 'control_typography.dart';
@@ -114,14 +117,14 @@ class RaftActivityScopeToolbar extends StatelessWidget {
                     ],
                   ),
                 ),
-                Row(
-                  spacing: 8,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    if (search != null) Expanded(child: search!),
-                    SizedBox(
-                      width: 116,
-                      height: 32,
+                LayoutBuilder(
+                  builder: (context, constraints) => _ActivityToolbarControls(
+                    width: constraints.maxWidth,
+                    direction: Directionality.of(context),
+                    search: search,
+                    read: markAllRead,
+                    sort: SizedBox(
+                      height: RaftScaled.extent(context, 32),
                       child: RaftSelectField<String>(
                         value: sort,
                         label: raftText(context, 'Sort Activity'),
@@ -134,7 +137,11 @@ class RaftActivityScopeToolbar extends StatelessWidget {
                           }.entries)
                             DropdownMenuItem(
                               value: entry.key,
-                              child: Text(raftText(context, entry.value)),
+                              child: Text(
+                                raftText(context, entry.value),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                         ],
                         onChanged: (value) {
@@ -142,8 +149,7 @@ class RaftActivityScopeToolbar extends StatelessWidget {
                         },
                       ),
                     ),
-                    ?markAllRead,
-                  ],
+                  ),
                 ),
               ],
             )
@@ -158,6 +164,152 @@ class RaftActivityScopeToolbar extends StatelessWidget {
             ),
     );
   }
+}
+
+// Measure the action itself: its localized label, recipe padding and text
+// scaling determine the space available for search and sort. A render layout
+// keeps the same input element when it moves between one and two rows.
+class _ActivityToolbarControls extends MultiChildRenderObjectWidget {
+  _ActivityToolbarControls({
+    required this.width,
+    required this.direction,
+    required Widget sort,
+    Widget? search,
+    Widget? read,
+  }) : hasSearch = search != null,
+       hasRead = read != null,
+       super(
+         children: [
+           search ?? const SizedBox.shrink(),
+           sort,
+           read ?? const SizedBox.shrink(),
+         ],
+       );
+
+  final double width;
+  final TextDirection direction;
+  final bool hasSearch, hasRead;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderActivityToolbarControls(this);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderActivityToolbarControls renderObject,
+  ) {
+    renderObject.config = this;
+    renderObject.markNeedsLayout();
+  }
+}
+
+class _ActivityToolbarParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderActivityToolbarControls extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _ActivityToolbarParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _ActivityToolbarParentData> {
+  _RenderActivityToolbarControls(this.config);
+  _ActivityToolbarControls config;
+  static const _gap = 8.0, _minimumSearch = 64.0, _minimumSort = 64.0;
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _ActivityToolbarParentData) {
+      child.parentData = _ActivityToolbarParentData();
+    }
+  }
+
+  Size _layout(
+    BoxConstraints constraints,
+    ChildLayouter layoutChild, {
+    bool position = false,
+  }) {
+    final search = firstChild!, sort = childAfter(search)!, read = lastChild!;
+    final width = constraints.constrainWidth(config.width);
+    final readSize = layoutChild(read, BoxConstraints(maxWidth: width));
+    final available = math.max(
+      0.0,
+      width - readSize.width - (config.hasRead ? _gap : 0),
+    );
+    final wrapped =
+        config.hasSearch && available < _minimumSearch + _gap + _minimumSort;
+    final sortWidth = math.min(
+      116.0,
+      config.hasSearch && !wrapped
+          ? available - _minimumSearch - _gap
+          : available,
+    );
+    final sortSize = layoutChild(
+      sort,
+      BoxConstraints.tightFor(width: sortWidth),
+    );
+    final searchSize = layoutChild(
+      search,
+      BoxConstraints.tightFor(
+        width: config.hasSearch
+            ? wrapped
+                  ? width
+                  : available - sortWidth - _gap
+            : 0,
+      ),
+    );
+    final controlsHeight = math.max(readSize.height, sortSize.height);
+    final height = config.hasSearch
+        ? wrapped
+              ? searchSize.height + _gap + controlsHeight
+              : math.max(searchSize.height, controlsHeight)
+        : controlsHeight;
+    if (position) {
+      void place(RenderBox child, Size size, double x, double y) {
+        (child.parentData! as _ActivityToolbarParentData).offset = Offset(
+          config.direction == TextDirection.rtl ? width - x - size.width : x,
+          y,
+        );
+      }
+
+      final top = wrapped
+          ? searchSize.height + _gap
+          : (height - controlsHeight) / 2;
+      place(
+        search,
+        searchSize,
+        0,
+        wrapped ? 0 : (height - searchSize.height) / 2,
+      );
+      place(
+        sort,
+        sortSize,
+        available - sortSize.width,
+        top + (controlsHeight - sortSize.height) / 2,
+      );
+      place(
+        read,
+        readSize,
+        width - readSize.width,
+        top + (controlsHeight - readSize.height) / 2,
+      );
+    }
+    return constraints.constrain(Size(width, height));
+  }
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) =>
+      _layout(constraints, ChildLayoutHelper.dryLayoutChild);
+
+  @override
+  void performLayout() {
+    size = _layout(constraints, ChildLayoutHelper.layoutChild, position: true);
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      defaultPaint(context, offset);
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      defaultHitTestChildren(result, position: position);
 }
 
 class _ActivityViewStrip extends StatefulWidget {
@@ -520,7 +672,7 @@ class RaftActivitySearchInput extends StatelessWidget {
         return KeyEventResult.ignored;
       },
       child: SizedBox(
-        height: 32,
+        height: RaftScaled.extent(context, 32),
         child: RaftTextInput(
           controller: controller,
           focusNode: focusNode,

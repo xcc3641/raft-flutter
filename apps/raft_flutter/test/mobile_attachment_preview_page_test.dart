@@ -16,6 +16,7 @@ import 'package:raft_ui/test_themes.dart';
 import 'workspace_source_location_contract_test.dart' show pageFixture;
 import 'message_context_transition_test.dart' show row;
 import 'task_surface_test.dart' show flush;
+import 'support/app_services_fixture.dart';
 
 class _Client extends RaftClient {
   _Client()
@@ -108,11 +109,13 @@ void main() {
             'data': {'kind': 'text', 'text': 'Fixture document'},
           };
           final router = RaftAppRouter(
-            home: (_) => WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: (_) => withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
             onLocation: (_) async {},
             onRootBack: () async => false,
@@ -329,11 +332,13 @@ Future<(WorkspaceController, RaftAppRouter)> _desktopChat(
     'data': {'kind': 'text', 'text': 'Fixture document'},
   };
   final router = RaftAppRouter(
-    home: (_) => WorkspaceView(
-      controller: w,
-      appearance: RaftAppearance(light: RaftFamily.elegant),
-      onAppearance: (_) async {},
-      onLogout: () async {},
+    home: (_) => withAppServices(
+      WorkspaceView(
+        controller: w,
+        appearance: RaftAppearance(light: RaftFamily.elegant),
+        onAppearance: (_) async {},
+        onLogout: () async {},
+      ),
     ),
     onLocation: (_) async {},
     onRootBack: () async => false,

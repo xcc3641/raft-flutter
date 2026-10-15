@@ -15,6 +15,7 @@ import 'package:raft_ui/test_themes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'parity/parity_harness.dart' show loadParityFonts;
+import 'support/app_services_fixture.dart';
 
 // Persistent selected state of the desktop Activity master list, driven
 // through the mounted WorkspaceView: the row whose item is open in the
@@ -188,14 +189,16 @@ Future<(WorkspaceController, _Client)> _mount(
     w.dispose();
     await client.stream.close();
   });
-  final workspace = WorkspaceView(
-    controller: w,
-    appearance: RaftAppearance(
-      mode: dark ? ThemeMode.dark : ThemeMode.light,
-      light: family,
+  final workspace = withAppServices(
+    WorkspaceView(
+      controller: w,
+      appearance: RaftAppearance(
+        mode: dark ? ThemeMode.dark : ThemeMode.light,
+        light: family,
+      ),
+      onAppearance: (_) async {},
+      onLogout: () async {},
     ),
-    onAppearance: (_) async {},
-    onLogout: () async {},
   );
   await t.pumpWidget(
     MaterialApp(

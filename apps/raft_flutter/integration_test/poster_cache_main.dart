@@ -23,6 +23,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/data/attachment_disk_cache.dart';
 import 'package:raft_flutter/data/device_preferences.dart';
 import 'package:raft_flutter/data/mobile_tabbar_preferences.dart';
@@ -445,6 +446,7 @@ Future<void> main() async {
   });
   runApp(
     app.RaftApp(
+      services: const AppServices.updatesDisabledForTestOrPreview(),
       sessionStore: client.sessionStore,
       createClient: (_, _, _) => client,
       initialLocation: Uri(path: '/s/lab/channel/a'),

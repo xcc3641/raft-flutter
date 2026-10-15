@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show fixture;
 import 'workspace_activity_activation_test.dart' show channelRow, message;
+import 'support/app_services_fixture.dart';
 
 /// Activity click C on every width where the shell is multi-column (>= 768,
 /// foldables included, flag evaluated off or on): first click previews and the
@@ -97,11 +98,13 @@ void main() {
             await t.pumpWidget(
               MaterialApp(
                 theme: raftTheme(RaftFamily.elegant),
-                home: WorkspaceView(
-                  controller: w,
-                  appearance: const RaftAppearance(),
-                  onAppearance: (_) async {},
-                  onLogout: () async {},
+                home: withAppServices(
+                  WorkspaceView(
+                    controller: w,
+                    appearance: const RaftAppearance(),
+                    onAppearance: (_) async {},
+                    onLogout: () async {},
+                  ),
                 ),
               ),
             );

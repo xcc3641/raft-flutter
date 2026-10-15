@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:raft_flutter/data/source_activity_unread_store.dart';
 import 'package:raft_flutter/features/resource_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 
@@ -23,7 +22,7 @@ void main() {
     (tester) async {
       await tester.runAsync(() => client.login('fixture', 'fixture'));
       client.selectServer('s1');
-      final store = SourceActivityUnreadStore(w);
+      final store = w.activityUnread..start();
       addTearDown(store.dispose);
       await tester.pumpWidget(
         MaterialApp(
@@ -33,9 +32,13 @@ void main() {
               controller: w,
               section: 'activity',
               onMessage: (_, _) async {},
-              onActivityWindowAccepted: (window) {
+              onActivityWindowAccepted: (window, {firstPage = false}) {
                 if (window != null) {
-                  store.acceptWindow(window, scope: store.scope);
+                  store.acceptWindow(
+                    window,
+                    scope: store.scope,
+                    firstPage: firstPage,
+                  );
                 }
               },
             ),

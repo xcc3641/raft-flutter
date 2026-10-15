@@ -13,6 +13,7 @@ import 'desktop_footer_sidebar_page_test.dart' show shellFonts;
 import 'workspace_shell_contract_test.dart' show retire;
 import 'workspace_source_location_contract_test.dart'
     show pageFixture, frames, LocalNotifications;
+import 'support/app_services_fixture.dart';
 
 // Source SettingsPanel.tsx:7911–7940 keeps the transparent Elegant header on
 // the Panel's canvas-muted surface and the content on a separate panel surface.
@@ -52,12 +53,14 @@ void main() {
               theme: raftTheme(family, dark: dark),
               home: RepaintBoundary(
                 key: key,
-                child: WorkspaceView(
-                  controller: w,
-                  appearance: RaftAppearance(light: family),
-                  onAppearance: (_) async {},
-                  onLogout: () async {},
-                  notifications: notifications,
+                child: withAppServices(
+                  WorkspaceView(
+                    controller: w,
+                    appearance: RaftAppearance(light: family),
+                    onAppearance: (_) async {},
+                    onLogout: () async {},
+                    notifications: notifications,
+                  ),
                 ),
               ),
             ),

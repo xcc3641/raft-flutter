@@ -12,6 +12,7 @@ import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show MessageAdapter, fixture;
+import 'support/app_services_fixture.dart';
 
 /// Sidebar.tsx row menus on the phone Home list: a long press opens the same
 /// anchored popover as Web's right click (`useLongPress`, 500 ms), and every
@@ -131,11 +132,13 @@ void main() {
         // main.dart installs the app error mapper above every route.
         builder: (_, child) =>
             RaftErrorScope(format: raftAppErrorFormatter, child: child!),
-        home: WorkspaceView(
-          controller: w,
-          appearance: RaftAppearance(light: RaftFamily.brutal),
-          onAppearance: (_) async {},
-          onLogout: () async {},
+        home: withAppServices(
+          WorkspaceView(
+            controller: w,
+            appearance: RaftAppearance(light: RaftFamily.brutal),
+            onAppearance: (_) async {},
+            onLogout: () async {},
+          ),
         ),
       ),
     );

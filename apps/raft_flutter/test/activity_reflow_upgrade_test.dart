@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show fixture;
 import 'workspace_activity_activation_test.dart' show channelRow, message;
+import 'support/app_services_fixture.dart';
 
 void main() {
   for (final (family, dark) in raftThemeMatrix([
@@ -61,11 +62,13 @@ void main() {
         await t.pumpWidget(
           MaterialApp(
             theme: raftTheme(family, dark: dark),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );

@@ -34,6 +34,7 @@ class ActivityClient extends RaftClient {
   final ingress = StreamController<RaftEvent>.broadcast(sync: true);
   final posts = <String>[];
   final bodies = <dynamic>[];
+  final responses = <String, Object>{};
   @override
   Stream<RaftEvent> get events => ingress.stream;
   @override
@@ -59,6 +60,7 @@ class ActivityClient extends RaftClient {
     }
     posts.add('$method $path');
     bodies.add(data);
+    if (responses.containsKey('$method $path')) return responses['$method $path'];
     return <String, dynamic>{};
   }
 

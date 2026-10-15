@@ -21,6 +21,7 @@ import 'package:raft_ui/raft_ui.dart';
 import '../parity_harness.dart';
 import 'ext_shell.dart' show shellWorkspace;
 import 'thread_messages/chat_stage.dart' show ParityIdentities;
+import '../../support/app_services_fixture.dart';
 
 Map<String, dynamic> _scene(ParityContext ctx) {
   final scenes = Map<String, dynamic>.from(
@@ -89,15 +90,17 @@ class _HostState extends State<_Host> {
   }
 
   @override
-  Widget build(BuildContext context) => WorkspaceView(
-    controller: w,
-    presentation: presentation,
-    appearance: RaftAppearance(
-      mode: widget.ctx.dark ? ThemeMode.dark : ThemeMode.light,
-      light: widget.ctx.family,
+  Widget build(BuildContext context) => withAppServices(
+    WorkspaceView(
+      controller: w,
+      presentation: presentation,
+      appearance: RaftAppearance(
+        mode: widget.ctx.dark ? ThemeMode.dark : ThemeMode.light,
+        light: widget.ctx.family,
+      ),
+      onAppearance: (_) async {},
+      onLogout: () async {},
     ),
-    onAppearance: (_) async {},
-    onLogout: () async {},
   );
 }
 

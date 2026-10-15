@@ -38,6 +38,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../parity_harness.dart';
 import 'thread_composer/fake_workspace.dart';
+import '../../support/app_services_fixture.dart';
 
 final Map<String, ParityCase> threadComposerCases = {
   'components.thread.composer.empty': _composer(draft: ''),
@@ -434,10 +435,12 @@ class _HeaderHostState extends State<_HeaderHost> {
   }
 
   @override
-  Widget build(BuildContext context) => WorkspaceView(
-    controller: w,
-    appearance: RaftAppearance(light: widget.family),
-    onAppearance: (_) async {},
-    onLogout: () async {},
+  Widget build(BuildContext context) => withAppServices(
+    WorkspaceView(
+      controller: w,
+      appearance: RaftAppearance(light: widget.family),
+      onAppearance: (_) async {},
+      onLogout: () async {},
+    ),
   );
 }

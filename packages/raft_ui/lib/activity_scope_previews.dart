@@ -11,6 +11,12 @@ Widget activityCompactScopePreview() => RaftActivityScopeToolbar(
   onView: (_) {},
   onOpenSwitcher: () {},
   onSort: (_) {},
+  markAllRead: RaftTextButton(
+    label: 'Mark all read',
+    visualHeight: 32,
+    minimumTargetSize: 32,
+    onPressed: () {},
+  ),
 );
 
 @RaftPreviews('Activity mobile views', size: Size(390, 70))

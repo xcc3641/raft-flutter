@@ -2175,7 +2175,7 @@
    "status": "covered",
    "webEntry": "channelStore.ensureChannel (ChannelRoute, notification click, search result) | readReceiptStore.fetchScope (background)",
    "gate": "",
-   "flutterEntry": "workspace_controller.dart channel refresh / main.dart deep link resolve",
+   "flutterEntry": "workspace_controller.dart channel refresh / app_root.dart deep link resolve",
    "flutterRefs": [
     {
      "file": "apps/raft_flutter/lib/data/workspace_controller.dart",
@@ -13273,10 +13273,10 @@
    "status": "covered",
    "webEntry": "InviteAcceptPage (/join/:token and /invite) loadInfo",
    "gate": "public, no login needed to preview",
-   "flutterEntry": "main.dart invite route loadInfo -> invite_accept_view.dart (InviteJoined, Sign in / Create account / Go to Raft)",
+   "flutterEntry": "app_root.dart invite route loadInfo -> invite_accept_view.dart (InviteJoined, Sign in / Create account / Go to Raft)",
    "flutterRefs": [
     {
-     "file": "apps/raft_flutter/lib/main.dart",
+     "file": "apps/raft_flutter/lib/app_root.dart",
      "needle": "/auth/invite-info"
     },
     {
@@ -13417,10 +13417,10 @@
    "status": "covered",
    "webEntry": "InviteAcceptPage 'Join' / 'Accept'",
    "gate": "signed in; seat limit and agreement checks",
-   "flutterEntry": "main.dart invite accept -> invite_accept_view.dart",
+   "flutterEntry": "app_root.dart invite accept -> invite_accept_view.dart",
    "flutterRefs": [
     {
-     "file": "apps/raft_flutter/lib/main.dart",
+     "file": "apps/raft_flutter/lib/app_root.dart",
      "needle": "/auth/accept-invite"
     },
     {
@@ -13834,7 +13834,7 @@
      "needle": "class InviteJoined"
     },
     {
-     "file": "apps/raft_flutter/lib/main.dart",
+     "file": "apps/raft_flutter/lib/app_root.dart",
      "needle": "onGoToRaft: clearInvite"
     }
    ],
@@ -14942,7 +14942,7 @@
    "status": "missing",
    "webEntry": "utils/browserDocumentTitle.ts getServerRouteDocumentTitle/useBrowserDocumentTitle; desktopServerTitle.ts (window.setServerTitle capability)",
    "gate": "",
-   "flutterEntry": "main.dart MaterialApp title is a fixed 'Raft'; no window-title updates found (docs/desktop-title-bar.md approves no title text in the strip, which is a visual decision, not the OS window title)",
+   "flutterEntry": "app_root.dart MaterialApp title is a fixed 'Raft'; no window-title updates found (docs/desktop-title-bar.md approves no title text in the strip, which is a visual decision, not the OS window title)",
    "justification": "",
    "impact": "Desktop users with several windows/alt-tab and screen-reader users; low, cosmetic.",
    "size": "S",
@@ -15016,14 +15016,14 @@
    "status": "covered",
    "webEntry": "hooks/useLastLocationResume.ts (slock:last-location, 24h), hooks/useTabRouteMemory.ts readServerSurfaceMemory (slock:serverSurface:v1:{slug}), store/serverPersistenceRegistry.ts last server slug",
    "gate": "",
-   "flutterEntry": "main.dart persists raft.server-surface.{origin}.{user}.last and per-server surface and restores both after sign-in",
+   "flutterEntry": "app_root.dart persists raft.server-surface.{origin}.{user}.last and per-server surface and restores both after sign-in",
    "flutterRefs": [
     {
-     "file": "apps/raft_flutter/lib/main.dart",
+     "file": "apps/raft_flutter/lib/app_root.dart",
      "needle": "raft.server-surface."
     },
     {
-     "file": "apps/raft_flutter/lib/main.dart",
+     "file": "apps/raft_flutter/lib/app_root.dart",
      "needle": "Future<Uri?> serverSurfaceMemory(RaftRecord server)"
     }
    ],
@@ -15079,14 +15079,14 @@
    "status": "covered",
    "webEntry": "i18n/locale.ts SUPPORTED_LOCALES [en, zh-cn], LOCALE_LABELS, LocaleProvider.tsx, Settings > Language & Region 'Display language'",
    "gate": "",
-   "flutterEntry": "account_settings.dart displayLanguage select (auto, en, zh-cn); main.dart displayLocale() with supportedLocales [en, zh-CN]",
+   "flutterEntry": "account_settings.dart displayLanguage select (auto, en, zh-cn); app_root.dart displayLocale() with supportedLocales [en, zh-CN]",
    "flutterRefs": [
     {
      "file": "apps/raft_flutter/lib/features/account_settings.dart",
      "needle": "'zh-cn': '简体中文'"
     },
     {
-     "file": "apps/raft_flutter/lib/main.dart",
+     "file": "apps/raft_flutter/lib/app_root.dart",
      "needle": "supportedLocales: const [Locale('en'), Locale('zh', 'CN')]"
     }
    ],
@@ -15583,10 +15583,10 @@
    "status": "covered",
    "webEntry": "App.tsx ServerSelectionPage / ServerRedirect / community join routing",
    "gate": "",
-   "flutterEntry": "main.dart discoverServers(): /servers path, last server, joinCommunityFromRoute, public non-member route, access-denied page",
+   "flutterEntry": "app_root.dart discoverServers(): /servers path, last server, joinCommunityFromRoute, public non-member route, access-denied page",
    "flutterRefs": [
     {
-     "file": "apps/raft_flutter/lib/main.dart",
+     "file": "apps/raft_flutter/lib/app_root.dart",
      "needle": "Future<void> discoverServers() async"
     }
    ],

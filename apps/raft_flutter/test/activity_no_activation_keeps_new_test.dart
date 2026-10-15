@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'activity_open_clears_new_test.dart' show activityRow;
 import 'message_presentation_test.dart' show fixture;
+import 'support/app_services_fixture.dart';
 
 void main() {
   for (final (family, dark) in [
@@ -90,11 +91,13 @@ void main() {
           await tester.pumpWidget(
             MaterialApp(
               theme: raftTheme(family, dark: dark),
-              home: WorkspaceView(
-                controller: w,
-                appearance: RaftAppearance(light: family),
-                onAppearance: (_) async {},
-                onLogout: () async {},
+              home: withAppServices(
+                WorkspaceView(
+                  controller: w,
+                  appearance: RaftAppearance(light: family),
+                  onAppearance: (_) async {},
+                  onLogout: () async {},
+                ),
               ),
             ),
           );
@@ -241,11 +244,13 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: raftTheme(RaftFamily.elegant),
-          home: WorkspaceView(
-            controller: w,
-            appearance: RaftAppearance(light: RaftFamily.elegant),
-            onAppearance: (_) async {},
-            onLogout: () async {},
+          home: withAppServices(
+            WorkspaceView(
+              controller: w,
+              appearance: RaftAppearance(light: RaftFamily.elegant),
+              onAppearance: (_) async {},
+              onLogout: () async {},
+            ),
           ),
         ),
       );
@@ -326,11 +331,13 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: raftTheme(RaftFamily.elegant),
-          home: WorkspaceView(
-            controller: w,
-            appearance: RaftAppearance(light: RaftFamily.elegant),
-            onAppearance: (_) async {},
-            onLogout: () async {},
+          home: withAppServices(
+            WorkspaceView(
+              controller: w,
+              appearance: RaftAppearance(light: RaftFamily.elegant),
+              onAppearance: (_) async {},
+              onLogout: () async {},
+            ),
           ),
         ),
       );

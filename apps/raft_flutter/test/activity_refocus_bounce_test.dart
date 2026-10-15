@@ -11,6 +11,7 @@ import '../integration_test/message_scroll_performance_test.dart'
     show longMessage;
 import 'chat_focus_receipt_test.dart' show contextRows, paintedMessage;
 import 'message_presentation_test.dart' show fixture;
+import 'support/app_services_fixture.dart';
 
 /// Desktop Activity: open a channel message, scroll far back (older pages
 /// load), activate the same Activity row again. The re-positioning must never
@@ -124,11 +125,13 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             theme: raftTheme(family, dark: dark),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );

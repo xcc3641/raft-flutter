@@ -16,6 +16,7 @@ import 'flutter_test_config.dart' show leakDebt;
 
 import '../integration_test/desktop_screens_test.dart'
     show DesktopFixtureClient;
+import 'support/app_services_fixture.dart';
 
 /// Idle-frame guard. Once a screen has loaded and its transitions finished,
 /// nothing may keep asking for frames: no scheduled frame, no running ticker,
@@ -54,16 +55,18 @@ void main() {
           delay: const Duration(milliseconds: 600),
           child: child!,
         ),
-        home: WorkspaceView(
-          controller: w,
-          presentation: PersonalPresentationStore(desktop: false),
-          appearance: const RaftAppearance(
-            mode: ThemeMode.light,
-            light: RaftFamily.elegant,
+        home: withAppServices(
+          WorkspaceView(
+            controller: w,
+            presentation: PersonalPresentationStore(desktop: false),
+            appearance: const RaftAppearance(
+              mode: ThemeMode.light,
+              light: RaftFamily.elegant,
+            ),
+            onAppearance: (_) async {},
+            onLogout: () async {},
+            notifications: NativeNotificationService(),
           ),
-          onAppearance: (_) async {},
-          onLogout: () async {},
-          notifications: NativeNotificationService(),
         ),
       ),
     );

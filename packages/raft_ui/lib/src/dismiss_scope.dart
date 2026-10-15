@@ -86,10 +86,10 @@ class _RaftDismissScopeState extends State<RaftDismissScope> {
 /// A menu, select or picker lives in an `OverlayPortal`, so it is not a route
 /// and Android Back would pop the page beneath it (or leave the app). While
 /// this widget is mounted (build it only while the popup is open) it adds a
-/// `LocalHistoryEntry` to the enclosing route: the navigator pops local
-/// history before it consults any `PopScope`, so Back lands on [onDismiss]
-/// once and the route stays put. Closing the popup any other way removes the
-/// entry again.
+/// `LocalHistoryEntry` to the enclosing route. Back consumes that entry and
+/// calls [onDismiss] once without leaving the page. A route that vetoes Back
+/// with `PopScope` must call [raftDismissTopPopup] itself. Closing the popup
+/// any other way removes the entry again.
 ///
 /// An `OverlayEntry` builds above the routes; pass the opener's context as
 /// [routeContext] there.
@@ -150,15 +150,38 @@ class _RaftBackDismissState extends State<RaftBackDismiss> {
     if (route == null || !route.isCurrent) return;
     final entry = LocalHistoryEntry(
       onRemove: () {
-        if (_entry == null) return;
+        final wasAttached = _entry != null;
         _entry = null;
         // Back popped the entry: the popup closes itself.
-        if (!_gone) widget.onDismiss();
+        if (wasAttached && !_gone) widget.onDismiss();
+        _notifyNavigation();
       },
     );
     _route = route;
     _entry = entry;
     route.addLocalHistoryEntry(entry);
+    _notifyNavigation();
+  }
+
+  void _notifyNavigation() {
+    // Local history changes rebuild the route but do not notify an ancestor
+    // NavigatorPopHandler. Publish them without waiting for an unrelated
+    // Navigator rebuild; its listener also accounts for other routes.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final route = _route;
+      final context = route?.subtreeContext;
+      if (route == null ||
+          !route.isCurrent ||
+          context == null ||
+          !context.mounted) {
+        return;
+      }
+      NavigationNotification(
+        canHandlePop:
+            route.willHandlePopInternally ||
+            route.popDisposition == RoutePopDisposition.doNotPop,
+      ).dispatch(context);
+    });
   }
 
   @override

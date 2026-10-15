@@ -15,6 +15,7 @@ import 'package:raft_ui/raft_ui.dart';
 
 import 'workspace_shell_contract_test.dart' show retire;
 import 'workspace_source_location_contract_test.dart' show pageFixture, frames;
+import 'support/app_services_fixture.dart';
 
 /// Web server avatar: `POST /servers/:id/avatar` (multipart `avatar`), then the
 /// response's `avatarUrl` is upserted into the server rows.
@@ -277,12 +278,14 @@ void main() {
     await t.pumpWidget(
       MaterialApp(
         theme: raftTheme(RaftFamily.brutal),
-        home: WorkspaceView(
-          controller: wf,
-          appearance: RaftAppearance(light: RaftFamily.brutal),
-          onAppearance: (_) async {},
-          onLogout: () async {},
-          onChooseServer: () {},
+        home: withAppServices(
+          WorkspaceView(
+            controller: wf,
+            appearance: RaftAppearance(light: RaftFamily.brutal),
+            onAppearance: (_) async {},
+            onLogout: () async {},
+            onChooseServer: () {},
+          ),
         ),
       ),
     );

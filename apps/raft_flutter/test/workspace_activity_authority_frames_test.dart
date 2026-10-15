@@ -15,6 +15,7 @@ import 'chat_focus_receipt_test.dart' show paintedMessage;
 import 'message_presentation_test.dart' show fixture, MessageAdapter;
 import 'workspace_activity_activation_test.dart'
     show threadRow, channelRow, message;
+import 'support/app_services_fixture.dart';
 
 Future<void> _dispatch(WidgetTester tester, {VoidCallback? afterFrame}) async {
   for (var i = 0; i < 12; i++) {
@@ -83,11 +84,13 @@ class _MountedActivity {
     await tester.pumpWidget(
       MaterialApp(
         theme: raftTheme(family, dark: dark),
-        home: WorkspaceView(
-          controller: w,
-          appearance: const RaftAppearance(),
-          onAppearance: (_) async {},
-          onLogout: () async {},
+        home: withAppServices(
+          WorkspaceView(
+            controller: w,
+            appearance: const RaftAppearance(),
+            onAppearance: (_) async {},
+            onLogout: () async {},
+          ),
         ),
       ),
     );

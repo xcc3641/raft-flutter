@@ -118,6 +118,7 @@ void main() {
         client = _Client();
         w = WorkspaceController(client, ownsClient: false)
           ..server = RaftRecord({'id': 's', 'role': 'owner'});
+        w.activityUnread.start();
         notifications = _Notifications(platform);
         desktop = DesktopInboxNotifications(
           notifications: notifications,

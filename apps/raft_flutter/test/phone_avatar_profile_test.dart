@@ -9,6 +9,7 @@ import 'package:raft_ui/raft_ui.dart';
 
 import 'message_presentation_test.dart' show MessageAdapter;
 import 'workspace_source_location_contract_test.dart' show pageFixture;
+import 'support/app_services_fixture.dart';
 
 /// Web `MessageItem` -> `SenderAvatar` button -> `openProfile`: on a phone the
 /// profile (`profile=` slot) is a full-page overlay in the real
@@ -159,11 +160,13 @@ void main() {
     await t.pumpWidget(
       MaterialApp(
         theme: raftTheme(RaftFamily.elegant),
-        home: WorkspaceView(
-          controller: w,
-          appearance: RaftAppearance(light: RaftFamily.elegant),
-          onAppearance: (_) async {},
-          onLogout: () async {},
+        home: withAppServices(
+          WorkspaceView(
+            controller: w,
+            appearance: RaftAppearance(light: RaftFamily.elegant),
+            onAppearance: (_) async {},
+            onLogout: () async {},
+          ),
         ),
       ),
     );

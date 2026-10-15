@@ -1,6 +1,8 @@
 import importlib.machinery
 import importlib.util
 import json
+import contextlib
+import io
 from pathlib import Path
 import tempfile
 import threading
@@ -54,6 +56,29 @@ class PartitionTests(unittest.TestCase):
     def test_never_more_shards_than_files(self):
         self.assertEqual(len(check.partition(['a', 'b'], {}, 8)), 2)
         self.assertEqual(check.partition([], {}, 4), [{'files': [], 'weight': 0.0}])
+
+
+class StructurePreflightTests(unittest.TestCase):
+    def test_growth_stops_before_assets_or_tests_and_records_a_failed_run(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            with unittest.mock.patch.object(check, 'local', folder), \
+                    unittest.mock.patch.object(check.subprocess, 'check_output', return_value='hash\n'), \
+                    unittest.mock.patch.object(check, 'discover_tests', return_value=[]), \
+                    unittest.mock.patch.object(check, 'history_weights', return_value={}), \
+                    unittest.mock.patch.object(check, 'run_logged', side_effect=[0, 1]) as run, \
+                    unittest.mock.patch.object(check, 'clear_unit_test_assets') as assets, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                result = check.run_gate({}, unittest.mock.Mock(), 0)
+            self.assertFalse(result['ok'])
+            self.assertEqual(result['failed_checks'], ['structure-audit.txt'])
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(run.call_args.args[0][-1], '--check')
+            self.assertTrue(any(str(arg).endswith('structure-audit') for arg in run.call_args.args[0]))
+            assets.assert_not_called()
+            receipt = json.loads((folder / 'engineering-run.json').read_text())
+            self.assertFalse(receipt['completed'])
+            self.assertEqual(receipt['shards'], [])
 
 
 class ParallelismTests(unittest.TestCase):

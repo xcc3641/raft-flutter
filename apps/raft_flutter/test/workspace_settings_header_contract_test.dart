@@ -12,6 +12,7 @@ import 'package:raft_ui/test_themes.dart';
 import 'desktop_footer_sidebar_page_test.dart' show shellFonts;
 import 'workspace_shell_contract_test.dart' show mountShell, retire;
 import 'workspace_source_location_contract_test.dart' show pageFixture, frames;
+import 'support/app_services_fixture.dart';
 
 // Actual Source MainLayout SettingsRoute -> SettingsPanel + Sidebar Settings
 // composition. Its content header begins in the top row of the desktop pane;
@@ -104,11 +105,13 @@ void main() {
         await t.pumpWidget(
           MaterialApp(
             theme: raftTheme(nextFamily),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: nextFamily),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: nextFamily),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );

@@ -79,6 +79,7 @@ import 'workspace_browser.dart';
 import 'public_avatar_url.dart';
 import 'management_support.dart' show managementLaunch;
 import 'sender_avatar_projection.dart';
+import '../platform/app_services.dart';
 import '../platform/app_update.dart';
 import '../platform/native_sharing.dart';
 import '../platform/native_notifications.dart';
@@ -105,12 +106,9 @@ class WorkspaceView extends StatefulWidget {
     this.onSwitchServer,
     this.mobileRoutePage = false,
     this.mobileHost,
-    this.appUpdate,
   });
   final WorkspaceController controller;
 
-  /// Native update check: red dot on the Settings entry and About row.
-  final AppUpdateService? appUpdate;
   final bool mobileRoutePage;
   final Object? mobileHost;
   final NativeNotificationService? notifications;
@@ -140,6 +138,7 @@ class WorkspaceView extends StatefulWidget {
 
 class _WorkspaceViewState extends State<WorkspaceView>
     with WidgetsBindingObserver, KeyboardInsetLogger<WorkspaceView> {
+  AppUpdateService? get appUpdate => AppServicesScope.of(context).appUpdate;
   /// Sidebar.tsx `joinedChannelsOnly` display preference of the Channels
   /// section (per workspace session here; Web persists it per server).
   bool joinedChannelsOnly = false;
@@ -224,8 +223,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
   _MobileNavigationSelection get mobileNavigationSelection =>
       _mobileNavigationSelection ??= _MobileNavigationSelection(this);
 
-  _WorkspaceViewState? get mobileHost =>
-      widget.mobileHost as _WorkspaceViewState?;
+  _WorkspaceViewState? get mobileHost => widget.mobileHost as _WorkspaceViewState?;
   TaskSurfaceSeed? taskSeed;
   void openTaskSurface(
     Map<String, dynamic> row,
@@ -696,8 +694,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
     HardwareKeyboard.instance.addHandler(globalShortcut);
     w.addListener(syncMobileAppBadge);
     syncMobileAppBadge();
-    activityUnread = w.acquireActivityUnread(this)
-      ..addListener(activityUnreadChanged);
+    activityUnread = w.activityUnread..addListener(activityUnreadChanged);
     serverUnread = mobileHost?.serverUnread ?? SourceServerUnreadStore(w);
     serverUnread.addListener(serverUnreadChanged);
     serverMenu.addListener(serverMenuChanged);
@@ -741,11 +738,8 @@ class _WorkspaceViewState extends State<WorkspaceView>
 
   late WorkspaceModeStore workspaceMode;
   final gridKey = GlobalKey<WorkspaceGridViewState>();
-  int classicEditorRevision = 0;
-  bool lastGridActive = false;
   bool gridEntered = false;
   Size? retainedGridSize;
-  String? classicDraftScope, classicDraftAtEntry;
   bool get gridActive => workspaceMode.active(MediaQuery.sizeOf(context).width);
 
   void syncBridgeFlag() {
@@ -839,9 +833,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
       w.addListener(syncMobileAppBadge);
       syncMobileAppBadge();
       activityUnread.removeListener(activityUnreadChanged);
-      oldWidget.controller.releaseActivityUnread(this);
-      activityUnread = w.acquireActivityUnread(this)
-        ..addListener(activityUnreadChanged);
+      activityUnread = w.activityUnread..addListener(activityUnreadChanged);
       serverMenu.close();
       if (mobileHost == null) {
         oldWidget.controller.resumes.removeListener(appResumed);
@@ -992,7 +984,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
     _ownedMobileTabbar?.dispose();
     _ownedRailSide?.dispose();
     activityUnread.removeListener(activityUnreadChanged);
-    w.releaseActivityUnread(this);
     if (mobileHost == null) w.resumes.removeListener(appResumed);
     w.removeListener(syncServerMenu);
     serverMenu.removeListener(serverMenuChanged);
@@ -1372,20 +1363,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
       final attentionOwner = activityUnread;
       final attentionScope = attentionOwner.scope;
       final attentionEpoch = attentionOwner.authorityEpoch;
-      if (!lastGridActive && gridActive) {
-        classicDraftScope = w.draftScope();
-        classicDraftAtEntry = w.drafts[classicDraftScope] ?? '';
-      }
-      if (lastGridActive && !gridActive) {
-        gridKey.currentState?.flushDrafts();
-        // Hydrate only an editor whose own text changed in the grid. A draft
-        // in a different tab must not reset the retained classic cursor.
-        if (classicDraftScope == w.draftScope() &&
-            classicDraftAtEntry != (w.drafts[classicDraftScope] ?? '')) {
-          classicEditorRevision++;
-        }
-      }
-      lastGridActive = gridActive;
       if (gridActive) gridEntered = true;
       if (!workspaceMode.enabled || !workspaceMode.showCard) {
         gridEntered = false;
@@ -1561,7 +1538,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
                   wide &&
                   activityFlag.masterDetail(MediaQuery.sizeOf(context).width),
               onActivityWindowAccepted: route == 'activity'
-                  ? (window) {
+                  ? (window, {firstPage = false}) {
                       if (!identical(attentionOwner, activityUnread)) return;
                       if (window == null) {
                         attentionOwner.deny(
@@ -1573,6 +1550,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
                           window,
                           scope: attentionScope,
                           authorityEpoch: attentionEpoch,
+                          firstPage: firstPage,
                         );
                       }
                     }
@@ -1949,9 +1927,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
                                                 ),
                                         Expanded(
                                           child: KeyedSubtree(
-                                            key: ValueKey(
-                                              'classic-editor-$classicEditorRevision',
-                                            ),
+                                            key: const ValueKey('classic-editor'),
                                             child: content,
                                           ),
                                         ),
@@ -2904,9 +2880,9 @@ class _WorkspaceViewState extends State<WorkspaceView>
       onPressed: () =>
           wide ? select('settings') : selectRailDestination('settings'),
       glyph: RaftGlyph.settings,
-      attention: widget.appUpdate?.hasUnseen ?? false,
+      attention: appUpdate?.hasUnseen ?? false,
     );
-    final update = widget.appUpdate;
+    final update = appUpdate;
     return update == null
         ? action()
         : ListenableBuilder(
@@ -3221,7 +3197,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
       selectedId: w.navigation.mobileRootTabOf(w.location) ?? 'chat',
       tabs: mobileTabIds,
       activityUnread: activityUnread,
-      appUpdate: widget.appUpdate,
+      appUpdate: appUpdate,
       // Native tab bars consume the system inset once, outside the nav recipe.
       bottomInset: 0,
       onSelected: (tab) => selectMobileTab(tab, scope),
@@ -4045,7 +4021,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
   Widget modeCard() => WorkspaceModeSettingsCard(
     controller: w,
     store: workspaceMode,
-    onBeforeChange: () => gridKey.currentState?.flushDrafts(),
   );
 
   Widget settings() {
@@ -4082,44 +4057,46 @@ class _WorkspaceViewState extends State<WorkspaceView>
     }
     final content = KeyedSubtree(
       key: const Key('workspace-account-settings'),
-      child: WorkspaceSettings(
-        key: ValueKey(
-          'workspace-account-settings-${w.client.generation}-${w.client.user?.id}-${w.server?.id}-${w.server?.string('role')}',
+      child: Builder(
+        builder: (serviceContext) => WorkspaceSettings(
+          key: ValueKey(
+            'workspace-account-settings-${w.client.generation}-${w.client.user?.id}-${w.server?.id}-${w.server?.string('role')}',
+          ),
+          controller: w,
+          initialTab: tab,
+          appUpdate: AppServicesScope.of(serviceContext).appUpdate,
+          workspaceModeCard: modeCard(),
+          appearance: widget.appearance,
+          onAppearance: (appearance) => widget.onAppearance(appearance),
+          presentation: presentation,
+          notifications: widget.notifications,
+          onLogout: widget.onLogout,
+          mobileRoot: w.location.settingsPath.isEmpty,
+          mobileResetRevision:
+              mobileSettingsRevision + (mobileHost?.mobileSettingsRevision ?? 0),
+          mobileTabbar: mobileTabbar,
+          railSide: railSideStore,
+          onMobileLocationChanged: (tab) {
+            if (!mounted || scope != mobileAuthority) return;
+            if (tab == null) {
+              dismissPanel();
+              return;
+            }
+            final current = w.location;
+            w.navigation.navigate(
+              RaftLocation.at(
+                serverSlug: current.serverSlug,
+                route: RaftRoute.settings,
+                settingsPath: [WorkspaceNavigation.settingsRouteSlug(tab)],
+              ),
+              kind: RaftNavigationKind.push,
+            );
+            w.notifyListeners();
+          },
+          providerEnabled: providerEnabled,
+          bridgeEnabled: bridgeEnabled,
+          labsEnabled: labsEnabled,
         ),
-        controller: w,
-        initialTab: tab,
-        appUpdate: widget.appUpdate,
-        workspaceModeCard: modeCard(),
-        appearance: widget.appearance,
-        onAppearance: (appearance) => widget.onAppearance(appearance),
-        presentation: presentation,
-        notifications: widget.notifications,
-        onLogout: widget.onLogout,
-        mobileRoot: w.location.settingsPath.isEmpty,
-        mobileResetRevision:
-            mobileSettingsRevision + (mobileHost?.mobileSettingsRevision ?? 0),
-        mobileTabbar: mobileTabbar,
-        railSide: railSideStore,
-        onMobileLocationChanged: (tab) {
-          if (!mounted || scope != mobileAuthority) return;
-          if (tab == null) {
-            dismissPanel();
-            return;
-          }
-          final current = w.location;
-          w.navigation.navigate(
-            RaftLocation.at(
-              serverSlug: current.serverSlug,
-              route: RaftRoute.settings,
-              settingsPath: [WorkspaceNavigation.settingsRouteSlug(tab)],
-            ),
-            kind: RaftNavigationKind.push,
-          );
-          w.notifyListeners();
-        },
-        providerEnabled: providerEnabled,
-        bridgeEnabled: bridgeEnabled,
-        labsEnabled: labsEnabled,
       ),
     );
     accountSettingsInputs = tab == 'account' ? inputs : null;

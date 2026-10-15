@@ -12,6 +12,7 @@ import 'package:raft_ui/test_themes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show fixture;
+import 'support/app_services_fixture.dart';
 
 const threadRow = <String, dynamic>{
   'kind': 'thread',
@@ -128,11 +129,13 @@ void main() {
           await tester.pumpWidget(
             MaterialApp(
               theme: raftTheme(family, dark: dark),
-              home: WorkspaceView(
-                controller: w,
-                appearance: RaftAppearance(light: family),
-                onAppearance: (_) async {},
-                onLogout: () async {},
+              home: withAppServices(
+                WorkspaceView(
+                  controller: w,
+                  appearance: RaftAppearance(light: family),
+                  onAppearance: (_) async {},
+                  onLogout: () async {},
+                ),
               ),
             ),
           );
@@ -310,11 +313,13 @@ void main() {
           await tester.pumpWidget(
             MaterialApp(
               theme: raftTheme(family, dark: dark),
-              home: WorkspaceView(
-                controller: w,
-                appearance: RaftAppearance(light: family),
-                onAppearance: (_) async {},
-                onLogout: () async {},
+              home: withAppServices(
+                WorkspaceView(
+                  controller: w,
+                  appearance: RaftAppearance(light: family),
+                  onAppearance: (_) async {},
+                  onLogout: () async {},
+                ),
               ),
             ),
           );

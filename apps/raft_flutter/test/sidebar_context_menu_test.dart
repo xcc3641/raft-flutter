@@ -8,6 +8,7 @@ import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show MessageAdapter, fixture;
+import 'support/app_services_fixture.dart';
 
 /// Sidebar.tsx context menus: channel / DM rows, section headers, the sidebar
 /// surface and the section dialog, with the Source actions
@@ -59,11 +60,13 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: raftTheme(RaftFamily.elegant),
-        home: WorkspaceView(
-          controller: w,
-          appearance: RaftAppearance(light: RaftFamily.elegant),
-          onAppearance: (_) async {},
-          onLogout: () async {},
+        home: withAppServices(
+          WorkspaceView(
+            controller: w,
+            appearance: RaftAppearance(light: RaftFamily.elegant),
+            onAppearance: (_) async {},
+            onLogout: () async {},
+          ),
         ),
       ),
     );

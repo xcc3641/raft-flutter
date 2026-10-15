@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 /// Mounted Web request contracts, pinned to source 26f77ef.
 class ResourceSender {
   const ResourceSender(this.id, this.type, this.label, {this.handle = ''});
@@ -34,6 +36,17 @@ class TaskResourceFilters {
 }
 
 class ResourceFilters {
+  /// A view keeps its identity while the loaded page grows. Filters and
+  /// ordering remain part of it so another view cannot seed this window.
+  static String viewKey(String path, Map<String, dynamic> query) => jsonEncode([
+    path,
+    {
+      for (final entry in query.entries)
+        if (!['limit', 'offset', 'cursor'].contains(entry.key))
+          entry.key: entry.value,
+    },
+  ]);
+
   String? channelId;
   ResourceSender? sender;
   final Set<String> scopes = {};

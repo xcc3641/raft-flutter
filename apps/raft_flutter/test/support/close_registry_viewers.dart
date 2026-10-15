@@ -262,7 +262,7 @@ const viewerSurfaces = <CloseSurface>[
     phone: {_back, _sys},
     fold: {_back, _sys},
     desktop: {_back, _sys},
-    files: ['lib/features/incoming_share_picker.dart', 'lib/main.dart'],
+    files: ['lib/features/incoming_share_picker.dart', 'lib/app_root.dart'],
     status: 'no-web',
   ),
   CloseSurface(

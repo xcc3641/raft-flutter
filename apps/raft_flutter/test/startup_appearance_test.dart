@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_client/raft_client.dart';
+import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/data/device_preferences.dart';
 import 'package:raft_flutter/main.dart';
 import 'package:raft_flutter/platform/native_sharing.dart';
@@ -35,6 +36,7 @@ Future<MaterialApp> _firstBuilt(
   // exactly the tree the first frame would paint.
   await t.pumpWidget(
     RaftApp(
+      services: const AppServices.updatesDisabledForTestOrPreview(),
       sessionStore: sessions ?? f.sessions,
       nativeContent: f.content,
       nativeSharing: NativeSharing(supported: false),

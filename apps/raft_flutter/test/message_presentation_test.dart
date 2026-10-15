@@ -15,6 +15,7 @@ import 'package:raft_flutter/features/private_route_guard.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_ui/test_themes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'support/app_services_fixture.dart';
 
 class MessageAdapter implements HttpClientAdapter {
   final calls = <RequestOptions>[];
@@ -677,11 +678,13 @@ void main() {
                 ),
               ),
               Expanded(
-                child: WorkspaceView(
-                  controller: w,
-                  appearance: const RaftAppearance(),
-                  onAppearance: (_) async {},
-                  onLogout: () async {},
+                child: withAppServices(
+                  WorkspaceView(
+                    controller: w,
+                    appearance: const RaftAppearance(),
+                    onAppearance: (_) async {},
+                    onLogout: () async {},
+                  ),
                 ),
               ),
             ],

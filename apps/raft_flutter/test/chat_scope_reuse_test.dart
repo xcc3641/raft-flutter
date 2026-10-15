@@ -8,6 +8,7 @@ import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show fixture;
+import 'support/app_services_fixture.dart';
 
 void main() {
   for (final adaptive in [false, true]) {
@@ -83,12 +84,14 @@ void main() {
         Widget application(bool thread) => MaterialApp(
           theme: raftTheme(RaftFamily.elegant),
           home: adaptive
-              ? WorkspaceView(
+              ? withAppServices(
+                WorkspaceView(
                   controller: w,
                   appearance: const RaftAppearance(),
                   onAppearance: (_) async {},
                   onLogout: () async {},
-                )
+                ),
+              )
               : Scaffold(
                   body: RaftChatView(
                     controller: w,

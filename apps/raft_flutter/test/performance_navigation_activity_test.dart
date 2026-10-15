@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
+import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/features/mobile_workspace_pages.dart';
 import 'package:raft_flutter/main.dart' as app;
 import 'package:raft_flutter/platform/native_sharing.dart';
@@ -53,6 +54,7 @@ void main() {
       final content = LabNavigationContent();
       await tester.pumpWidget(
         app.RaftApp(
+          services: const AppServices.updatesDisabledForTestOrPreview(),
           sessionStore: client.sessionStore,
           createClient: (_, _, _) => client,
           initialLocation: Uri(path: '/s/lab'),

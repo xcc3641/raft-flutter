@@ -9,6 +9,7 @@ import 'package:raft_flutter/features/desktop_directory_view.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'support/app_services_fixture.dart';
 
 class _Client extends RaftClient {
   _Client()
@@ -175,14 +176,16 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             theme: raftTheme(family, dark: dark),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(
-                mode: dark ? ThemeMode.dark : ThemeMode.light,
-                light: family,
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(
+                  mode: dark ? ThemeMode.dark : ThemeMode.light,
+                  light: family,
+                ),
+                onAppearance: (_) async {},
+                onLogout: () async {},
               ),
-              onAppearance: (_) async {},
-              onLogout: () async {},
             ),
           ),
         );
@@ -284,11 +287,13 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: raftTheme(RaftFamily.brutal),
-          home: WorkspaceView(
-            controller: w,
-            appearance: const RaftAppearance(),
-            onAppearance: (_) async {},
-            onLogout: () async {},
+          home: withAppServices(
+            WorkspaceView(
+              controller: w,
+              appearance: const RaftAppearance(),
+              onAppearance: (_) async {},
+              onLogout: () async {},
+            ),
           ),
         ),
       );
@@ -345,11 +350,13 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: raftTheme(RaftFamily.brutal),
-          home: WorkspaceView(
-            controller: w,
-            appearance: const RaftAppearance(),
-            onAppearance: (_) async {},
-            onLogout: () async {},
+          home: withAppServices(
+            WorkspaceView(
+              controller: w,
+              appearance: const RaftAppearance(),
+              onAppearance: (_) async {},
+              onLogout: () async {},
+            ),
           ),
         ),
       );

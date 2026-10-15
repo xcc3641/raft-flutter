@@ -16,6 +16,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import random
 import re
 import shutil
 import subprocess
@@ -30,7 +31,7 @@ sys.path.insert(0, str(ROOT / 'tool'))
 from android_app import SafetyError, flutter_guard, protected_state
 BUDGET_120 = 1e6 / 120  # 8333 us
 BUDGET_60 = 1e6 / 60    # 16667 us
-SCENARIO_ORDER = ['steady-scroll', 'fling', 'image-scroll', 'older-drag', 'scrollbar-drag', 'scrollbar-sweep', 'arrival-scrolled-up', 'resize', 'idle-final',
+SCENARIO_ORDER = ['steady-scroll', 'fling', 'image-scroll', 'older-drag', 'scrollbar-drag', 'scrollbar-sweep', 'arrival-scrolled-up', 'resize', 'keyboard', 'idle-final',
                   'open-cold', 'open-warm', 'channel-switch', 'thread-open', 'section-drag', 'section-back-drag', 'section-cycle']
 ROW_KINDS = ['plain', 'markdown', 'code', 'image', 'attachments', 'reactions', 'thread-summary', 'task']
 
@@ -58,6 +59,177 @@ def frames_in(record, t0, t1):
     return [f for f in record.get('frames', []) if t0 <= f['b'] < t1]
 
 
+def _work(frames, key):
+    """Per-frame count summary. None when any frame omitted it.
+
+    `mean` is the reference figure. The sum and max move when the frame
+    count moves, so compare does not treat them as a gate.
+    """
+    if not frames or any(key not in frame for frame in frames):
+        return None
+    values = [frame[key] for frame in frames]
+    return {'sum': int(sum(values)), 'max': int(max(values)), 'mean': sum(values) / len(values)}
+
+
+def _attach_thread_time(frames, attribution):
+    """Copy per-frame timeline tdur onto frame rows. Returns the presence note."""
+    if not attribution:
+        return None
+    by_b = {item['b']: item for item in attribution.get('frameThreadTime') or [] if 'b' in item}
+    for frame in frames:
+        item = by_b.get(frame.get('b'))
+        if not item:
+            continue
+        for key in ('uiCpuUs', 'rasterCpuUs', 'uiEvent', 'rasterEvent'):
+            if item.get(key) is not None:
+                frame[key] = item[key]
+    return attribution.get('threadTime')
+
+
+def _present_dist(frames, key):
+    values = [frame[key] for frame in frames if key in frame]
+    if not values:
+        return None
+    return {'p50': pct(values, .5), 'p90': pct(values, .9), 'max': max(values), 'frames': len(values)}
+
+
+def _thread_time_line(keyboard, thread_time):
+    """One line: per-frame timeline CPU next to the wall-clock median."""
+    def side(cpu_key, wall_key, label):
+        cpu = keyboard.get(cpu_key)
+        wall = keyboard.get(wall_key)
+        cpu_s = '-' if not cpu else f"{ms(cpu['p50'])} ms"
+        wall_s = '-' if wall is None else f'{ms(wall)} ms'
+        return f'{label} median {cpu_s} CPU, {wall_s} wall'
+
+    def coverage(prefix):
+        events = thread_time.get(f'{prefix}Events')
+        if events is None:
+            return f'{prefix} tdur was not collected'
+        with_tdur = thread_time.get(f'{prefix}EventsWithTdur', 0)
+        names = thread_time.get(f'{prefix}Threads') or []
+        if not names and events == 0:
+            return f'no {prefix} thread in the timeline'
+        if events and with_tdur == 0:
+            tts = thread_time.get(f'{prefix}EventsWithTts', 0)
+            if tts:
+                return f'{prefix} thread has {events} events, no tdur, {tts} with tts'
+            return f'{prefix} thread has {events} events and no tdur'
+        return f'{prefix} events {with_tdur}/{events} with tdur'
+
+    if thread_time.get('collected') is False:
+        return 'timeline was not collected, so tdur is absent.'
+    return f"{side('uiCpuUs', 'uiWallP50Us', 'UI')}; {side('rasterCpuUs', 'rasterWallP50Us', 'raster')}. {coverage('ui')}. {coverage('raster')}."
+
+
+def _proc_cpu_line(proc):
+    """Whole-scene kernel CPU. Names the source so it is not read as timeline tts."""
+    if not proc or proc.get('collected') is False:
+        if proc and proc.get('error'):
+            return f"scene CPU from /proc schedstat was not collected ({proc['error']})."
+        return None
+
+    def side(key, label):
+        item = proc.get(key) or {}
+        if item.get('missing') or 'ms' not in item:
+            return f'{label} missing'
+        comm = item.get('comm') or '?'
+        ms = item['ms']
+        text = f'{ms:.1f}' if isinstance(ms, float) else str(ms)
+        if item.get('matchedBy') == 'main-thread':
+            return f'{label} {text} ms (main thread `{comm}`; UI runs on the platform thread, kernel name is not 1.ui)'
+        return f'{label} {text} ms (`{comm}`)'
+
+    window = proc.get('windowMs')
+    span = '' if window is None else f' Window {window / 1000:.1f} s.'
+    return f"scene CPU from /proc schedstat, not timeline tts: {side('ui', 'UI')}; {side('raster', 'raster')}.{span}"
+
+
+def paired_ratio_ci(pairs, samples=4000, seed=1):
+    """95% interval of the median new/old ratio, resampling rounds.
+
+    `pairs` is a sequence of (old, new), one entry per alternating round.
+    A round with a non-positive old value is dropped. Rounds that shared a
+    process are not independent samples. Use `cluster_ratio_ci` for that
+    count. `compare` does not call this.
+    """
+    ratios = [new / old for old, new in pairs if old > 0 and new >= 0]
+    if not ratios:
+        return {'rounds': 0, 'low': None, 'high': None, 'median': None}
+
+    def median(xs):
+        ordered = sorted(xs)
+        n = len(ordered)
+        mid = n // 2
+        if n % 2:
+            return ordered[mid]
+        return (ordered[mid - 1] + ordered[mid]) / 2
+
+    rng = random.Random(seed)
+    n = len(ratios)
+    boots = sorted(median([ratios[rng.randrange(n)] for _ in range(n)]) for _ in range(samples))
+    return {
+        'rounds': n,
+        'low': boots[int(0.025 * (samples - 1))],
+        'high': boots[int(0.975 * (samples - 1))],
+        'median': median(ratios),
+    }
+
+
+def cluster_ratio_ci(batch_pairs, samples=4000, seed=1):
+    """95% interval of the median launch-batch ratio.
+
+    Each item is `(old_batch, new_batch)`: the scene-CPU values from one old
+    launch and one new launch. The pair ratio is mean(new) / mean(old).
+    Bootstrap draws those launches whole, so rounds that shared a process
+    stay together. The independent sample count is the number of launch
+    pairs. `compare` does not call this.
+    """
+    ratios = []
+    for old, new in batch_pairs:
+        old_values = [value for value in old if value > 0]
+        new_values = [value for value in new if value >= 0]
+        if not old_values or not new_values:
+            continue
+        old_mean = sum(old_values) / len(old_values)
+        new_mean = sum(new_values) / len(new_values)
+        ratios.append(new_mean / old_mean)
+    if not ratios:
+        return {'pairs': 0, 'low': None, 'high': None, 'median': None}
+
+    def median(xs):
+        ordered = sorted(xs)
+        n = len(ordered)
+        mid = n // 2
+        if n % 2:
+            return ordered[mid]
+        return (ordered[mid - 1] + ordered[mid]) / 2
+
+    rng = random.Random(seed)
+    n = len(ratios)
+    boots = sorted(median([ratios[rng.randrange(n)] for _ in range(n)]) for _ in range(samples))
+    return {
+        'pairs': n,
+        'low': boots[int(0.025 * (samples - 1))],
+        'high': boots[int(0.975 * (samples - 1))],
+        'median': median(ratios),
+    }
+
+
+def ratio_verdict(ci, *, high_limit=1.05, low_limit=None):
+    """Whole interval within the limit passes. Entirely past it is a regression."""
+    low, high = ci.get('low'), ci.get('high')
+    if low is None or high is None:
+        return 'no-data'
+    if low_limit is not None:
+        return 'same' if low >= low_limit and high <= high_limit else 'not-same'
+    if high <= high_limit:
+        return 'pass'
+    if low > high_limit:
+        return 'regression'
+    return 'uncertain'
+
+
 def stutters(record):
     """Frames that arrived more than 1.5 vsync periods after the previous one
     during a continuously animated scenario (dropped / doubled frame)."""
@@ -71,6 +243,7 @@ def stutters(record):
 
 def summarize_record(record, attribution=None):
     frames = record.get('frames', [])
+    thread_time = _attach_thread_time(frames, attribution)
     for f in frames:
         # UI thread time per frame: engine build span plus the semantics,
         # finalize-tree and post-frame work that runs after scene submission.
@@ -161,6 +334,48 @@ def summarize_record(record, attribution=None):
         row['mount'] = {'rowKind': record.get('rowKind'), 'steps': len(mount_ui), 'rowsMounted': sum(rows),
                         'perRowUs': dist(per_row), 'perRowCpuUs': dist(per_row_cpu), 'mountFrameUs': dist(mount_ui), 'followUpUs': dist(follow),
                         'coldFirstStepUs': mount_ui[0] if mount_ui else 0}
+    if 'keyboard' in record:
+        anim, episodes, cpu, cpu_known = [], [], 0, bool(record['keyboard'])
+        for episode in record['keyboard']:
+            fs = frames_in(record, episode['t0'], episode['t1'])
+            anim.extend(fs)
+            if 'cpuUs' not in episode:
+                cpu_known = False
+            else:
+                cpu += episode['cpuUs']
+            item = {'direction': episode.get('direction'), 'frames': len(fs),
+                    'worstUiMs': ms(max((f['uit'] for f in fs), default=0)),
+                    'worstRasterMs': ms(max((f['r'] for f in fs), default=0))}
+            if 'cpuUs' in episode:
+                item['cpuUs'] = episode['cpuUs']
+            episodes.append(item)
+        ui_anim = [f['uit'] for f in anim]
+        raster_anim = [f['r'] for f in anim]
+        keyboard = {
+            'cycles': record.get('keyboardCycles'), 'episodes': episodes, 'frames': len(anim),
+            'worstUiMs': ms(max(ui_anim, default=0)), 'worstRasterMs': ms(max(raster_anim, default=0)),
+            'over8Ui': over(ui_anim, BUDGET_120), 'over8Raster': over(raster_anim, BUDGET_120),
+            'over16Ui': over(ui_anim, BUDGET_60), 'over16Raster': over(raster_anim, BUDGET_60),
+        }
+        for key in ('builds', 'layouts', 'paints'):
+            counted = _work(anim, key)
+            if counted is not None:
+                keyboard[key] = counted
+        if cpu_known:
+            keyboard['uiThreadCpuUs'] = cpu
+        for key in ('uiCpuUs', 'rasterCpuUs'):
+            counted = _present_dist(anim, key)
+            if counted is not None:
+                keyboard[key] = counted
+        if ui_anim:
+            keyboard['uiWallP50Us'] = pct(ui_anim, .5)
+        if raster_anim:
+            keyboard['rasterWallP50Us'] = pct(raster_anim, .5)
+        row['keyboard'] = keyboard
+    if thread_time:
+        row['threadTime'] = thread_time
+    if attribution and attribution.get('procThreadCpu'):
+        row['procThreadCpu'] = attribution['procThreadCpu']
     if attribution:
         worst_cpu = attribution.get('cpuWorstUiFrames') or {}
         total = worst_cpu.get('samples') or 0
@@ -271,6 +486,27 @@ def markdown(summary):
         out += ['', '## Transitions', '', '| Scenario | Theme | Opens | Visible ms (p50 / max) | Worst UI frame per open (ms) |', '|---|---|---|---|---|']
         for r in trans:
             out.append(f"| {r['scenario']} | {r['theme']} | {len(r['opens'])} | {r['visibleMs']['p50']} / {r['visibleMs']['max']} | {', '.join(str(o['worstUiMs']) for o in r['opens'])} |")
+    keys = [r for r in summary['scenarios'] if 'keyboard' in r]
+    if keys:
+        out += ['', '## Soft keyboard', '',
+                'The rows below count only the inset slides. The hold between an open and a close is not included. 8.33 ms and 16.7 ms are this lab\'s frame budgets. Build, layout and paint figures are the average count per frame, a reference, not a gate. Slide UI CPU is the UI thread\'s schedstat time over the slides. The lines under the table are per-frame timeline thread CPU (`tdur`) next to the wall-clock median. Scene CPU, when the next line is present, is `/proc` schedstat nanoseconds for the whole scenario, not `tts`.',
+                '',
+                '| Theme | Frames | Worst UI ms | Worst raster ms | >8.33 ms (UI/R) | >16.7 ms (UI/R) | Builds per frame | Layouts per frame | Paints per frame | Slide UI CPU ms |',
+                '|---|---|---|---|---|---|---|---|---|---|']
+        def work_pair(k, name):
+            counted = k.get(name)
+            if not counted:
+                return '-'
+            return f"{counted['mean']:.1f}"
+        for r in keys:
+            k = r['keyboard']
+            cpu = k.get('uiThreadCpuUs')
+            cpu_cell = '-' if cpu is None else f'{cpu / 1000:.1f}'
+            out.append(f"| {r['theme']} | {k['frames']} | {k['worstUiMs']} | {k['worstRasterMs']} | {k['over8Ui']}/{k['over8Raster']} | {k['over16Ui']}/{k['over16Raster']} | {work_pair(k, 'builds')} | {work_pair(k, 'layouts')} | {work_pair(k, 'paints')} | {cpu_cell} |")
+            out.append(f"- {r['theme']}: {_thread_time_line(k, r.get('threadTime') or {})}")
+            proc_line = _proc_cpu_line(r.get('procThreadCpu'))
+            if proc_line:
+                out.append(f"- {r['theme']}: {proc_line}")
     out += ['', '## Worst-frame attribution', '']
     for r in summary['scenarios']:
         att = r.get('worstUiAttribution') or {}
@@ -350,6 +586,16 @@ def compare(base, cand, threshold=0.10, floor_us=500):
                 row['improvements'].append(f'per-row mount p50 {round(old)}→{round(new)} µs')
         if 'visibleMs' in x and 'visibleMs' in y:
             row['metrics']['visibleMs.p50'] = (x['visibleMs']['p50'], y['visibleMs']['p50'])
+        if 'keyboard' in x and 'keyboard' in y:
+            kx, ky = x['keyboard'], y['keyboard']
+            for field in ('frames', 'worstUiMs', 'worstRasterMs', 'over8Ui', 'over8Raster', 'over16Ui', 'over16Raster', 'uiThreadCpuUs'):
+                row['metrics'][f'keyboard.{field}'] = (kx.get(field), ky.get(field))
+            for count in ('builds', 'layouts', 'paints'):
+                old, new = kx.get(count) or {}, ky.get(count) or {}
+                # Native counts move with the frame count. The per-frame mean
+                # stays in the report as a reference and does not change the
+                # comparison.
+                row['metrics'][f'keyboard.{count}'] = ({'mean': old.get('mean')}, {'mean': new.get('mean')})
         rows.append(row)
     missing = sorted(set(b) ^ set(c))
     return {'problems': problems, 'missing': [list(k) for k in missing], 'rows': rows,
@@ -366,6 +612,36 @@ def compare_markdown(result, base_name, cand_name):
     for r in result['rows']:
         m = r['metrics']
         out.append(f"| {r['scenario']} | {r['theme']} | {ms(m['uiUs.p99'][0])}→{ms(m['uiUs.p99'][1])} | {ms(m['rasterUs.p99'][0])}→{ms(m['rasterUs.p99'][1])} | {m['over8EitherPct'][0]}→{m['over8EitherPct'][1]} | {m['over16Ui'][0]}/{m['over16Raster'][0]}→{m['over16Ui'][1]}/{m['over16Raster'][1]} | {'**' + '; '.join(r['regressions']) + '**' if r['regressions'] else ''} | {'; '.join(r['improvements'])} |")
+    keyboard_rows = [r for r in result['rows'] if 'keyboard.worstUiMs' in r['metrics']]
+    if keyboard_rows:
+        out += ['', '## Soft keyboard (animation frames only)', '',
+                'Worst milliseconds and the 8.33 / 16.7 ms counts are the slide frames. UI-thread CPU is on-CPU time during those slides. Build, layout and paint figures are the average count per frame, a reference, not a gate.',
+                '',
+                '| Scenario | Theme | Worst UI ms | Worst raster ms | >8.33 UI/R | >16.7 UI/R | Builds per frame | Layouts per frame | Paints per frame | UI-thread CPU ms |',
+                '|---|---|---|---|---|---|---|---|---|---|']
+        for r in keyboard_rows:
+            m = r['metrics']
+            def side(field, index, scale=1):
+                value = m.get(f'keyboard.{field}', (None, None))[index]
+                if value is None:
+                    return '-'
+                return f'{value / scale:.1f}' if scale != 1 else str(value)
+            def duo(ui_field, raster_field):
+                def one(index):
+                    ui = m.get(f'keyboard.{ui_field}', (None, None))[index]
+                    raster = m.get(f'keyboard.{raster_field}', (None, None))[index]
+                    if ui is None or raster is None:
+                        return '-'
+                    return f'{ui}/{raster}'
+                return f'{one(0)}→{one(1)}'
+            def means(name):
+                def one(index):
+                    counted = m.get(f'keyboard.{name}', ({}, {}))[index] or {}
+                    value = counted.get('mean')
+                    return '-' if value is None else f'{value:.1f}'
+                return f'{one(0)}→{one(1)}'
+            out.append(
+                f"| {r['scenario']} | {r['theme']} | {side('worstUiMs', 0)}→{side('worstUiMs', 1)} | {side('worstRasterMs', 0)}→{side('worstRasterMs', 1)} | {duo('over8Ui', 'over8Raster')} | {duo('over16Ui', 'over16Raster')} | {means('builds')} | {means('layouts')} | {means('paints')} | {side('uiThreadCpuUs', 0, 1000)}→{side('uiThreadCpuUs', 1, 1000)} |")
     out += ['', f"Total regressions: {result['regressions']}"]
     return '\n'.join(out) + '\n'
 
@@ -488,7 +764,10 @@ def run(args):
     (out / 'env.json').write_text(json.dumps(env, indent=1) + '\n')
     defines = {'RAFT_LAB_THEMES': args.themes, 'RAFT_LAB_SCENARIOS': args.scenarios or '', 'RAFT_LAB_SECONDS': str(args.seconds),
                'RAFT_LAB_SEMANTICS': args.semantics, 'RAFT_LAB_PHASES': str(not args.no_trace).lower()}
-    child = dict(os.environ, RAFT_PERF_OUT=str(out), RAFT_LAB_ROOT=str(ROOT), **defines)
+    rounds = os.environ.get('RAFT_LAB_ROUNDS')
+    if rounds:
+        defines['RAFT_LAB_ROUNDS'] = rounds
+    child = dict(os.environ, RAFT_PERF_OUT=str(out), RAFT_LAB_ROOT=str(ROOT), RAFT_LAB_DEVICE=device, **defines)
     if device == 'linux':
         child['GDK_BACKEND'] = os.environ.get('RAFT_LAB_GDK_BACKEND', 'x11')  # 'wayland' with WAYLAND_DISPLAY measures native Wayland
     argv += [f'--dart-define={k}={v}' for k, v in defines.items()]

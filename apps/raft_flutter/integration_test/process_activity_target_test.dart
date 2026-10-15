@@ -22,6 +22,7 @@ import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/process_artifact_handoff.dart';
+import '../test/support/app_services_fixture.dart';
 
 class ProcessFixtureClient extends RaftClient {
   ProcessFixtureClient(String base, Map<String, dynamic> fixture)
@@ -792,14 +793,16 @@ void main() {
                 ),
               ),
             ),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(
-                mode: dark ? ThemeMode.dark : ThemeMode.light,
-                light: elegant ? RaftFamily.elegant : RaftFamily.brutal,
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(
+                  mode: dark ? ThemeMode.dark : ThemeMode.light,
+                  light: elegant ? RaftFamily.elegant : RaftFamily.brutal,
+                ),
+                onAppearance: (_) async {},
+                onLogout: () async {},
               ),
-              onAppearance: (_) async {},
-              onLogout: () async {},
             ),
           ),
         );

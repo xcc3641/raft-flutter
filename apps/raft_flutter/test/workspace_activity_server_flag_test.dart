@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show fixture;
 import 'activity_follow_ack_test.dart' show thread;
+import 'support/app_services_fixture.dart';
 
 const activeRow = <String, dynamic>{
   'kind': 'channel',
@@ -70,11 +71,13 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             theme: raftTheme(family, dark: dark),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );
@@ -135,11 +138,13 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             theme: raftTheme(family, dark: dark),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );
@@ -199,11 +204,13 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             theme: raftTheme(family, dark: dark),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );
@@ -343,11 +350,13 @@ void main() {
             await tester.pumpWidget(
               MaterialApp(
                 theme: raftTheme(family, dark: dark),
-                home: WorkspaceView(
-                  controller: w,
-                  appearance: RaftAppearance(light: family),
-                  onAppearance: (_) async {},
-                  onLogout: () async {},
+                home: withAppServices(
+                  WorkspaceView(
+                    controller: w,
+                    appearance: RaftAppearance(light: family),
+                    onAppearance: (_) async {},
+                    onLogout: () async {},
+                  ),
                 ),
               ),
             );

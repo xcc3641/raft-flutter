@@ -17,6 +17,7 @@ import 'message_context_transition_test.dart' show row;
 import 'task_surface_test.dart' show modernTask, taskRoutes, flush;
 import 'workspace_task_parent_hydration_test.dart' show parentFixture;
 import 'parity/parity_harness.dart' show loadParityFonts;
+import 'support/app_services_fixture.dart';
 
 final legacyTask = <String, dynamic>{
   ...modernTask,
@@ -70,16 +71,20 @@ void main() {
             await t.pumpWidget(
               MaterialApp(
                 theme: raftTheme(family, dark: dark),
-                home: WorkspaceView(
-                  controller: w,
-                  appearance: RaftAppearance(light: family),
-                  onAppearance: (_) async {},
-                  onLogout: () async {},
+                home: withAppServices(
+                  WorkspaceView(
+                    controller: w,
+                    appearance: RaftAppearance(light: family),
+                    onAppearance: (_) async {},
+                    onLogout: () async {},
+                  ),
                 ),
               ),
             );
             await flush(t);
-            final workspaceState = t.state(find.byType(WorkspaceView));
+            final workspaceState = t.state(
+              find.byType(WorkspaceView),
+            );
             final adaptiveState = adaptiveStates(t).last;
             if (!tasksRoute) {
               final tabs = find.byKey(const Key('conversation-tabs'));
@@ -136,7 +141,10 @@ void main() {
                   .trailingExtent,
               docked ? 380 : 0,
             );
-            expect(t.state(find.byType(WorkspaceView)), same(workspaceState));
+            expect(
+              t.state(find.byType(WorkspaceView)),
+              same(workspaceState),
+            );
             // The page that opened the task stays live (not rebuilt) beneath it.
             expect(adaptiveStates(t), contains(adaptiveState));
             if (width >= 768) expect(adaptiveStates(t), hasLength(1));
@@ -199,11 +207,13 @@ void main() {
         await t.pumpWidget(
           MaterialApp(
             theme: raftTheme(family, dark: dark),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );
@@ -374,11 +384,13 @@ void main() {
           await t.pumpWidget(
             MaterialApp(
               theme: raftTheme(family, dark: dark),
-              home: WorkspaceView(
-                controller: w,
-                appearance: RaftAppearance(light: family),
-                onAppearance: (_) async {},
-                onLogout: () async {},
+              home: withAppServices(
+                WorkspaceView(
+                  controller: w,
+                  appearance: RaftAppearance(light: family),
+                  onAppearance: (_) async {},
+                  onLogout: () async {},
+                ),
               ),
             ),
           );
@@ -452,11 +464,13 @@ void main() {
         await t.pumpWidget(
           MaterialApp(
             theme: raftTheme(family, dark: dark),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );
@@ -512,11 +526,13 @@ void main() {
         await t.pumpWidget(
           MaterialApp(
             theme: raftTheme(family, dark: dark),
-            home: WorkspaceView(
-              controller: w,
-              appearance: RaftAppearance(light: family),
-              onAppearance: (_) async {},
-              onLogout: () async {},
+            home: withAppServices(
+              WorkspaceView(
+                controller: w,
+                appearance: RaftAppearance(light: family),
+                onAppearance: (_) async {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );
@@ -595,11 +611,13 @@ void main() {
           await t.pumpWidget(
             MaterialApp(
               theme: raftTheme(family, dark: dark),
-              home: WorkspaceView(
-                controller: w,
-                appearance: RaftAppearance(light: family),
-                onAppearance: (_) async {},
-                onLogout: () async {},
+              home: withAppServices(
+                WorkspaceView(
+                  controller: w,
+                  appearance: RaftAppearance(light: family),
+                  onAppearance: (_) async {},
+                  onLogout: () async {},
+                ),
               ),
             ),
           );

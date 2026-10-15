@@ -12,6 +12,7 @@ import 'message_presentation_test.dart' show fixture;
 import 'support/panel_edge_registry.dart';
 import 'workspace_activity_activation_test.dart'
     show channelRow, message, threadRow;
+import 'support/app_services_fixture.dart';
 
 /// The attached left edge shows everywhere except on a full-width standalone
 /// phone page (`RaftPanelEdge`). Every registered panel surface is mounted at
@@ -118,11 +119,13 @@ void main() {
     await t.pumpWidget(
       MaterialApp(
         theme: raftTheme(family, dark: dark),
-        home: WorkspaceView(
-          controller: w,
-          appearance: RaftAppearance(light: family),
-          onAppearance: (_) async {},
-          onLogout: () async {},
+        home: withAppServices(
+          WorkspaceView(
+            controller: w,
+            appearance: RaftAppearance(light: family),
+            onAppearance: (_) async {},
+            onLogout: () async {},
+          ),
         ),
       ),
     );

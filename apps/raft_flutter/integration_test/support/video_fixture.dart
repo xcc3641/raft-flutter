@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/data/device_preferences.dart';
 import 'package:raft_flutter/data/mobile_tabbar_preferences.dart';
 import 'package:raft_flutter/data/source_time_formatter.dart';
@@ -188,6 +189,7 @@ Future<VideoFixture> buildVideoFixture({
   final dir = await Directory.systemTemp.createTemp('raft-video-parity-');
   return VideoFixture(
     app.RaftApp(
+      services: const AppServices.updatesDisabledForTestOrPreview(),
       sessionStore: client.sessionStore,
       createClient: (_, _, _) => client,
       initialLocation: Uri(path: location),
