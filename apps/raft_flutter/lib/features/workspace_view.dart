@@ -70,6 +70,7 @@ import 'fleet_views.dart';
 import 'private_route_guard.dart';
 import 'server_setup_gate.dart';
 import 'sidebar_projection.dart';
+import 'sidebar_reorder.dart';
 import 'sidebar_sort_menu.dart';
 import 'agent_avatar_projection.dart';
 import 'agent_metadata_projection.dart';
@@ -3476,14 +3477,15 @@ class _WorkspaceViewState extends State<WorkspaceView>
   /// [pinned] / [custom]: the Sidebar.tsx row options of those sections -
   /// Pinned rows wrap (`allowWrap`) and hide an agent's description, custom
   /// sections hide every DM description.
-  Widget sidebarEntry(
+  RaftNavItem sidebarEntry(
     SidebarEntry entry, {
     bool pinned = false,
     bool custom = false,
+    bool reorderable = false,
   }) {
     final agent = entry.agent;
     if (agent == null) {
-      return channelItem(entry.channel!, pinned: pinned, custom: custom);
+      return channelItem(entry.channel!, pinned, custom, reorderable);
     }
     final source = projectSenderAvatar(
       origin: w.client.origin,
@@ -3507,6 +3509,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
       wrap: pinned,
       menuOpen: menuOpenRow == 'a:${agent['id']}',
       onContextMenu: (at) => openAgentMenu(at, agent, entry.channel),
+      contextMenuOnLongPress: !reorderable,
       description: pinned || custom || description.isEmpty ? null : description,
       selected:
           w.section == 'chat' &&
@@ -3537,12 +3540,11 @@ class _WorkspaceViewState extends State<WorkspaceView>
                 child: sectionLabel(group.label, group: group),
               ),
               if (sidebarDisclosure.collapsed[group.id] != true)
-                SliverList.builder(
-                  itemCount: group.entries.length,
-                  itemBuilder: (context, index) =>
-                      sidebarEntry(group.entries[index], custom: true),
-                  findChildIndexCallback: (key) =>
-                      sidebarEntryIndex(group.entries, key),
+                sidebarRowsSliver(
+                  group.entries,
+                  onReorder: sidebarReorderCallback(group, group.entries, w),
+                  row: (e, reorderable) =>
+                      sidebarEntry(e, custom: true, reorderable: reorderable),
                 ),
               if (sidebarDisclosure.collapsed[group.id] != true &&
                   group.entries.isEmpty)
@@ -3554,18 +3556,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
       ] else
         sidebarGroupSliver(group),
   ];
-
-  int? sidebarEntryIndex(List<SidebarEntry> entries, Key key) {
-    if (key is! ValueKey<String>) return null;
-    final index = entries.indexWhere(
-      (entry) =>
-          (entry.agent == null
-              ? 'sidebar-channel-${entry.channel!.id}'
-              : 'sidebar-${entry.key}') ==
-          key.value,
-    );
-    return index < 0 ? null : index;
-  }
 
   /// Source `hasUnmutedUnread`: a collapsed section header shows an attention
   /// dot when one of its rows has unread messages and is not Activity-muted.
@@ -3581,6 +3571,8 @@ class _WorkspaceViewState extends State<WorkspaceView>
 
   Widget sidebarGroupSliver(SidebarGroup group) {
     final entries = _shownEntries(group);
+    final reorder = sidebarReorderCallback(group, entries, w);
+    final pinned = group.id == 'system:pinned';
     return RaftChatSidebarGroup.sliver(
       key: ValueKey('sidebar-group-${group.id}'),
       headerKey: ValueKey('sidebar-section-${group.id}'),
@@ -3606,9 +3598,15 @@ class _WorkspaceViewState extends State<WorkspaceView>
       attention: groupAttention(group, entries),
       actions: sidebarGroupActions(group),
       onContextMenu: (at) => openSectionMenu(at, group),
-      itemBuilder: (context, index) =>
-          sidebarEntry(entries[index], pinned: group.id == 'system:pinned'),
+      itemBuilder: (context, index) => sidebarListRow(
+        entries,
+        index,
+        reorder,
+        (e, reorderable) =>
+            sidebarEntry(e, pinned: pinned, reorderable: reorderable),
+      ),
       findChildIndexCallback: (key) => sidebarEntryIndex(entries, key),
+      onReorderItem: reorder,
     );
   }
 
@@ -3675,11 +3673,12 @@ class _WorkspaceViewState extends State<WorkspaceView>
     );
   }
 
-  Widget channelItem(
-    RaftChannel c, {
+  RaftNavItem channelItem(
+    RaftChannel c, [
     bool pinned = false,
     bool custom = false,
-  }) {
+    bool reorderable = false,
+  ]) {
     final scope = mobileAuthority;
     final peer = dmPeer(c);
     final agent = peer.agent, name = peer.name;
@@ -3700,6 +3699,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
       wrap: pinned,
       menuOpen: menuOpenRow == 'c:${c.id}',
       onContextMenu: (at) => openChannelMenu(at, c),
+      contextMenuOnLongPress: !reorderable,
       description: c.type == 'dm' && description.isNotEmpty
           ? description
           : null,

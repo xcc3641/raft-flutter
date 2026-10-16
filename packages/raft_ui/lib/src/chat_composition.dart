@@ -86,7 +86,8 @@ class RaftChatSidebarGroup extends StatelessWidget {
     this.headerKey,
     this.onContextMenu,
   }) : itemBuilder = null,
-       findChildIndexCallback = null;
+       findChildIndexCallback = null,
+       onReorderItem = null;
 
   /// A group in a scroll viewport whose offscreen rows are built on demand.
   const RaftChatSidebarGroup.sliver({
@@ -99,6 +100,7 @@ class RaftChatSidebarGroup extends StatelessWidget {
     required this.onExpandedChanged,
     required IndexedWidgetBuilder this.itemBuilder,
     this.findChildIndexCallback,
+    this.onReorderItem,
     this.loading = false,
     this.dragActive = false,
     this.dragSource = false,
@@ -113,6 +115,11 @@ class RaftChatSidebarGroup extends StatelessWidget {
 
   final IndexedWidgetBuilder? itemBuilder;
   final ChildIndexGetter? findChildIndexCallback;
+
+  /// Non-null makes the rows a [SliverReorderableList] (indexes as
+  /// [SliverReorderableList.onReorderItem] reports them). Each row must then
+  /// carry its own key and drag start listener (long press lifts it).
+  final ReorderCallback? onReorderItem;
   final ValueChanged<Offset>? onContextMenu;
   final RaftChatSidebarGroupKind kind;
   final String label, emptyLabel;
@@ -181,13 +188,21 @@ class RaftChatSidebarGroup extends StatelessWidget {
         slivers: [
           SliverToBoxAdapter(child: header),
           if (expanded) ...[
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                builder,
-                childCount: count,
-                findChildIndexCallback: findChildIndexCallback,
+            if (onReorderItem case final reorder?)
+              SliverReorderableList(
+                itemCount: count,
+                itemBuilder: builder,
+                onReorderItem: reorder,
+                proxyDecorator: raftSidebarReorderProxy,
+              )
+            else
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  builder,
+                  childCount: count,
+                  findChildIndexCallback: findChildIndexCallback,
+                ),
               ),
-            ),
             if (emptyRegion != null) SliverToBoxAdapter(child: emptyRegion),
           ],
         ],
@@ -203,6 +218,27 @@ class RaftChatSidebarGroup extends StatelessWidget {
     );
   }
 }
+
+/// The lifted row of a reorderable sidebar list. Rows are ghost controls, so
+/// the proxy carries the sidebar canvas to stay legible over the rows below.
+Widget raftSidebarReorderProxy(
+  Widget child,
+  int index,
+  Animation<double> animation,
+) => Builder(
+  builder: (context) {
+    final size = MediaQuery.sizeOf(context);
+    return ColoredBox(
+      color: RaftSidebarRecipe(
+        RaftTokens.of(context),
+        viewportWidth: size.width,
+        viewportHeight: size.height,
+        variant: RaftSidebarVariant.mountedProduct,
+      ).bodyBackground,
+      child: child,
+    );
+  },
+);
 
 /// Product Skeleton.tsx (not RUI Skeleton): px8/py8/gap6,
 /// 18px bordered avatar and a 60%-width, 12px line in all three themes.
