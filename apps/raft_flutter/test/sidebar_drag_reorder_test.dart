@@ -16,7 +16,8 @@ import 'support/app_services_fixture.dart';
 /// Sidebar.tsx drag-and-drop inside a section: a long press lifts a row of a
 /// manually sorted section, the drop persists through `updateSidebarOrder`
 /// (PATCH /servers/:id/sidebar-order) as `sectionPlacements`, `pinned`,
-/// `channelOrder` or `dmOrder`.
+/// `channelOrder` or `dmOrder`. A long press on a section header lifts the
+/// whole section (`SortableSidebarSection`) and persists `sectionOrder`.
 void main() {
   RaftChannel channel(String id, String name, {String type = 'channel'}) =>
       RaftChannel({'id': id, 'name': name, 'type': type, 'joined': true});
@@ -298,6 +299,125 @@ void main() {
     });
   });
 
+  group('sidebarSectionReorderUpdates', () {
+    const system = [
+      'system:pinned',
+      'system:joint',
+      'system:channels',
+      'system:dms',
+    ];
+
+    test('the stored order is completed with every section once', () {
+      expect(sidebarSectionOrder(const {}), system);
+      expect(
+        sidebarSectionOrder({
+          'sectionOrder': ['s2', 'system:dms', 's2', 'missing', 7],
+          'customSections': [
+            {'id': 's1', 'name': 'Launch'},
+            {'id': 's2', 'name': 'Later'},
+          ],
+        }),
+        [
+          's2',
+          'system:dms',
+          'system:pinned',
+          'system:joint',
+          'system:channels',
+          's1',
+        ],
+      );
+    });
+
+    test('a section dropped on another takes its slot', () {
+      final prefs = preferences();
+      // Dragging up lands before the target.
+      expect(
+        sidebarSectionReorderUpdates(
+          preferences: prefs,
+          fromId: 's1',
+          toId: 'system:joint',
+        ),
+        {
+          'sectionOrder': [
+            'system:pinned',
+            's1',
+            'system:joint',
+            'system:channels',
+            'system:dms',
+            's2',
+          ],
+        },
+      );
+      // Dragging down lands after it.
+      final updates = sidebarSectionReorderUpdates(
+        preferences: prefs,
+        fromId: 'system:pinned',
+        toId: 'system:channels',
+      )!;
+      expect(updates['sectionOrder'], [
+        'system:joint',
+        'system:channels',
+        'system:pinned',
+        'system:dms',
+        's1',
+        's2',
+      ]);
+      // The projection follows the new order.
+      expect(
+        [
+          for (final g in project({...prefs, ...updates})) g.id,
+        ],
+        [
+          'system:joint',
+          'system:channels',
+          'system:pinned',
+          'system:dms',
+          's1',
+          's2',
+        ],
+      );
+    });
+
+    test('a stored partial order is moved as the full list', () {
+      expect(
+        sidebarSectionReorderUpdates(
+          preferences: {
+            'sectionOrder': ['system:dms'],
+          },
+          fromId: 'system:channels',
+          toId: 'system:dms',
+        ),
+        {
+          'sectionOrder': [
+            'system:channels',
+            'system:dms',
+            'system:pinned',
+            'system:joint',
+          ],
+        },
+      );
+    });
+
+    test('no-op and unknown drops produce nothing', () {
+      final prefs = preferences();
+      for (final (from, to) in [
+        ('system:dms', 'system:dms'),
+        ('missing', 'system:dms'),
+        ('system:dms', 'missing'),
+      ]) {
+        expect(
+          sidebarSectionReorderUpdates(
+            preferences: prefs,
+            fromId: from,
+            toId: to,
+          ),
+          isNull,
+          reason: '$from -> $to',
+        );
+      }
+    });
+  });
+
   group('mounted sidebar', () {
     Future<(WorkspaceController, List<Object?>)> setup(
       WidgetTester tester,
@@ -446,6 +566,133 @@ void main() {
       await tester.longPress(row('d2'));
       await tester.pumpAndSettle();
       expect(find.text('Close Chat'), findsOneWidget);
+      expect(patches, isEmpty);
+    });
+
+    Finder header(String id) => find.byKey(ValueKey('sidebar-section-$id'));
+    double top(WidgetTester tester, String id) =>
+        tester.getTopLeft(header(id)).dy;
+
+    testWidgets('system sections: a long-press drag patches sectionOrder', (
+      tester,
+    ) async {
+      final (w, patches) = await setup(tester, {'sectionsVersion': 3});
+      expect(
+        top(tester, 'system:channels'),
+        lessThan(top(tester, 'system:dms')),
+      );
+      await longPressDrag(
+        tester,
+        header('system:dms'),
+        header('system:channels'),
+      );
+      expect(patches.single, {
+        'sectionOrder': [
+          'system:pinned',
+          'system:joint',
+          'system:dms',
+          'system:channels',
+        ],
+        'sectionsVersion': 3,
+      });
+      // The whole section moves at once, rows included.
+      expect(
+        top(tester, 'system:dms'),
+        lessThan(top(tester, 'system:channels')),
+      );
+      expect(
+        tester.getCenter(row('d1')).dy,
+        lessThan(top(tester, 'system:channels')),
+      );
+      expect(w.sidebarOrder['sectionOrder'], hasLength(4));
+      expect(find.text('Hide empty sections'), findsNothing);
+    });
+
+    testWidgets('custom section: its header drags above a system section', (
+      tester,
+    ) async {
+      final (_, patches) = await setup(tester, sectionPrefs);
+      expect(top(tester, 'system:pinned'), lessThan(top(tester, 's1')));
+      await longPressDrag(tester, header('s1'), header('system:pinned'));
+      expect(patches.single, {
+        'sectionOrder': [
+          's1',
+          'system:pinned',
+          'system:joint',
+          'system:channels',
+          'system:dms',
+        ],
+        'sectionsVersion': 3,
+      });
+      expect(top(tester, 's1'), lessThan(top(tester, 'system:pinned')));
+    });
+
+    testWidgets('a dragged header shows its card and the drop indicator', (
+      tester,
+    ) async {
+      final (_, patches) = await setup(tester, {'sectionsVersion': 3});
+      final start = tester.getCenter(header('system:dms'));
+      final end = tester.getCenter(header('system:channels'));
+      final gesture = await tester.startGesture(start);
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+      for (var i = 1; i <= 10; i++) {
+        await gesture.moveTo(start + (end - start) * (i / 10));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      // The source stays in place, faded; the card follows the pointer.
+      expect(
+        tester
+            .widget<Opacity>(
+              find
+                  .descendant(
+                    of: find.byKey(
+                      const ValueKey('sidebar-section-drag-system:dms'),
+                    ),
+                    matching: find.byType(Opacity),
+                  )
+                  .first,
+            )
+            .opacity,
+        lessThan(1),
+      );
+      expect(find.text('DIRECT MESSAGES'), findsNWidgets(2));
+      // The target marks the edge the section will land on.
+      final drop = tester.widget<DecoratedBox>(
+        find.byKey(const ValueKey('sidebar-section-drop-system:channels')),
+      );
+      expect((drop.decoration as BoxDecoration).border, isNotNull);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(find.text('DIRECT MESSAGES'), findsOneWidget);
+      expect(patches, hasLength(1));
+    });
+
+    testWidgets('section header: right click and a long press in place open '
+        'the menu, a tap still collapses it', (tester) async {
+      final (_, patches) = await setup(tester, {'sectionsVersion': 3});
+      await tester.tapAt(
+        tester.getCenter(header('system:channels')),
+        kind: PointerDeviceKind.mouse,
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Hide empty sections'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('Hide empty sections'), findsNothing);
+
+      await tester.longPress(header('system:channels'));
+      await tester.pumpAndSettle();
+      expect(find.text('Hide empty sections'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      expect(row('c1'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('sidebar-disclosure-system:channels')),
+      );
+      await tester.pumpAndSettle();
+      expect(row('c1'), findsNothing);
       expect(patches, isEmpty);
     });
 

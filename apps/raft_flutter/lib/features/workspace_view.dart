@@ -3598,6 +3598,14 @@ class _WorkspaceViewState extends State<WorkspaceView>
       attention: groupAttention(group, entries),
       actions: sidebarGroupActions(group),
       onContextMenu: (at) => openSectionMenu(at, group),
+      contextMenuOnLongPress: false,
+      wrapHeader: (header) => sidebarSectionDragHeader(
+        group: group,
+        w: w,
+        label: tr(group.label),
+        header: header,
+        onHeldInPlace: (at) => openSectionMenu(at, group),
+      ),
       itemBuilder: (context, index) => sidebarListRow(
         entries,
         index,
@@ -3901,7 +3909,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
     String addLabel = 'Create channel',
   }) {
     final id = group?.id;
-    return RaftSidebarSectionHeader(
+    final header = RaftSidebarSectionHeader(
       key: id == null ? null : ValueKey('sidebar-section-$id'),
       disclosureKey: id == null ? null : ValueKey('sidebar-disclosure-$id'),
       label: label,
@@ -3916,7 +3924,17 @@ class _WorkspaceViewState extends State<WorkspaceView>
                 sidebarDisclosure.setExpanded(mobileAuthority, id, expanded),
       actions: group == null ? const [] : sidebarGroupActions(group),
       onContextMenu: group == null ? null : (at) => openSectionMenu(at, group),
+      contextMenuOnLongPress: group == null,
     );
+    return group == null
+        ? header
+        : sidebarSectionDragHeader(
+            group: group,
+            w: w,
+            label: label,
+            header: header,
+            onHeldInPlace: (at) => openSectionMenu(at, group),
+          );
   }
 
   List<RaftSidebarSectionAction> sidebarGroupActions(SidebarGroup group) {

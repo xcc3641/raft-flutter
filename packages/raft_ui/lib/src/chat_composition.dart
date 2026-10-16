@@ -85,6 +85,8 @@ class RaftChatSidebarGroup extends StatelessWidget {
     this.disclosureKey,
     this.headerKey,
     this.onContextMenu,
+    this.contextMenuOnLongPress = true,
+    this.wrapHeader,
   }) : itemBuilder = null,
        findChildIndexCallback = null,
        onReorderItem = null;
@@ -111,6 +113,8 @@ class RaftChatSidebarGroup extends StatelessWidget {
     this.disclosureKey,
     this.headerKey,
     this.onContextMenu,
+    this.contextMenuOnLongPress = true,
+    this.wrapHeader,
   }) : children = const [];
 
   final IndexedWidgetBuilder? itemBuilder;
@@ -121,6 +125,12 @@ class RaftChatSidebarGroup extends StatelessWidget {
   /// carry its own key and drag start listener (long press lifts it).
   final ReorderCallback? onReorderItem;
   final ValueChanged<Offset>? onContextMenu;
+
+  /// See [RaftSidebarSectionHeader.contextMenuOnLongPress].
+  final bool contextMenuOnLongPress;
+
+  /// Wraps the built header (the host makes it a drag handle or drop target).
+  final Widget Function(Widget header)? wrapHeader;
   final RaftChatSidebarGroupKind kind;
   final String label, emptyLabel;
   final int count;
@@ -165,7 +175,7 @@ class RaftChatSidebarGroup extends StatelessWidget {
         );
       }
     }
-    final header = RaftSidebarSectionHeader(
+    final built = RaftSidebarSectionHeader(
       key: headerKey,
       label: label,
       count: count,
@@ -175,7 +185,9 @@ class RaftChatSidebarGroup extends StatelessWidget {
       actions: actions,
       attention: attention,
       onContextMenu: onContextMenu,
+      contextMenuOnLongPress: contextMenuOnLongPress,
     );
+    final header = wrapHeader?.call(built) ?? built;
     final emptyRegion = empty == null
         ? null
         : ConstrainedBox(

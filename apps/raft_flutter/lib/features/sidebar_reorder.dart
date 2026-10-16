@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:raft_ui/raft_ui.dart';
 
@@ -143,6 +144,258 @@ bool _resolves(Map<String, dynamic> ref, SidebarEntry entry) {
     'agent' => entry.agent == null ? peer(true) : '${entry.agent!['id']}' == id,
     _ => false,
   };
+}
+
+/// sidebarSections.ts `SIDEBAR_SYSTEM_SECTION_IDS`.
+const sidebarSystemSectionIds = [
+  'system:pinned',
+  'system:joint',
+  'system:channels',
+  'system:dms',
+];
+
+/// sidebarSections.ts `normalizeSidebarSectionOrder`: the stored
+/// `sectionOrder`, then the system and custom sections it lacks; unknown and
+/// repeated ids are dropped. [projectSidebar] lays the groups out in it.
+List<String> sidebarSectionOrder(Map<String, dynamic> preferences) {
+  final allowed = {
+    ...sidebarSystemSectionIds,
+    for (final s in _rows(preferences['customSections'])) '${s['id']}',
+  };
+  final seen = <String>{};
+  return [
+    for (final id in [
+      ...(preferences['sectionOrder'] as List? ?? const []).whereType<String>(),
+      ...allowed,
+    ])
+      if (allowed.contains(id) && seen.add(id)) id,
+  ];
+}
+
+/// The `updateSidebarOrder` payload (Sidebar.tsx `handleSidebarDragEnd` with
+/// `reorderSidebarSectionOrder`) for dropping section [fromId] on section
+/// [toId]: [fromId] takes [toId]'s slot, so it lands before [toId] when moved
+/// up and after it when moved down. Null when nothing moves.
+Map<String, dynamic>? sidebarSectionReorderUpdates({
+  required Map<String, dynamic> preferences,
+  required String fromId,
+  required String toId,
+}) {
+  final order = sidebarSectionOrder(preferences);
+  final from = order.indexOf(fromId), to = order.indexOf(toId);
+  if (from < 0 || to < 0 || from == to) return null;
+  final next = [...order]..removeAt(from);
+  next.insert(to, fromId);
+  return {'sectionOrder': next};
+}
+
+/// The glyph the lifted card of [group]'s header carries.
+RaftGlyph sidebarSectionGlyph(SidebarGroup group) => switch (group.id) {
+  'system:pinned' => RaftGlyph.pin,
+  'system:joint' => RaftGlyph.globe,
+  'system:channels' => RaftGlyph.hash,
+  'system:dms' => RaftGlyph.messageSquare,
+  _ => RaftGlyph.folderClosed,
+};
+
+/// [header] of [group] as Sidebar.tsx `SortableSidebarSection` makes it: a
+/// long press lifts the whole section and a drop on another section header
+/// persists the new `sectionOrder` through the optimistic
+/// [WorkspaceController.updateSidebarOrder]. [onHeldInPlace] (the header's
+/// menu) opens when the press is released without the pointer travelling.
+Widget sidebarSectionDragHeader({
+  required SidebarGroup group,
+  required WorkspaceController w,
+  required String label,
+  required Widget header,
+  ValueChanged<Offset>? onHeldInPlace,
+}) => SidebarSectionDragHeader(
+  key: ValueKey('sidebar-section-drag-${group.id}'),
+  id: group.id,
+  order: sidebarSectionOrder(w.sidebarOrder),
+  label: label,
+  count: group.entries.length,
+  glyph: sidebarSectionGlyph(group),
+  onHeldInPlace: onHeldInPlace,
+  onMove: (from, to) {
+    final updates = sidebarSectionReorderUpdates(
+      preferences: w.sidebarOrder,
+      fromId: from,
+      toId: to,
+    );
+    if (updates != null) unawaited(w.updateSidebarOrder(updates));
+  },
+  child: header,
+);
+
+/// A section header that is both the drag handle (`LongPressDraggable`
+/// carrying [id]) and the drop target of the other sections in [order].
+class SidebarSectionDragHeader extends StatefulWidget {
+  const SidebarSectionDragHeader({
+    super.key,
+    required this.id,
+    required this.order,
+    required this.label,
+    required this.onMove,
+    required this.child,
+    this.count,
+    this.glyph = RaftGlyph.folderClosed,
+    this.onHeldInPlace,
+  });
+
+  final String id, label;
+  final List<String> order;
+  final int? count;
+  final RaftGlyph glyph;
+
+  /// Section `from` was dropped on this header (`to`).
+  final void Function(String from, String to) onMove;
+  final ValueChanged<Offset>? onHeldInPlace;
+  final Widget child;
+
+  @override
+  State<SidebarSectionDragHeader> createState() => _SectionDragHeaderState();
+}
+
+class _SectionDragHeaderState extends State<SidebarSectionDragHeader> {
+  bool dragging = false;
+
+  void setDragging(bool value) {
+    if (mounted && dragging != value) setState(() => dragging = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RaftTokens.of(context), id = widget.id;
+    return LayoutBuilder(
+      builder: (context, constraints) => DragTarget<String>(
+        onWillAcceptWithDetails: (d) =>
+            d.data != id && widget.order.contains(d.data),
+        onAcceptWithDetails: (d) => widget.onMove(d.data, id),
+        builder: (context, candidates, _) {
+          final incoming = candidates.whereType<String>().firstOrNull;
+          // The dropped section takes this slot: it lands below this header
+          // when it comes from above, above it when it comes from below.
+          final below =
+              incoming != null &&
+              widget.order.indexOf(incoming) < widget.order.indexOf(id);
+          final edge = BorderSide(color: t.accent, width: 2);
+          return _SectionDraggable(
+            data: id,
+            onHeldInPlace: widget.onHeldInPlace,
+            onDragStarted: () => setDragging(true),
+            onDragEnd: (_) => setDragging(false),
+            feedback: _SectionDragCard(
+              width: constraints.maxWidth,
+              label: widget.label,
+              count: widget.count,
+              glyph: widget.glyph,
+            ),
+            child: DecoratedBox(
+              key: ValueKey('sidebar-section-drop-$id'),
+              decoration: BoxDecoration(
+                color: incoming == null ? null : t.accentSoft,
+                border: incoming == null
+                    ? null
+                    : below
+                    ? Border(bottom: edge)
+                    : Border(top: edge),
+              ),
+              child: Opacity(opacity: dragging ? .4 : 1, child: widget.child),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// The lifted section: a card with the section's glyph, name and count that
+/// follows the pointer.
+class _SectionDragCard extends StatelessWidget {
+  const _SectionDragCard({
+    required this.width,
+    required this.label,
+    required this.count,
+    required this.glyph,
+  });
+
+  final double width;
+  final String label;
+  final int? count;
+  final RaftGlyph glyph;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RaftTokens.of(context);
+    final recipe = RaftSidebarSectionRecipe(t, RaftDensityScope.of(context));
+    return SizedBox(
+      width: width,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: t.popover,
+          borderRadius: BorderRadius.circular(t.radius),
+          border: Border.all(color: t.line),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x29000000),
+              blurRadius: 12,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: DefaultTextStyle(
+            style: recipe.title.copyWith(color: recipe.foreground),
+            child: Row(
+              children: [
+                RaftIcon(glyph, size: 14, color: recipe.foreground),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    label.toUpperCase(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (count != null) ...[
+                  const SizedBox(width: 4),
+                  Text('$count', style: recipe.count),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// [LongPressDraggable] through the rows' hold recognizer: a long press lifts
+/// the section, a release without travel is [onHeldInPlace] instead.
+class _SectionDraggable extends LongPressDraggable<String> {
+  const _SectionDraggable({
+    required super.data,
+    required super.feedback,
+    required super.child,
+    super.onDragStarted,
+    super.onDragEnd,
+    this.onHeldInPlace,
+  });
+
+  final ValueChanged<Offset>? onHeldInPlace;
+
+  @override
+  DelayedMultiDragGestureRecognizer createRecognizer(
+    GestureMultiDragStartCallback onStart,
+  ) =>
+      _HoldRecognizer(debugOwner: this, onHeldInPlace: onHeldInPlace)
+        ..onStart = (position) {
+          final drag = onStart(position);
+          if (drag != null) unawaited(HapticFeedback.selectionClick());
+          return drag;
+        };
 }
 
 /// The persisting reorder of [group]'s [shown] rows through the optimistic
