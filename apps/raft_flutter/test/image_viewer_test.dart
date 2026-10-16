@@ -347,6 +347,7 @@ Future<_Rig> _mount(
     w.dispose();
     await client.dispose();
     toasts.dispose();
+    await _clearTestCache(tester, w.attachmentDiskCache!);
     root.deleteSync(recursive: true);
   });
   await tester.pumpWidget(
@@ -383,6 +384,31 @@ Future<_Rig> _mount(
   );
   await _settle(tester);
   return _Rig(client, w, files, sharing, root, toasts);
+}
+
+// File I/O needs real event turns; writes started by widgets also have
+// continuations in the fake zone. Drive both until cleanup actually finishes.
+Future<void> _clearTestCache(
+  WidgetTester tester,
+  AttachmentDiskCache cache,
+) async {
+  var complete = false;
+  final clearing = cache.clear();
+  unawaited(
+    clearing.then<void>(
+      (_) => complete = true,
+      onError: (Object _, StackTrace _) => complete = true,
+    ),
+  );
+  final clock = Stopwatch()..start();
+  while (!complete) {
+    if (clock.elapsed > const Duration(seconds: 30)) {
+      throw TimeoutException('Image viewer cache cleanup did not finish');
+    }
+    await tester.runAsync(() => Future<void>(() {}));
+    await tester.pump();
+  }
+  await clearing; // Preserve any cleanup error after driving its completion.
 }
 
 /// Ends a test that raised a toast: its 5 s timer must not outlive the tree.

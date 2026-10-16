@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 
 import 'attachment_image_store.dart';
 import 'cache_directory_listing.dart';
+import 'cache_file_access.dart';
 
 /// The default size cap of the attachment cache (all accounts and servers on
 /// this device); Settings > Storage offers other tiers
@@ -161,6 +162,7 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
 
   Future<_DiskIndex?>? _index;
   Future<void> _tail = Future.value();
+  final _access = CacheFileAccess();
   final Map<String, int> _pins = {};
   final Map<String, _Download> _downloads = {};
   int _sequence = 0;
@@ -274,7 +276,8 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
     await _pruneEmpty(index.directory);
   }
 
-  /// Serializes mutations so concurrent writes/evictions see one index.
+  /// Serializes mutations. Lookups run independently; removal invalidates
+  /// them and waits for their handles before deleting on Windows.
   Future<T> _serial<T>(Future<T> Function() task) {
     final result = _tail.then((_) => task());
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
@@ -316,44 +319,63 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
   Future<Uint8List?> read(AttachmentImageStoreKey key) async {
     final index = await _open();
     if (index == null) return null;
-    final path = _path(index, key);
+    return _readBytes(index, _path(index, key));
+  }
+
+  Future<Uint8List?> _readBytes(_DiskIndex index, String path) async {
     final entry = index.files[path];
     if (entry == null) return null;
     if (_expired(index, path, entry.$2)) {
-      await _serial(() => _delete(index, path));
+      await _discard(index, path, entry);
       return null;
     }
+    final lookup = _access.begin(path);
+    if (lookup == null) return null;
     try {
       final bytes = await File(path).readAsBytes();
+      if (!lookup.valid) return null;
       final now = _clock();
-      index.files[path] = (bytes.length, now);
-      unawaited(_quietly(() => File(path).setLastModified(now)));
-      return bytes;
+      index.files[path] = (bytes.length, now, entry.$3);
+      await _quietly(() => File(path).setLastModified(now));
+      return lookup.valid ? bytes : null;
     } on FileSystemException {
-      await _serial(() => _delete(index, path));
-      return null;
+      // Release our handle before queued removal can wait for it.
+    } finally {
+      lookup.release();
     }
+    await _discard(index, path, entry);
+    return null;
   }
+
+  Future<void> _discard(_DiskIndex index, String path, _DiskEntry entry) =>
+      _serial(() async {
+        // A replacement queued during the lookup owns its own bytes.
+        if (identical(index.files[path]?.$3, entry.$3)) {
+          await _delete(index, path);
+        }
+      });
 
   @override
   Future<void> write(AttachmentImageStoreKey key, Uint8List bytes) async {
     if (bytes.isEmpty || bytes.length > maxEntryBytes) return;
     final index = await _open();
     if (index == null) return;
-    await _serial(() async {
-      final path = _path(index, key);
-      final part = '$path.${_sequence++}$_partSuffix';
-      try {
-        await Directory(p.dirname(path)).create(recursive: true);
-        await File(part).writeAsBytes(bytes, flush: true);
-        await File(part).rename(path);
-      } on FileSystemException {
-        await _quietly(() => File(part).delete());
-        return;
-      }
-      _register(index, path, bytes.length);
-      await _trim(index, keep: path);
-    });
+    final path = _path(index, key);
+    await _serial(
+      () => _access.write(path, () async {
+        final part = '$path.${_sequence++}$_partSuffix';
+        try {
+          await Directory(p.dirname(path)).create(recursive: true);
+          await File(part).writeAsBytes(bytes, flush: true);
+          await File(part).rename(path);
+        } on FileSystemException {
+          await _quietly(() => File(part).delete());
+          return;
+        }
+        _register(index, path, bytes.length);
+        await _trim(index, keep: path);
+      }),
+    );
   }
 
   /// True when the bytes entry is stored; no read and no LRU touch.
@@ -368,8 +390,14 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
   Future<bool> _stored(_DiskIndex index, String path) async {
     final entry = index.files[path];
     if (entry == null || _expired(index, path, entry.$2)) return false;
-    if (await File(path).exists()) return true;
-    await _serial(() => _delete(index, path));
+    final lookup = _access.begin(path);
+    if (lookup == null) return false;
+    try {
+      if (await File(path).exists()) return lookup.valid;
+    } finally {
+      lookup.release();
+    }
+    await _discard(index, path, entry);
     return false;
   }
 
@@ -430,18 +458,7 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
   Future<Uint8List?> readPublic(String key) async {
     final index = await _open();
     if (index == null) return null;
-    final path = _publicPath(index, key);
-    if (!index.files.containsKey(path)) return null;
-    try {
-      final bytes = await File(path).readAsBytes();
-      final now = _clock();
-      index.files[path] = (bytes.length, now);
-      unawaited(_quietly(() => File(path).setLastModified(now)));
-      return bytes;
-    } on FileSystemException {
-      await _serial(() => _delete(index, path));
-      return null;
-    }
+    return _readBytes(index, _publicPath(index, key));
   }
 
   /// Stores [bytes] under [key] in the public namespace, then trims that
@@ -451,21 +468,23 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
     if (bytes.isEmpty || bytes.length > publicMaxEntryBytes) return;
     final index = await _open();
     if (index == null) return;
-    await _serial(() async {
-      final path = _publicPath(index, key);
-      final part = '$path.${_sequence++}$_partSuffix';
-      try {
-        await index.publicDirectory.create(recursive: true);
-        await File(part).writeAsBytes(bytes, flush: true);
-        await File(part).rename(path);
-      } on FileSystemException {
-        await _quietly(() => File(part).delete());
-        return;
-      }
-      _register(index, path, bytes.length);
-      await _trimPublic(index, keep: path);
-      await _trim(index, keep: path);
-    });
+    final path = _publicPath(index, key);
+    await _serial(
+      () => _access.write(path, () async {
+        final part = '$path.${_sequence++}$_partSuffix';
+        try {
+          await index.publicDirectory.create(recursive: true);
+          await File(part).writeAsBytes(bytes, flush: true);
+          await File(part).rename(path);
+        } on FileSystemException {
+          await _quietly(() => File(part).delete());
+          return;
+        }
+        _register(index, path, bytes.length);
+        await _trimPublic(index, keep: path);
+        await _trim(index, keep: path);
+      }),
+    );
   }
 
   Future<void> removePublic(String key) async {
@@ -513,9 +532,12 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
     final entry = index.files[path];
     if (entry == null) return null;
     if (_expired(index, path, entry.$2)) {
-      await _serial(() => _delete(index, path));
+      await _discard(index, path, entry);
       return null;
     }
+    final lookup = _access.begin(path);
+    if (lookup == null) return null;
+    var keepPin = false;
     _pin(path); // Before touching the disk: eviction must not win the race.
     try {
       if (expectedBytes != null && entry.$1 != expectedBytes) {
@@ -525,15 +547,21 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
       if (stat.type != FileSystemEntityType.file || stat.size != entry.$1) {
         throw const FileSystemException('stored file changed');
       }
+      if (!lookup.valid) return null;
       final now = _clock();
-      index.files[path] = (stat.size, now);
-      unawaited(_quietly(() => File(path).setLastModified(now)));
+      index.files[path] = (stat.size, now, entry.$3);
+      await _quietly(() => File(path).setLastModified(now));
+      if (!lookup.valid) return null;
+      keepPin = true;
       return AttachmentCachedFile._(this, File(path));
     } on FileSystemException {
-      _unpin(path);
-      await _serial(() => _delete(index, path));
-      return null;
+      // Removal must run after this lookup releases its handle.
+    } finally {
+      lookup.release();
+      if (!keepPin) _unpin(path);
     }
+    await _discard(index, path, entry);
+    return null;
   }
 
   /// The file for [key]: the stored copy, or one download shared by every
@@ -607,17 +635,19 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
             (expectedBytes != null && length != expectedBytes)) {
           throw const FileSystemException('incomplete download');
         }
-        await _serial(() async {
-          await part.rename(path);
-          _register(index, path, length);
-          // From this instant the entry is findable, every caller still
-          // attached owns one pin, and later callers open the stored file:
-          // nothing below (eviction included) can lose it.
-          _pins[path] = (_pins[path] ?? 0) + job.waiters.length;
-          job.finished = true;
-          if (identical(_downloads[path], job)) _downloads.remove(path);
-          await _trim(index, keep: path);
-        });
+        await _serial(
+          () => _access.write(path, () async {
+            await part.rename(path);
+            _register(index, path, length);
+            // From this instant the entry is findable, every caller still
+            // attached owns one pin, and later callers open the stored file:
+            // nothing below (eviction included) can lose it.
+            _pins[path] = (_pins[path] ?? 0) + job.waiters.length;
+            job.finished = true;
+            if (identical(_downloads[path], job)) _downloads.remove(path);
+            await _trim(index, keep: path);
+          }),
+        );
         job.done.complete();
       } catch (error, trace) {
         await _quietly(part.delete);
@@ -646,7 +676,7 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
     final before = index.files[path]?.$1 ?? 0;
     index.total += length - before;
     if (index.isPublic(path)) index.publicTotal += length - before;
-    index.files[path] = (length, _clock());
+    index.files[path] = (length, _clock(), Object());
   }
 
   /// Trims the least recently used unpinned attachment entries (never [keep])
@@ -809,6 +839,7 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
           if (index.isPublic(path)) index.publicTotal -= removed;
         }
       }
+      await _access.invalidateWhere((path) => p.isWithin(directory, path));
       await _quietly(() => Directory(directory).delete(recursive: true));
     });
   }
@@ -819,6 +850,7 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
       index.total -= removed.$1;
       if (index.isPublic(path)) index.publicTotal -= removed.$1;
     }
+    await _access.invalidateWhere((candidate) => candidate == path);
     await _quietly(() => File(path).delete());
     if (path.contains('.f${p.separator}')) {
       // A file entry lives in its own directory.
@@ -888,16 +920,23 @@ _Scan _scanEntries(String privatePath, String publicPath, String partSuffix) {
   return scan;
 }
 
+// A write gets a new token even when its size and clock match the old file.
+// Recency-only updates preserve it, so failed lookups cannot delete a rewrite.
+typedef _DiskEntry = (int, DateTime, Object);
+
 class _DiskIndex {
   _DiskIndex(this.directory, this.publicDirectory, _Scan scan)
     : _publicPrefix = '${publicDirectory.path}${p.separator}',
-      files = scan.files,
+      files = {
+        for (final entry in scan.files.entries)
+          entry.key: (entry.value.$1, entry.value.$2, Object()),
+      },
       total = scan.total,
       publicTotal = scan.publicTotal;
 
   /// The attachments namespace (`v2`) and the public one, side by side.
   final Directory directory, publicDirectory;
-  final Map<String, (int, DateTime)> files;
+  final Map<String, _DiskEntry> files;
 
   /// Bytes of every entry, and of the public ones among them.
   int total, publicTotal;

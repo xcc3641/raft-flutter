@@ -1,6 +1,7 @@
 import 'package:raft_client/raft_client.dart';
 
 import 'message_history.dart';
+import 'cached_history_window.dart';
 import 'history_read_policy.dart';
 import 'message_history_pages.dart';
 import 'message_history_verification.dart';
@@ -77,6 +78,7 @@ class MessageHistoryPositions {
     MessageWindowRequest request,
     String id, {
     bool thread = false,
+    dynamic cached,
   }) async {
     final storage = MessageHistoryPages.storage(w.cache),
         scope = MessageHistoryPages.scope(
@@ -89,6 +91,9 @@ class MessageHistoryPositions {
         scope == null ||
         !request.current ||
         !w.cacheWritable) {
+      return null;
+    }
+    if (cached is CachedHistoryWindow && cached.provesNoPosition(scope)) {
       return null;
     }
     try {
@@ -117,9 +122,10 @@ class MessageHistoryPositions {
   static Future<bool> restoreMain(
     WorkspaceController w,
     MessageWindowRequest request,
-    String id,
-  ) async {
-    final page = await restore(w, request, id);
+    String id, {
+    dynamic cached,
+  }) async {
+    final page = await restore(w, request, id, cached: cached);
     if (page == null || !request.current) return false;
     final rows = acceptedWindowRows(page['messages'], id);
     w.hasMore = page['hasOlder'] == true;
@@ -150,7 +156,7 @@ class MessageHistoryPositions {
     String id,
     Map legacy,
   ) async {
-    final page = await restore(w, request, id, thread: true);
+    final page = await restore(w, request, id, thread: true, cached: legacy);
     if (page == null || !request.current) return null;
     w.threadChannelId = id;
     final parent = legacy['parent'];

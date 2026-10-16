@@ -120,6 +120,7 @@ Future<void> _mount(
 }
 
 void main() {
+  _loadOlderTests();
   testWidgets('signed out: channels, the first channel messages and the join banner', (t) async {
     final client = _PublicClient(_routes());
     var signIn = 0, register = 0;
@@ -331,5 +332,53 @@ void main() {
       expect(joined, 1);
       expect(find.text('Community agreement'), findsNothing);
     });
+  });
+}
+
+void _loadOlderTests() {
+  List<Map<String, dynamic>> page(int first, int count) => [
+    for (var i = first; i < first + count; i++) _message('m$i', 'Wenyi', 'Row $i'),
+  ];
+
+  Future<_PublicClient> mountWith(
+    WidgetTester t,
+    List<Map<String, dynamic>> latest,
+    List<Map<String, dynamic>> older,
+  ) async {
+    final queries = <Map<String, dynamic>?>[];
+    final routes = _routes()
+      ..['GET $_base/channels/c1/messages'] = (query, _) {
+        queries.add(query);
+        return {'messages': query?['beforeMessageId'] == null ? latest : older};
+      };
+    final client = _PublicClient(routes);
+    addTearDown(client.dispose);
+    await _mount(t, client);
+    return client;
+  }
+
+  testWidgets('Load older messages prepends the older page, then goes away', (
+    t,
+  ) async {
+    await mountWith(t, page(100, 50), page(50, 20));
+    expect(find.text('Load older messages'), findsOneWidget);
+    expect(find.text('Row 50'), findsNothing);
+    await t.tap(find.text('Load older messages'));
+    await t.pumpAndSettle();
+    expect(find.text('Row 50', skipOffstage: false), findsOneWidget);
+    expect(find.text('Load older messages'), findsNothing);
+  });
+
+  testWidgets('an older page that comes back empty ends the button', (t) async {
+    await mountWith(t, page(100, 50), const []);
+    await t.tap(find.text('Load older messages'));
+    await t.pumpAndSettle();
+    expect(find.text('Load older messages'), findsNothing);
+    expect(find.text('Row 100', skipOffstage: false), findsOneWidget);
+  });
+
+  testWidgets('a channel with a short history never offers it', (t) async {
+    await mountWith(t, page(100, 12), const []);
+    expect(find.text('Load older messages'), findsNothing);
   });
 }

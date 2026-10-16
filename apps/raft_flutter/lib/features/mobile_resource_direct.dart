@@ -1,7 +1,6 @@
 import 'package:flutter/widgets.dart';
 
 import '../data/workspace_controller.dart';
-import 'mobile_workspace_pages.dart';
 
 /// Principal, page, and every value that changes how the list is built.
 /// Messages and presence are not inputs.
@@ -11,25 +10,26 @@ Object mobileResourceInputs(
   required bool wide,
   required String? rootTab,
   required bool activityMasterDetail,
-}) =>
-    (
-      controller.client.generation,
-      controller.client.user?.id,
-      controller.server?.id,
-      controller.server?.string('role'),
-      section,
-      wide,
-      rootTab,
-      activityMasterDetail,
-    );
+}) => (
+  controller.client.generation,
+  controller.client.user?.id,
+  controller.server?.id,
+  controller.server?.string('role'),
+  section,
+  wide,
+  rootTab,
+  activityMasterDetail,
+);
 
-/// Phone tasks and saved. Off builds [buildList] on the page controller.
-/// On keeps one list for the active page, and rebuilds it when [inputs] change.
+/// Phone tasks and saved keep one list for the page, and rebuild it when
+/// [inputs] change. A covered route keeps that list so coming back is the
+/// same page.
 Widget mobileResourceBody({
   required String route,
   required WorkspaceController page,
   required WorkspaceController? outer,
   required bool direct,
+  required bool Function() active,
   required bool wide,
   required String? rootTab,
   required bool activityMasterDetail,
@@ -45,15 +45,12 @@ Widget mobileResourceBody({
       rootTab: rootTab,
       activityMasterDetail: activityMasterDetail,
     ),
-    active: () =>
-        mobilePageIdentity(page.location) ==
-        mobilePageIdentity(outer.location),
+    active: active,
     buildList: () => buildList(outer),
   );
 }
 
-/// The active phone list. A covered route returns nothing, so it does not
-/// keep a second list on the outer workspace.
+/// The phone list. A covered route keeps the list it already built.
 class MobileResourceDirectPage extends StatefulWidget {
   const MobileResourceDirectPage({
     super.key,
@@ -77,11 +74,8 @@ class _MobileResourceDirectPageState extends State<MobileResourceDirectPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.active()) {
-      _leaf = null;
-      _inputs = null;
-      return const SizedBox.shrink();
-    }
+    TickerMode.valuesOf(context);
+    if (!widget.active()) return _leaf ?? const SizedBox.shrink();
     if (_leaf != null && widget.inputs == _inputs) return _leaf!;
     _inputs = widget.inputs;
     _leaf = widget.buildList();

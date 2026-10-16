@@ -12,6 +12,8 @@ import 'package:raft_client/raft_client.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'mobile_route_gate.dart';
+export 'mobile_route_gate.dart' show MobileChatDirectRead;
 import 'message_timeline.dart';
 import 'history_reading_anchor.dart';
 import 'message_history_gaps.dart';
@@ -59,31 +61,6 @@ import 'profile_preview.dart';
 import 'quoted_message_preview.dart';
 import 'message_task_projection.dart';
 import 'saved_sidebar_entry.dart';
-
-/// Phone channel timeline and the thread opened from that page. Present only
-/// while that page is the direct-read visit. Desktop, grid, task discussion
-/// and agent chat do not wrap this.
-class MobileChatDirectRead extends InheritedWidget {
-  const MobileChatDirectRead({
-    super.key,
-    required this.channel,
-    required this.thread,
-    required super.child,
-  });
-
-  final bool channel, thread;
-
-  static MobileChatDirectRead? maybeOf(BuildContext context) {
-    final found = context
-        .getElementForInheritedWidgetOfExactType<MobileChatDirectRead>()
-        ?.widget;
-    return found is MobileChatDirectRead ? found : null;
-  }
-
-  @override
-  bool updateShouldNotify(MobileChatDirectRead oldWidget) =>
-      channel != oldWidget.channel || thread != oldWidget.thread;
-}
 
 /// Controlled mounted-viewport action; no route, controller or data ownership.
 class ChatViewportHandle {
@@ -486,7 +463,12 @@ class _RaftChatViewState extends State<RaftChatView>
     // foreground phone page reads the shared window, which already includes
     // pending sends. A missing window falls back so the first frame is not
     // emptied.
-    if (_directTimeline && presentationActive && w.presentationActive) {
+    if (MobileRouteGate.sharedWindow(
+      context,
+      w,
+      direct: _directTimeline,
+      visible: presentationActive,
+    )) {
       final window = widget.thread ? w.threadWindow : w.messageWindow;
       if (window != null && !window.retired) return window.timeline;
     }
@@ -876,7 +858,7 @@ class _RaftChatViewState extends State<RaftChatView>
       if (arrived && presentationActive) {
         // A covered direct page shares the session receipt. It must not send
         // one. Other pages keep the existing receipt rule.
-        if (_directTimeline && !w.presentationActive) return;
+        if (_directTimeline && MobileRouteGate.paused(context, w)) return;
         final id = widget.thread ? w.threadChannelId : w.channel?.id;
         if (id != null && (w.unread[id] ?? 0) != 0) {
           unawaited(w.markRead(id));
@@ -1104,6 +1086,7 @@ class _RaftChatViewState extends State<RaftChatView>
   int? revealingWindow;
 
   void sync() {
+    if (!mounted || MobileRouteGate.paused(context, w)) return;
     if (reactionPicker != null && pickerAuthority != workspaceAuthority(w)) {
       closeReactionPicker();
     }

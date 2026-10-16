@@ -23,8 +23,16 @@ class SqliteHistoryPositions {
   final Future<void> Function(String, String, String, String, String, dynamic)
   writeLegacy;
   Future<void> _writes = Future<void>.value();
+  int _revision = 0, _pending = 0;
   Future<void> get settled =>
       _writes.then<void>((_) {}, onError: (Object _) {});
+
+  /// Capture before a snapshot starts. Both enqueue and completion invalidate
+  /// the proof, including a save that was pending throughout the snapshot.
+  bool Function() unchangedGuard() {
+    final revision = _revision, idle = _pending == 0;
+    return () => idle && _pending == 0 && revision == _revision;
+  }
 
   Future<SavedReadingPosition?> read(MessageHistoryScope scope) =>
       order(() async {
@@ -55,10 +63,19 @@ class SqliteHistoryPositions {
         return SavedReadingPosition(raw['messageId'] as String, sequence, top);
       });
 
-  Future<void> save(
+  Future<void> save(MessageHistoryScope scope, SavedReadingPosition? position) {
+    _revision++;
+    _pending++;
+    return _writes = order(() => _save(scope, position)).whenComplete(() {
+      _revision++;
+      _pending--;
+    });
+  }
+
+  Future<void> _save(
     MessageHistoryScope scope,
     SavedReadingPosition? position,
-  ) => _writes = order(() async {
+  ) async {
     await ready();
     if (position == null) {
       await db.customStatement(
@@ -85,7 +102,8 @@ class SqliteHistoryPositions {
         .get();
     if (rows.isEmpty ||
         rows.single.read<int>('tombstone') != 0 ||
-        BigInt.parse(rows.single.read<String>('seq_key')) != position.sequence) {
+        BigInt.parse(rows.single.read<String>('seq_key')) !=
+            position.sequence) {
       return;
     }
     await writeLegacy(
@@ -103,5 +121,5 @@ class SqliteHistoryPositions {
         'top': position.top,
       },
     );
-  });
+  }
 }

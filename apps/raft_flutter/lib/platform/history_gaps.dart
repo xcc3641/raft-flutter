@@ -4,7 +4,7 @@ import '../data/history_gaps.dart';
 import '../data/message_history.dart';
 import 'message_history.dart' show HistoryOperationOrder;
 
-/// Proof checks use bounded indexed seeks, never sequence-distance guesses.
+/// Checks open intervals between saved rows with bounded indexed seeks.
 class SqliteHistoryGaps extends HistoryGapQueries {
   SqliteHistoryGaps(
     this.db,
@@ -46,30 +46,55 @@ class SqliteHistoryGaps extends HistoryGapQueries {
   ) async {
     if (_closed || visible.length < 2) return const [];
     final result = <HistoryGap>[];
-    for (var offset = 0; offset < visible.length - 1; offset += 200) {
-      final end = (offset + 200).clamp(0, visible.length - 1);
+    // Five values per pair plus scope keys stay below SQLite's 999-bind limit.
+    for (var offset = 0; offset < visible.length - 1; offset += 160) {
+      final end = (offset + 160).clamp(0, visible.length - 1);
       final pairs = [
         for (var n = offset; n < end; n++)
-          (visible[n].$2, visible[n + 1].$2, visible[n + 1].$1),
+          if (visible[n + 1].$2 > visible[n].$2 + BigInt.one)
+            (
+              visible[n].$2,
+              visible[n + 1].$2,
+              visible[n + 1].$1,
+              visible[n].$2 + BigInt.one,
+              visible[n + 1].$2 - BigInt.one,
+            ),
       ];
+      if (pairs.isEmpty) continue;
       final gaps = await order(() async {
         await ready();
         if (_closed || !await allowed(scope)) return <HistoryGap>[];
         final rows = await db
             .customSelect(
-              '''WITH pairs(older_key,newer_key,newer_id) AS (VALUES
-          ${List.filled(pairs.length, '(?,?,?)').join(',')})
+              // Endpoints already exist. A before=N response proves through
+              // N-1 even when N came from a legacy window without its own proof.
+              // Completely unverified legacy pairs are unknown, not separate
+              // fetched fragments. They still cannot answer cached pagination.
+              '''WITH pairs(older_key,newer_key,newer_id,first_key,last_key) AS (VALUES
+          ${List.filled(pairs.length, '(?,?,?,?,?)').join(',')})
           SELECT newer_id,newer_key FROM pairs WHERE coalesce((
             SELECT upper_key FROM raft_history_ranges WHERE origin=? AND principal=?
+              AND server=? AND channel=? AND lower_key<=pairs.first_key
+              ORDER BY lower_key DESC LIMIT 1),'')<last_key
+          AND (coalesce((
+            SELECT upper_key FROM raft_history_ranges WHERE origin=? AND principal=?
               AND server=? AND channel=? AND lower_key<=pairs.older_key
-              ORDER BY lower_key DESC LIMIT 1),'')<newer_key ORDER BY newer_key''',
+              ORDER BY lower_key DESC LIMIT 1),'')>=older_key
+            OR coalesce((
+            SELECT upper_key FROM raft_history_ranges WHERE origin=? AND principal=?
+              AND server=? AND channel=? AND lower_key<=pairs.newer_key
+              ORDER BY lower_key DESC LIMIT 1),'')>=newer_key)
+          ORDER BY newer_key''',
               variables: [
                 for (final pair in pairs) ...[
                   Variable(historySequenceKey(pair.$1)),
                   Variable(historySequenceKey(pair.$2)),
                   Variable(pair.$3),
+                  Variable(historySequenceKey(pair.$4)),
+                  Variable(historySequenceKey(pair.$5)),
                 ],
-                for (final value in scope.key) Variable(value),
+                for (var n = 0; n < 3; n++)
+                  for (final value in scope.key) Variable(value),
               ],
             )
             .get();

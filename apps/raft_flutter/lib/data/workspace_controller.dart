@@ -17,6 +17,7 @@ import 'source_channel_files_store.dart';
 import 'source_activity_unread_store.dart';
 import 'reaction_toggle.dart';
 import 'workspace_cache.dart';
+import 'workspace_cache_reads.dart';
 import 'workspace_composer.dart';
 import 'workspace_uploads.dart';
 import 'workspace_sends.dart';
@@ -91,95 +92,6 @@ bool isThreadAbsentLookupError(Object? error) {
 }
 
 class WorkspaceController extends ChangeNotifier {
-  void synchronizePagePresentation(
-    WorkspaceController source, {
-    required bool active,
-  }) {
-    final reactivated = active && !presentationActive;
-    presentationActive = active;
-    if (reactivated) {
-      if (_presentationOwner case final owner?) {
-        source.setConversationPresentation(
-          owner,
-          main: _mainPresented,
-          thread: _threadPresented,
-        );
-      }
-      if (_tabPresentationOwner case final owner?) {
-        source.setChatTabPresentation(owner, _chatTabPresented);
-      }
-    }
-    server = source.server;
-    servers = source.servers;
-    channels = source.channels;
-    dms = source.dms;
-    unread = source.unread;
-    mentions = source.mentions;
-    newFlags = source.newFlags;
-    sidebarOrder = source.sidebarOrder;
-    connected = source.connected;
-    foreground = active && source.foreground;
-    syncCoreMessagesEnabled = source.syncCoreMessagesEnabled;
-    remoteComputerUpgradeEnabled = source.remoteComputerUpgradeEnabled;
-    agentMigrationEnabled = source.agentMigrationEnabled;
-    runtimeFormV2WebEnabled = source.runtimeFormV2WebEnabled;
-    savedRevision = source.savedRevision;
-    planRevision = source.planRevision;
-    syncCoreNotificationPrefsEnabled = source.syncCoreNotificationPrefsEnabled;
-    _revokedChannels
-      ..clear()
-      ..addAll(source._revokedChannels);
-    _revokedServers
-      ..clear()
-      ..addAll(source._revokedServers);
-    if (!active) return;
-    _missingConversationChannelId = source._missingConversationChannelId;
-    // Back reveals the retained page before the source has hydrated its new
-    // selection. Do not replace that page's channel with the outgoing one.
-    final target = location;
-    final requestedChannel = switch (target.route) {
-      RaftRoute.channel || RaftRoute.dm => target.entityId,
-      _ => null,
-    };
-    if (requestedChannel != null && source.channel?.id != requestedChannel) {
-      if (_missingConversationChannelId == requestedChannel ||
-          _revokedChannels.contains(requestedChannel)) {
-        channel = null;
-        channelLoading = false;
-        return;
-      }
-      if (channel?.id != requestedChannel) {
-        channel = [
-          ...source.channels,
-          ...source.dms,
-        ].where((record) => record.id == requestedChannel).firstOrNull;
-        channelLoading =
-            source.visibleIds[requestedChannel]?.isNotEmpty != true;
-      }
-      return;
-    }
-    channel = source.channel;
-    hasMore = source.hasMore;
-    hasNewer = source.hasNewer;
-    historyLimited = source.historyLimited;
-    highlightedMessageId = source.highlightedMessageId;
-    contextLoadError = source.contextLoadError;
-    channelLoading = source.channelLoading;
-    loadingOlder = source.loadingOlder;
-    loading = source.loading;
-    error = source.error;
-    threadParent = source.threadParent;
-    threadChannelId = source.threadChannelId;
-    threadHasMore = source.threadHasMore;
-    threadHistoryLimited = source.threadHistoryLimited;
-    threadLoading = source.threadLoading;
-    _threadIdentity = source._threadIdentity;
-    _threadVisit = source._threadVisit;
-    _threadResolutionLoading = source._threadResolutionLoading;
-    _threadParentLoading = source._threadParentLoading;
-    _threadResolutionError = source._threadResolutionError;
-  }
-
   /// High-frequency socket events that never change workspace state.
   static const presenceEvents = {
     'agent:activity',
@@ -1357,6 +1269,7 @@ class WorkspaceController extends ChangeNotifier {
   /// Writes every pending (debounced) change and completes once all queued
   /// device writes have landed.
   Future<void> flushCache() async {
+    await MessageHistorySnapshots.flush(this);
     await MessageHistoryPages.storage(cache)?.receiver.settled;
     await MessageHistoryPages.storage(cache)?.positionsSettled;
     if (_ownsEntityDirectory) entityDirectory.flushDevice();
@@ -1532,13 +1445,10 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<dynamic> _cached(String kind, String id, {String? server}) async {
-    if (cache == null || client.user == null) return null;
-    final origin = client.origin,
-        principal = client.user!.id,
-        serverId = server ?? client.serverId ?? '';
-    await _cacheWrites;
     try {
-      return await cache!.read(origin, principal, serverId, kind, id);
+      return await WorkspaceCacheReads.read(cache, client, _cacheWrites, kind, id,
+        server: server, active: () => cacheWritable, authority: messageHistoryTicket,
+        visible: (id) => !_revokedChannels.contains(id));
     } catch (_) {
       if (!_disposed) error ??= 'Local workspace history is unavailable.';
       return null;
@@ -1685,9 +1595,9 @@ class WorkspaceController extends ChangeNotifier {
   Future<void> saveHistoryWindow(String id, {bool thread = false}) =>
       _windowReceiver._saveWindow(id, thread: thread);
 
-  Future<void> _saveWindow(String id, {bool thread = false}) =>
+  Future<void> _saveWindow(String id, {bool thread = false, bool coalesce = false}) =>
       MessageHistorySnapshots.save(
-        this, id, thread: thread,
+        this, id, thread: thread, coalesce: coalesce,
         identity: _threadIdentity, replyToken: _replyToken, write: _save,
       );
 
@@ -4192,7 +4102,7 @@ class WorkspaceController extends ChangeNotifier {
           ? null
           : await _cached('window', next.id);
       if (!request.current) return;
-      if (!retainContextUntilAccepted && await MessageHistoryPositions.restoreMain(this, request, next.id)) {
+      if (!retainContextUntilAccepted && await MessageHistoryPositions.restoreMain(this, request, next.id, cached: page)) {
         if (request.current) await _save('selection', '', next.id);
         return;
       }
@@ -6000,7 +5910,7 @@ class WorkspaceController extends ChangeNotifier {
           }
         }
         messageWindows.reveal(liveWindowWrite, id, [row['id']]);
-        _saveWindow(id, thread: id == threadChannelId);
+        _saveWindow(id, thread: id == threadChannelId, coalesce: event.name == 'message:updated');
       } else if (event.name == 'message:new' &&
           id is String &&
           row['id'] is String &&

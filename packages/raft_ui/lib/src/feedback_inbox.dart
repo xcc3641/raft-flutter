@@ -163,16 +163,27 @@ class RaftFeedbackInbox extends StatelessWidget {
       final tickets = ticketsForFilter?.call(filter) ?? this.tickets;
       final emptyKind = any ? filter : RaftFeedbackFilter.all;
       final showEmpty = !loading && error == null && tickets.isEmpty;
-      return showEmpty
-          ? Padding(
-              // `[data-feedback-empty-scroll]`: 6px 2px 0.
-              padding: EdgeInsets.fromLTRB(
-                2,
-                6,
-                2 + raftFeedbackScrollGutter(context),
-                0,
+      final emptyState = RaftFeedbackEmptyState(kind: emptyKind);
+      return showEmpty && onLoadMore == null
+          ? LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                primary: false,
+                child: ConstrainedBox(
+                  // Keep the original full-height, centred empty state when
+                  // it fits; let larger text extend below the viewport.
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: Padding(
+                    // `[data-feedback-empty-scroll]`: 6px 2px 0.
+                    padding: EdgeInsets.fromLTRB(
+                      2,
+                      6,
+                      2 + raftFeedbackScrollGutter(context),
+                      0,
+                    ),
+                    child: emptyState,
+                  ),
+                ),
               ),
-              child: RaftFeedbackEmptyState(kind: emptyKind),
             )
           : KeyedSubtree(
               key: const ValueKey('feedback-inbox'),
@@ -194,6 +205,10 @@ class RaftFeedbackInbox extends StatelessWidget {
                   // cannot shrink the track, so the 12px grid
                   // gap after it stays.
                   const SizedBox(height: 12),
+                  // No match in the loaded pages does not exhaust the inbox.
+                  // Keep pagination reachable, including when the empty copy
+                  // needs to scroll at larger text sizes.
+                  if (showEmpty) emptyState,
                   if (loading)
                     for (var i = 0; i < 3; i++) ...[
                       if (i > 0) const SizedBox(height: 8),

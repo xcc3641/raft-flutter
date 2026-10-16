@@ -14,6 +14,8 @@ import '../data/workspace_cache_codec.dart';
 import 'history_capacity.dart';
 import 'history_positions.dart';
 import 'history_gaps.dart';
+import 'history_shadows.dart';
+import 'history_committed_reads.dart';
 import 'device_storage.dart';
 
 typedef HistoryOperationOrder = Future<T> Function<T>(
@@ -103,6 +105,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
 
   void stop() {
     _closed = true;
+    receiver.close();
     reads.close();
     capacity.close();
     memory.close();
@@ -168,6 +171,8 @@ class SqliteMessageHistory implements MessageHistoryStorage {
       PRIMARY KEY(origin,principal,server,channel,message_id))''');
     await db.customStatement('''CREATE INDEX IF NOT EXISTS raft_history_sequence
       ON raft_history_rows(origin,principal,server,channel,seq_key)''');
+    await db.customStatement('''CREATE INDEX IF NOT EXISTS raft_history_receipts
+      ON raft_history_rows(origin,principal,server,channel,tombstone,revision DESC,message_id DESC)''');
     await db.customStatement('''CREATE TABLE IF NOT EXISTS raft_history_ranges (
       origin TEXT NOT NULL, principal TEXT NOT NULL, server TEXT NOT NULL,
       channel TEXT NOT NULL, lower_key TEXT NOT NULL, upper_key TEXT NOT NULL,
@@ -258,7 +263,8 @@ class SqliteMessageHistory implements MessageHistoryStorage {
     final marker = await _marker(scope);
     if (marker == null || marker['authority'] != scope.authority || await _denial(scope) >= 0) return false;
     if (target != null) {
-      return (await _existing(scope, [target]))[target]?.read<int>('tombstone') == 2;
+      final row = (await _existing(scope, [target]))[target];
+      return row?.read<int>('tombstone') == 2 || row == null && marker['evictionSequence'] != null;
     }
     if (before == null && after == null) return false;
     final rows = await _query(
@@ -325,14 +331,20 @@ class SqliteMessageHistory implements MessageHistoryStorage {
       order(() async {
         await _ready();
         if (limit < 1 || limit > 4) throw ArgumentError.value(limit, 'limit');
-        final progress = await readLegacy(
-          scope.origin,
-          scope.principal,
-          '',
-          'message-history-migration',
-          '',
-        );
-        final cursor = progress is Map ? progress['lastRowid'] as int? ?? 0 : 0;
+        dynamic progress;
+        try {
+          progress = await readLegacy(
+            scope.origin,
+            scope.principal,
+            '',
+            'message-history-migration',
+            '',
+          );
+        } on FormatException {
+          // A damaged progress record restarts bounded, idempotent imports.
+        }
+        final value = progress is Map ? progress['lastRowid'] : null;
+        final cursor = value is int && value >= 0 ? value : 0;
         final batch = await _query(
           "SELECT rowid,server,kind,id,payload FROM workspace_cache WHERE origin=? AND principal=? AND kind IN ('window','thread-window') AND rowid>? ORDER BY rowid LIMIT ?",
           [scope.origin, scope.principal, cursor, limit],
@@ -340,9 +352,12 @@ class SqliteMessageHistory implements MessageHistoryStorage {
         if (batch.isEmpty) return 0;
         await db.transaction(() async {
           for (final row in batch) {
-            final value = await decodeWorkspaceCache(
-              row.read<String>('payload'),
-            );
+            dynamic value;
+            try {
+              value = await decodeWorkspaceCache(row.read<String>('payload'));
+            } on FormatException {
+              continue; // Preserve the bad record; do not pin the scan cursor.
+            }
             if (value is! Map) continue;
             await _importWindow(
               scope.origin,
@@ -502,6 +517,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
           ],
         );
       }
+      receiver.revokeScopes(origin, principal, server, ids);
     });
   }
 
@@ -650,6 +666,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
     int? maximumPreviousRevision,
     bool onlyNew = false,
     bool updateOnly = false,
+    bool complete = false,
   }) async {
     final incoming = [
       for (final row in values)
@@ -660,18 +677,21 @@ class SqliteMessageHistory implements MessageHistoryStorage {
       scope,
       incoming.map((m) => m['id'] as String),
     );
+    final evictionSequence = onlyNew ? ((await _marker(scope))?['evictionSequence'] as String?) : null;
     final previousIds = existing.keys.toList();
-    final previousRows = await decodeWorkspaceTranslations([
-      for (final id in previousIds) existing[id]!.read<String>('payload'),
-    ]);
+    final previousRows = complete
+        ? const <Map<String, dynamic>>[]
+        : await decodeWorkspaceTranslations([
+            for (final id in previousIds) existing[id]!.read<String>('payload'),
+          ]);
     final previous = {
       for (var i = 0; i < previousIds.length; i++)
-        previousIds[i]: previousRows[i],
+        if (!complete) previousIds[i]: previousRows[i],
     };
     final accepted = <Map<String, dynamic>>[];
     for (final row in incoming) {
       final old = existing[row['id']];
-      if (onlyNew && old != null ||
+      if (onlyNew && (old != null || evictionSequence != null && historySequenceKey(row['seq']).compareTo(evictionSequence) <= 0) ||
           updateOnly && (old == null || old.read<int>('tombstone') != 0)) {
         continue;
       }
@@ -680,13 +700,18 @@ class SqliteMessageHistory implements MessageHistoryStorage {
           old.read<int>('revision') > maximumPreviousRevision) {
         continue;
       }
-      accepted.add(mergeMessageProjection(previous[row['id']], row));
+      accepted.add(
+        complete
+            ? Map<String, dynamic>.from(row)
+            : mergeMessageProjection(previous[row['id']], row),
+      );
     }
     final payloads = await encodeWorkspaceTranslations(accepted);
     final sizes = [for (final payload in payloads) utf8.encode(payload).length];
     var added = 0;
     for (var i = 0; i < accepted.length; i++) {
-      added += sizes[i] - (existing[accepted[i]['id']]?.read<int>('byte_size') ?? 0);
+      added +=
+          sizes[i] - (existing[accepted[i]['id']]?.read<int>('byte_size') ?? 0);
     }
     capacity.admitNow(scope, added);
     final touched = now().millisecondsSinceEpoch;
@@ -728,8 +753,8 @@ class SqliteMessageHistory implements MessageHistoryStorage {
       if (await _denial(scope) >= 0) return false;
       final previousMarker = await _marker(scope);
       if (requestedRevision != null &&
-          ((previousMarker?['permissionFloor'] as int?) ?? 0) >
-              requestedRevision) {
+          (((previousMarker?['permissionFloor'] as int?) ?? 0) > requestedRevision ||
+            ((previousMarker?['evictionRevision'] as int?) ?? 0) > requestedRevision)) {
         return false;
       }
       final marker = await _scope(scope, create: !updateOnly);
@@ -775,6 +800,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
           'tailSequence': '${highest > tail ? highest : tail}',
         });
       }
+      await HistoryShadows(db).refresh(scope);
       return true;
     });
   });
@@ -1064,6 +1090,9 @@ class SqliteMessageHistory implements MessageHistoryStorage {
         await _denial(scope) >= 0) {
       return page;
     }
+    if (((marker['evictionRevision'] as int?) ?? 0) > requestedRevision) {
+      throw const HistoryReadRetired();
+    }
     final rows = page['messages'];
     if (rows is! List) return page;
     final values = [
@@ -1133,6 +1162,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
       final deniedAt = await _denial(scope);
       if (deniedAt > page.revision) return;
       final existing = await _marker(scope);
+      if (((existing?['evictionRevision'] as int?) ?? 0) > page.revision) return;
       if (existing != null &&
           (existing['authority'] != scope.authority ||
               ((existing['permissionFloor'] as int?) ?? 0) > page.revision)) {
@@ -1216,7 +1246,9 @@ class SqliteMessageHistory implements MessageHistoryStorage {
         rows,
         revision,
         maximumPreviousRevision: limited ? null : page.revision,
+        complete: true,
       );
+      await HistoryShadows(db).refresh(scope);
       if (lower <= upper) {
         await _range(
           scope,
@@ -1484,4 +1516,30 @@ class SqliteMessageHistory implements MessageHistoryStorage {
     );
     return await markerWindow() ?? Map<String, dynamic>.from(legacy);
   });
+
+  /// The single SELECT uses a read executor; it cannot observe partial writes.
+  Future<CommittedHistoryWindow?> peekCommittedWindow(
+    String origin, String principal, String server, String kind, String id,
+  ) async {
+    final positionsUnchanged = _positions.unchangedGuard();
+    await _ready();
+    _scheduleMigration(MessageHistoryScope(origin: origin, principal: principal,
+      server: server, channel: id, parentChannel: id, authority: ''));
+    return SqliteCommittedHistoryReads.read(db, origin, principal, server, kind, id,
+      positionsUnchanged: positionsUnchanged);
+  }
+
+  /// Retain IDs only while queued. LRU maintenance must not delay first paint.
+  void touchCommittedWindow(MessageHistoryScope scope, List<String> ids,
+      {required bool Function() current}) {
+    if (ids.isEmpty || _closed) return;
+    unawaited(order(() async {
+      if (_closed || !current()) return;
+      final stamp = now().millisecondsSinceEpoch;
+      await db.customStatement(
+        'UPDATE raft_history_rows SET touched=? WHERE $_where AND touched<? AND message_id IN (${List.filled(ids.length, '?').join(',')})',
+        [stamp, ...scope.key, stamp - const Duration(minutes: 1).inMilliseconds, ...ids],
+      );
+    }).catchError((Object _) { /* Best-effort LRU; the read is already accepted. */ }));
+  }
 }

@@ -969,7 +969,11 @@ void main() {
     });
     final loading = w.selectChannel(w.channels.last, autoRead: false);
     await hydrated.future.timeout(const Duration(seconds: 3));
-    expect(w.channelLoading, true);
+    expect(
+      w.channelLoading,
+      false,
+      reason: 'Accepted cached rows are ready while HTTP validates in the background.',
+    );
     expect(w.messages.first.id, 'b-1');
     client.pending!.complete({
       'messages': [for (var i = 51; i <= 100; i++) row(i)],

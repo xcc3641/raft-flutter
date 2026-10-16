@@ -7,6 +7,7 @@ import '../data/source_activity_unread_store.dart';
 import '../data/workspace_controller.dart';
 import '../data/raft_location.dart';
 import '../data/workspace_navigation.dart';
+import '../platform/app_services.dart';
 import '../platform/app_update.dart';
 import 'system_notification_center.dart';
 
@@ -77,16 +78,20 @@ class WorkspaceMobileTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final listenables = [?activityUnread, ?appUpdate];
+    // A covered phone route keeps this bar mounted and does not rebuild it
+    // from the shell. Read the root service here so a replacement releases
+    // the previous one in that same frame.
+    final live = AppServicesScope.maybeOf(context)?.appUpdate ?? appUpdate;
+    final listenables = [?activityUnread, ?live];
     return listenables.isEmpty
-        ? bar(context)
+        ? bar(context, live)
         : ListenableBuilder(
             listenable: Listenable.merge(listenables),
-            builder: (context, _) => bar(context),
+            builder: (context, _) => bar(context, live),
           );
   }
 
-  Widget bar(BuildContext context) {
+  Widget bar(BuildContext context, AppUpdateService? update) {
     String tr(String s) => raftText(context, s);
     final w = controller;
     final nativeMobile =
@@ -145,7 +150,7 @@ class WorkspaceMobileTabBar extends StatelessWidget {
           label: tr('Settings'),
           glyph: RaftGlyph.settings,
           key: const Key('mobile-tab-settings'),
-          attention: appUpdate?.hasUnseen ?? false,
+          attention: update?.hasUnseen ?? false,
         ),
       ],
     );

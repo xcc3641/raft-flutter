@@ -145,19 +145,47 @@ void main() {
         'translationAvailable': true,
         'canManageTranslation': false,
       };
-      api.routes['GET /servers/s1/translation-settings'] = (_) =>
-          throw _refused('Translation settings are down', 503);
-      Future<void> settle() =>
-          Future<void>.delayed(const Duration(milliseconds: 50));
+      final response = Completer<void>();
+      addTearDown(() {
+        if (!response.isCompleted) response.complete();
+      });
+      api.routes['GET /servers/s1/translation-settings'] = (_) async {
+        await response.future;
+        throw _refused('Translation settings are down', 503);
+      };
+      Future<void> settleSettings() async {
+        final store = w.translations;
+        final settled = Completer<void>();
+        void changed() {
+          if (!store.settingsLoading && !settled.isCompleted) {
+            settled.complete();
+          }
+        }
+
+        store.addListener(changed);
+        try {
+          changed();
+          await settled.future;
+        } finally {
+          store.removeListener(changed);
+        }
+      }
 
       w.server = RaftRecord({'id': 's2', 'role': 'member'});
       w.translations.ensureSettings();
-      await settle();
+      await settleSettings();
+      expect(w.translations.settings.loaded, isTrue);
       expect(w.translations.settingsError, isNull);
 
       w.server = RaftRecord({'id': 's1', 'role': 'member'});
       w.translations.ensureSettings();
-      await settle();
+      expect(w.translations.settingsLoading, isTrue);
+      expect(w.translations.settingsError, isNull);
+      final settled = settleSettings();
+      // The response, rather than a wall-clock delay, ends the loading state.
+      response.complete();
+      await settled;
+      expect(w.translations.settingsLoading, isFalse);
       expect(
         w.translations.settingsError,
         'Failed to load translation settings',
