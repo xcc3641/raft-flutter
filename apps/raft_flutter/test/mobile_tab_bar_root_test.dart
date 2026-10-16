@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_flutter/data/raft_location.dart';
 import 'package:raft_ui/raft_ui.dart';
 
+import 'package:raft_flutter/features/mobile_settings_owner.dart';
+
 import 'app_global_server_selector_test.dart' show RootFixture;
 
 // Mounted ports of Source MobileTabBar / useMobileNav.selectTab on the actual
@@ -19,6 +21,10 @@ Future<void> settleRoute(WidgetTester t) async {
 }
 
 void main() {
+  for (final direct in [false, true]) {
+    group(direct ? 'direct settings' : 'current settings', () {
+      setUp(() => MobileSettingsPreference.instance.setEnabled(direct));
+      tearDown(MobileSettingsPreference.instance.resetForTest);
   for (final theme in ['brutal', 'elegant-light']) {
     // tab-bar-sidebar.spec.ts:155–204 [T18] and useMobileNav.ts:89–109: every
     // tab tap, active or inactive, PUSHes that tab's root and drops its
@@ -217,5 +223,7 @@ void main() {
         },
       );
     }
+  }
+    });
   }
 }

@@ -10,6 +10,7 @@ import 'package:dio/dio.dart';
 import 'package:path/path.dart' as p;
 
 import 'attachment_image_store.dart';
+import 'cache_directory_listing.dart';
 
 /// The default size cap of the attachment cache (all accounts and servers on
 /// this device); Settings > Storage offers other tiers
@@ -77,12 +78,11 @@ class AttachmentCachedFile {
 /// Downloads into [destination] (a private temporary path inside the cache).
 /// [cancel] is shared by every caller joined to the download; [progress] is
 /// dio's `onReceiveProgress` shape. Throws on any failure.
-typedef AttachmentFileDownload =
-    Future<void> Function(
-      File destination,
-      CancelToken cancel,
-      void Function(int received, int total) progress,
-    );
+typedef AttachmentFileDownload = Future<void> Function(
+  File destination,
+  CancelToken cancel,
+  void Function(int received, int total) progress,
+);
 
 /// The cache directory is unusable (no platform cache dir, read-only disk).
 /// Callers fall back to their uncached path.
@@ -205,9 +205,9 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
       // The first image-only layout: its entries were never reachable again.
       unawaited(
         _quietly(
-          () => Directory(
-            p.join(base.path, 'raft-attachment-images'),
-          ).delete(recursive: true),
+          () =>
+              Directory(p.join(base.path, 'raft-attachment-images'))
+                  .delete(recursive: true),
         ),
       );
       // The walk (tens of thousands of stat calls on a large cache) runs on a
@@ -733,7 +733,7 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
   Future<void> _pruneEmpty(Directory root) async {
     final directories = <Directory>[];
     try {
-      await for (final entity in root.list(recursive: true)) {
+      await for (final entity in listCacheDirectory(root, recursive: true)) {
         if (entity is Directory) directories.add(entity);
       }
     } on FileSystemException {
@@ -759,7 +759,7 @@ class AttachmentDiskCache implements AttachmentImageByteStore {
     final keepNames = {for (final (o, pr) in keep) _accountSegment(o, pr)};
     final orphans = <String>[];
     try {
-      await for (final entity in index.directory.list()) {
+      await for (final entity in listCacheDirectory(index.directory)) {
         final name = p.basename(entity.path);
         if (!keepNames.contains(name)) orphans.add(name);
       }
@@ -859,7 +859,8 @@ _Scan _scanEntries(String privatePath, String publicPath, String partSuffix) {
     // The public folder is created by the first public write.
     if (!directory.existsSync()) continue;
     try {
-      for (final entity in directory.listSync(
+      for (final entity in listCacheDirectorySync(
+        directory,
         recursive: true,
         followLinks: false,
       )) {

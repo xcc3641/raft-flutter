@@ -33,8 +33,12 @@ import 'toast.dart';
 /// from UI-facing code that wants its text shown; any other exception type is
 /// replaced by the call site's fallback copy.
 class RaftUserError implements Exception {
-  const RaftUserError(this.message);
+  const RaftUserError(this.message, {this.suffix = ''});
   final String message;
+
+  /// Text appended after [message] is localized (a technical code the Web
+  /// copy writes as `message (CODE)`); [raftErrorMessage] adds it.
+  final String suffix;
   @override
   String toString() => message;
 }
@@ -75,7 +79,9 @@ String raftErrorMessage(
   BuildContext context,
   Object error, {
   String? fallback,
-}) => raftText(context, RaftErrorScope.of(context)(error, fallback: fallback));
+}) =>
+    raftText(context, RaftErrorScope.of(context)(error, fallback: fallback)) +
+    (error is RaftUserError ? error.suffix : '');
 
 /// Web `<Banner intent="warning" className="font-bold">{error}</Banner>`: the
 /// error row of dialogs, forms and settings panels. [small] is

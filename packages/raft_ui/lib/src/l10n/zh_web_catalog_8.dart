@@ -58,8 +58,8 @@ const Map<String, String> zhCatalogWeb8 = <String, String>{
   "Upgrade": "升级",
   "Upgrade for more": "升级以获得更多",
   "Upgrade for more channels": "升级以获得更多频道",
-  "Upgrade this server to Pro to move the agent and its workspace to another Computer.":
-      "将此服务器升级到 Pro，即可把 Agent 及其工作区迁移到另一台 Computer。",
+  "After upgrading, you can migrate an agent and its workspace to another computer.":
+      "升级后，可以把 Agent 连同工作区迁移到另一台计算机。",
   "Upgrade timed out. Check that the Computer is online and retry.":
       "升级超时。请检查 Computer 是否在线后重试。",
   "Upgrade to Pro": "升级到 Pro",
@@ -232,7 +232,7 @@ const Map<String, String> zhCatalogWeb8 = <String, String>{
   "Working...": "处理中…",
   "Working…": "工作中…",
   "Workspace": "工作空间",
-  "Workspace and agent state": "工作区和 Agent 状态",
+  "Workspace and agent data": "工作区和 Agent 数据",
   "Workspace details and administration are available from Settings.":
       "工作空间详情与管理入口在「设置」中。",
   "Workspace file view mode": "工作区文件查看模式",

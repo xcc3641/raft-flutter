@@ -11,6 +11,7 @@
 - Android 真机更新统一使用 `python3 tool/android-install --device <serial> --apk <arm64.apk> [--launch]`；先用 `--check-only` 验证制品。禁止用 `fvm flutter run/drive/test/install` 隐式安装正式 App，禁止卸载、清数据、降级或安装失败后的卸载重试。脚本核对实际 APK 的身份/架构/版本/签名与安装前后数据目录；任何失败立即停止。
 - 首次安装只在用户明确要求时追加 `--first-install`，同样先做 `--check-only`；该模式必须确认设备上不存在此包（含其他用户与保留数据），禁止用作更新失败后的自动兜底。
 - Android profile 测试只通过 `tool/performance/lab.py`，只接受预编译且实际包名为 `app.raft.raft_flutter.linkperf` 的 APK，并强制 `--keep-app-running`。只改 `applicationId` 不足以隔离：Flutter drive 的 source 包名可能取 namespace，结束时自动卸载。测试前后检查正式 App 仍在，不得把“找不到包”当成正常状态继续安装。
+- Linux profile 问题检测：`python3 tool/performance/lab.py detect --out .local/performance/detect-<新名称> --scenarios all`（自动使用独立 Weston GPU 会话；单场景如 `--scenarios keyboard`，异常归因单独加 `--details`；以 detection.md 的 ISSUE / REVIEW / NOT_RUN 为准，退出码只表示采集是否成功）。
 - 视觉对齐扩展套件（tool/parity-ext）的新增 / 修复流程见 docs/parity-ext-quickstart.md。
 - 状态对齐：每个页面/面板的 loading / empty / error / partial 状态登记在 docs/state-parity.json（有无 Web 对应、有无 parity case、差距大小）。`test/state_parity_guard_test.dart` 要求每个已登记状态要么有 parity case id，要么写明 intentional / NA 理由；新增页面或面板时同时登记。只盯默认（有数据）状态的 case 会漏掉加载 / 空 / 错误的差异，而且这些状态的 case 必须先确认 Web 侧真的渲染出该状态（React host 不得用预置 store 数据盖住它）。
 - 空闲 CPU：禁止 `scheduleTask`/`Priority.idle` 与零延迟自重排的 Timer（被拒绝的 idle 任务会经 `Timer.run` 热循环，见 docs/idle-cpu.md）；延后工作用 `RaftIdleTimer`，仅屏幕可见才有意义的轮询用 `RaftForegroundPeriodic`；常驻动画必须用 State vsync 并随 TickerMode/减弱动效停止。`avoid_unreviewed_idle_work` lint（tool/raft_lints，由 tool/raft-lints 运行）扫描并要求在用法处写 `// ignore: raft_lints/avoid_unreviewed_idle_work -- 理由`。

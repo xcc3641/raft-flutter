@@ -4,6 +4,7 @@ import 'package:raft_client/raft_client.dart';
 
 import '../data/resource_row_reconcile.dart';
 import '../data/resource_snapshot_cache.dart';
+import '../data/server_page_window.dart';
 import '../data/server_saved_window.dart';
 import '../data/workspace_controller.dart';
 import 'saved_sidebar_entry.dart';
@@ -82,17 +83,12 @@ ResourceSnapshot? takeServerSavedPage(
   ResourceSnapshotCache cache,
   String identity,
 ) {
-  cache.remove('saved');
-  final window = cache.serverSaved;
-  if (window != null &&
-      window.snapshot.identity == identity &&
-      !window.snapshot.enabledActivity) {
-    window.attach();
-    window.needsRevalidate = false;
-    return window.snapshot;
-  }
-  if (window != null) cache.dropServerSaved();
-  return null;
+  return takeServerPage<ResourceSnapshot>(
+    cache,
+    serverSavedPage,
+    identity,
+    accept: (snapshot) => !snapshot.enabledActivity,
+  );
 }
 
 /// Holds [snapshot] on the session window and stops writing slot `saved`.
@@ -102,11 +98,23 @@ void keepServerSavedPage(
 ) {
   final cache = controller.resourceSnapshots;
   cache.remove('saved');
-  final window = holdServerSavedWindow(
+  Set<String> lost(Map<String, Map<String, dynamic>> previous) =>
+      savedLostChannels(controller, previous);
+  String? server() => controller.client.serverId;
+  String identity() => savedPageIdentity(controller);
+  final window = holdServerPage(
     cache,
-    controller: controller,
-    client: controller.client,
-    snapshot: snapshot,
+    serverSavedPage,
+    ServerSavedWindow(
+      client: controller.client,
+      events: controller.client.events,
+      snapshot: snapshot,
+      serverId: server,
+      identity: identity,
+      lostChannels: lost,
+    ),
+    bind: (held) => _bindSavedStore(controller, held),
+    release: (held) => _unbindSavedStore(controller, held),
   );
   if (window.attached > 0) window.detach();
 }
@@ -145,47 +153,6 @@ void _unbindSavedStore(WorkspaceController controller, ServerSavedWindow window)
   if (listener == null) return;
   _savedStoreListeners[window] = null;
   SavedCountStore.of(controller).removeListener(listener);
-}
-
-/// Keeps [current] when the account and client are the same window.
-ServerSavedWindow holdServerSavedWindow(
-  ResourceSnapshotCache cache, {
-  required WorkspaceController controller,
-  required Object client,
-  required ResourceSnapshot snapshot,
-}) {
-  Set<String> lost(Map<String, Map<String, dynamic>> previous) =>
-      savedLostChannels(controller, previous);
-  String? server() => controller.client.serverId;
-  String identity() => savedPageIdentity(controller);
-  final current = cache.serverSaved;
-  if (current is ServerSavedWindow &&
-      current.snapshot.identity == snapshot.identity &&
-      identical(current.client, client)) {
-    current.adopt(
-      snapshot: snapshot,
-      serverId: server,
-      identity: identity,
-      lostChannels: lost,
-    );
-    _bindSavedStore(controller, current);
-    return current;
-  }
-  final created = ServerSavedWindow(
-    client: client,
-    events: controller.client.events,
-    snapshot: snapshot,
-    serverId: server,
-    identity: identity,
-    lostChannels: lost,
-  );
-  cache.keepServerSaved(created, () {
-    _unbindSavedStore(controller, created);
-    created.dispose();
-  });
-  _bindSavedStore(controller, created);
-  created.ensureListening();
-  return created;
 }
 
 typedef SavedUnsave = ({

@@ -4,13 +4,46 @@ import CFNetwork
 import AVFoundation
 import ImageIO
 
-class MainFlutterWindow: NSWindow {
+class MainFlutterWindow: NSWindow, RaftPreferencesWindow {
   private var interactionChannel: FlutterMethodChannel?
+  private var memoryChannel: FlutterMethodChannel?
   private var titleBar: RaftTitleBar?
   private var proxyChannel: FlutterMethodChannel?
   private var windowChannel: FlutterMethodChannel?
+  private var windowCommandsReady = false
+  private(set) var canOpenPreferences = false
   private var videoFrameChannel: FlutterMethodChannel?
   private let videoFrame = RaftVideoFrame()
+
+  static func isRepeatedCloseKey(_ event: NSEvent?) -> Bool {
+    // AppKit can dispatch a menu action after Flutter's asynchronous key reply;
+    // currentEvent may then be a mouse or application event. Its isARepeat
+    // getter raises an Objective-C exception unless it is a keyboard event.
+    guard let event, event.type == .keyDown else { return false }
+    return event.isARepeat
+  }
+
+  override func performClose(_ sender: Any?) {
+    if Self.isRepeatedCloseKey(NSApp.currentEvent) { return }
+    // Menu actions share Flutter's close policy with the keyboard fallback.
+    // Route a menu Close through previews before closing the native window.
+    guard sender is NSMenuItem, windowCommandsReady, let channel = windowChannel else {
+      super.performClose(sender)
+      return
+    }
+    channel.invokeMethod("closeRequested", arguments: nil) { [weak self] response in
+      if (response as? Bool) != true { self?.closeWindowFromCommand() }
+    }
+  }
+
+  private func closeWindowFromCommand() {
+    super.performClose(nil)
+  }
+
+  func openPreferences() {
+    windowChannel?.invokeMethod("openPreferences", arguments: nil)
+  }
+
   override func awakeFromNib() {
     // Do not restore an old fullscreen/Space state during background launch.
     isRestorable = false
@@ -24,6 +57,24 @@ class MainFlutterWindow: NSWindow {
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
+
+    memoryChannel = FlutterMethodChannel(
+      name: "app.raft/device-memory", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    memoryChannel?.setMethodCallHandler { call, result in
+      if call.method == "snapshot" {
+        result(["totalBytes": Int64(ProcessInfo.processInfo.physicalMemory)])
+      } else if call.method == "availableStorageBytes",
+        let args = call.arguments as? [String: Any], let path = args["path"] as? String {
+        do {
+          let values = try FileManager.default.attributesOfFileSystem(forPath: path)
+          result((values[.systemFreeSize] as? NSNumber)?.int64Value)
+        } catch {
+          result(FlutterError(code: "storage_unavailable", message: "Available storage could not be read.", details: nil))
+        }
+      } else {
+        result(FlutterMethodNotImplemented)
+      }
+    }
 
     interactionChannel = FlutterMethodChannel(
       name: "app.raft/interaction",
@@ -42,7 +93,18 @@ class MainFlutterWindow: NSWindow {
       name: "app.raft/window",
       binaryMessenger: flutterViewController.engine.binaryMessenger)
     windowChannel?.setMethodCallHandler { [weak self] call, result in
-      if call.method == "present" {
+      if call.method == "isActive" {
+        result(NSApp.isActive)
+      } else if call.method == "setWindowCommandsState" {
+        let state = call.arguments as? [String: Any]
+        self?.windowCommandsReady = state?["ready"] as? Bool == true
+        self?.canOpenPreferences = self?.windowCommandsReady == true
+          && state?["preferences"] as? Bool == true
+        result(nil)
+      } else if call.method == "closeWindow" {
+        self?.closeWindowFromCommand()
+        result(nil)
+      } else if call.method == "present" {
         if let window = self {
           if window.isMiniaturized { window.deminiaturize(nil) }
           NSApp.activate(ignoringOtherApps: true)

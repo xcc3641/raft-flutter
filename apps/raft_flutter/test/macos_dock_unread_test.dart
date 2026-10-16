@@ -56,6 +56,43 @@ Future<void> run(Future<void> Function() action) => action();
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('Windows tray uses accepted Activity plus other member servers and clears on logout', () async {
+    final (w, api) = fixture();
+    w.servers = [
+      w.server!,
+      RaftRecord({'id': 's2', 'role': 'member'}),
+    ];
+    api.summaryRead = () => [
+      summary('s1', 10),
+      summary('s2', 3),
+      summary('revoked', 90),
+    ];
+    final writes = <int>[];
+    final badge = MacOSDockUnread(
+      platform: TargetPlatform.windows,
+      write: (count) async => writes.add(count),
+    );
+    addTearDown(badge.dispose);
+    expect(badge.supported, isTrue);
+    badge.bind(w);
+    await badge.refresh();
+    await badge.settled;
+    expect(writes.last, 13);
+    w.activityUnread.acceptWindow({
+      'items': [],
+      'totalUnreadCount': 2,
+    }, scope: w.activityUnread.scope);
+    await badge.settled;
+    expect(writes.last, 5);
+    w.servers.removeWhere((server) => server.id == 's2');
+    w.notifyListeners();
+    await badge.settled;
+    expect(writes.last, 2);
+    api.user = null;
+    w.notifyListeners();
+    await badge.settled;
+    expect(writes.last, 0);
+  });
   test(
     'Dock totals known servers once; reads, foreground and revocation',
     () async {

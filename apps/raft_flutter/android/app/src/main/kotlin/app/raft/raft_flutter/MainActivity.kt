@@ -4,6 +4,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import android.app.Activity
+import android.app.ActivityManager
 import android.webkit.CookieManager
 import android.webkit.WebStorage
 import android.Manifest
@@ -90,6 +91,25 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.raft/device-memory")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "availableStorageBytes") {
+                    val path = call.argument<String>("path")
+                    try {
+                        if (path.isNullOrBlank()) result.error("invalid_path", "A storage path is required.", null)
+                        else result.success(android.os.StatFs(path).availableBytes)
+                    } catch (_: Exception) {
+                        result.error("storage_unavailable", "Available storage could not be read.", null)
+                    }
+                } else if (call.method != "snapshot") {
+                    result.notImplemented()
+                } else {
+                    val manager = getSystemService(ACTIVITY_SERVICE) as ActivityManager
+                    val memory = ActivityManager.MemoryInfo()
+                    manager.getMemoryInfo(memory)
+                    result.success(mapOf("totalBytes" to memory.totalMem, "lowRam" to manager.isLowRamDevice))
+                }
+            }
         sharing = NativeSharingBridge(this, flutterEngine, ::shareReceiverAttached)
         systemFonts = NativeSystemFontsBridge(this, flutterEngine)
         systemProxy = NativeProxyBridge(this, flutterEngine)

@@ -1,4 +1,5 @@
 import 'dart:io' show File, Platform;
+import 'dart:ui' show AppExitType;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -132,6 +133,46 @@ class AppUpdater {
   /// is false. Its status drives the Updates card while an update runs.
   AppImageUpdater? get appImage => available ? _appImage : null;
 
+  /// Runs before a required Linux AppImage exit.
+  ///
+  /// A required exit does not ask the application whether it may leave, so the
+  /// app uses this to finish closing the background database. Null keeps the
+  /// required exit as it is.
+  Future<void> Function()? beforeQuit;
+
+  /// Application hook read by [quitAfterHook] when [beforeQuit] is null.
+  ///
+  /// Assigning it does not construct [instance]. The app sets it at startup so
+  /// a required exit can close the background database.
+  static Future<void> Function()? requiredExitHook;
+
+  /// Runs [beforeQuit], or else [requiredExitHook], then requests a required
+  /// exit.
+  ///
+  /// A throw from the hook does not cancel the exit.
+  Future<void> quitAfterHook() async {
+    final hook = beforeQuit ?? requiredExitHook;
+    if (hook != null) {
+      try {
+        await hook();
+      } on Object {
+        // The required exit still proceeds.
+      }
+    }
+    await performRequiredExit();
+  }
+
+  /// The required exit [quitAfterHook] performs. Tests replace this because
+  /// the test binding rejects a required exit.
+  @visibleForTesting
+  Future<void> Function() performRequiredExit = _performRequiredExit;
+
+  static Future<void> _performRequiredExit() {
+    return ServicesBinding.instance
+        .exitApplication(AppExitType.required)
+        .then((_) {});
+  }
+
   /// Supplies the app's proxy-aware HTTP client (the package builds none of
   /// its own) and, for isolated test builds only, another origin in place of
   /// `https://github.com`. Linux AppImage updates stay unavailable until this
@@ -171,6 +212,7 @@ class AppUpdater {
       publicKey: _config.publicKey.trim(),
       origin: _updateOrigin,
       environment: _environment,
+      quit: quitAfterHook,
     );
     return true;
   }

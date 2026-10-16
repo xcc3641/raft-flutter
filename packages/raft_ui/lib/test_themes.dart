@@ -86,11 +86,14 @@ int stableHash(String text) {
   return hash;
 }
 
-final _testFrame = RegExp(r'(file:///[^\s():]*?_test\.dart)');
+// A drive colon or a parenthesis can belong to the URI. End at the VM frame's
+// location suffix instead of treating those valid path characters as separators.
+final _testFrame = RegExp(r'(file:///.*_test\.dart)(?::\d+(?::\d+)?)?\)\s*$');
 
 /// The `*_test.dart` file nearest to the top of the current stack.
-String callingTestFile() {
-  for (final line in StackTrace.current.toString().split('\n')) {
+/// An explicit [stack] lets regression tests exercise other platforms' frames.
+String callingTestFile([StackTrace? stack]) {
+  for (final line in (stack ?? StackTrace.current).toString().split('\n')) {
     final match = _testFrame.firstMatch(line);
     if (match != null) return Uri.parse(match.group(1)!).toFilePath();
   }

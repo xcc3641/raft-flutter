@@ -168,7 +168,11 @@ static void my_application_activate(GApplication* application) {
       "app.raft/window", FL_METHOD_CODEC(codec));
   fl_method_channel_set_method_call_handler(window_channel,
       [](FlMethodChannel*, FlMethodCall* call, gpointer data) {
-        if (g_strcmp0(fl_method_call_get_name(call), "present") == 0) {
+        if (g_strcmp0(fl_method_call_get_name(call), "isActive") == 0) {
+          g_autoptr(FlValue) active =
+              fl_value_new_bool(gtk_window_is_active(GTK_WINDOW(data)));
+          fl_method_call_respond_success(call, active, nullptr);
+        } else if (g_strcmp0(fl_method_call_get_name(call), "present") == 0) {
           GtkWindow* target = GTK_WINDOW(data);
           // A notification click carries the desktop's activation token
           // (org.freedesktop.Notifications ActivationToken). Wayland

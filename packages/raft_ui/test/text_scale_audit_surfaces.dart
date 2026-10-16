@@ -26,6 +26,7 @@ import 'package:raft_ui/desktop_title_bar_previews.dart';
 import 'package:raft_ui/dialog_previews.dart';
 import 'package:raft_ui/directory_navigation_previews.dart';
 import 'package:raft_ui/document_previews.dart';
+import 'package:raft_ui/dropdown_viewport_previews.dart';
 import 'package:raft_ui/elegant_navigation_previews.dart';
 import 'package:raft_ui/hover_card_previews.dart';
 import 'package:raft_ui/html_previews.dart';
@@ -86,6 +87,13 @@ class AuditSurface {
 }
 
 final auditSurfaces = <AuditSurface>[
+  AuditSurface(
+    'dropdownViewportPreview',
+    'Long dropdowns at the window edge',
+    dropdownViewportPreview,
+    Size(390, 720),
+    representative: true,
+  ),
   AuditSurface(
     'activityCompactScopePreview',
     'Activity compact scope',

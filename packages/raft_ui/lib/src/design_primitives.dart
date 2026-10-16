@@ -2457,6 +2457,7 @@ class _RaftMenuItemState extends State<RaftMenuItem> {
     // Match DropdownMenuItem's CSS row while retaining the same 48px native
     // hit/semantics expansion as the shared recipe controls.
     final height = recipe.rowVisualHeight;
+    final grows = RaftScaled.grows(context);
     Widget result = Semantics(
       role: widget.kind == RaftMenuKind.selectionPopover
           ? SemanticsRole.menuItemCheckbox
@@ -2525,7 +2526,8 @@ class _RaftMenuItemState extends State<RaftMenuItem> {
             excludeFromSemantics: true,
             onTap: enabled ? activateItem : null,
             child: Container(
-              height: height,
+              height: grows ? null : height,
+              constraints: grows ? BoxConstraints(minHeight: height) : null,
               padding: recipe.rowInset,
               decoration: BoxDecoration(
                 color: enabled && (hovered || focused)
@@ -2576,7 +2578,7 @@ class _RaftMenuItemState extends State<RaftMenuItem> {
                     Expanded(
                       child: Text(
                         widget.label,
-                        maxLines: 1,
+                        maxLines: grows ? null : 1,
                         overflow: TextOverflow.ellipsis,
                         style: RaftControlTypography.of(
                           context,

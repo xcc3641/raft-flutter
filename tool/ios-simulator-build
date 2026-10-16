@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build an iOS simulator bundle with its App Group entitlements; never launch it.
 
-Flutter's simulator build signs with empty entitlements. Re-signing the locally
-built Runner and its extension lets simulator admission register the shared
-container. A physical-device build must use real provisioning, not this helper.
+Xcode embeds iOS simulator entitlements in the executable's Mach-O sections.
+Keep its empty host code-signature entitlements: attaching iOS App Group or
+keychain entitlements to that signature makes AMFI reject the process before
+Flutter starts. Physical-device signing and provisioning are not changed here.
 """
 import argparse
 import json
@@ -11,7 +12,6 @@ from pathlib import Path
 import plistlib
 import subprocess
 import sys
-import tempfile
 
 from android_app import local_dev_version
 
@@ -45,22 +45,16 @@ if (not shared_keychain or '$(' in shared_keychain
                or info.get('RaftShareKeychainGroup') != shared_keychain
                or info['CFBundleVersion'] != app_info['CFBundleVersion']
                for info, identifier in zip(infos, expected_ids))):
-    sys.exit('Unexpected app/extension identity, version or shared groups. Signing stopped.')
-with tempfile.TemporaryDirectory(prefix='raft-ios-simulator-sign-') as temporary:
-    for target, identifier in zip(targets, expected_ids):
-        entitlements = Path(temporary) / 'entitlements.plist'
-        signed = {'com.apple.security.application-groups': [group],
-                  'keychain-access-groups': [identifier, shared_keychain],
-                  'get-task-allow': True}
-        entitlements.write_bytes(plistlib.dumps(signed))
-        subprocess.run(['codesign', '--force', '--sign', '-', '--timestamp=none',
-                        '--entitlements', str(entitlements), str(target)], check=True)
-        subprocess.run(['codesign', '--verify', '--strict', str(target)], check=True)
-        result = subprocess.check_output(['codesign', '--display', '--xml', '--entitlements', '-',
-                                          str(target)], stderr=subprocess.PIPE)
-        actual = plistlib.loads(result)
-        if any(actual.get(key) != value for key, value in signed.items()):
-            sys.exit('Signed group mismatch. Build stopped.')
+    sys.exit('Unexpected app/extension identity, version or shared groups. Build stopped.')
+# Validate Xcode's output without re-signing it. Simulator executables run on
+# the host kernel; iOS entitlements must not be copied into their host signature.
+for target in targets:
+    result = subprocess.check_output(
+        ['codesign', '--display', '--xml', '--entitlements', '-', str(target)],
+        stderr=subprocess.PIPE)
+    if plistlib.loads(result):
+        sys.exit('Simulator host signature has entitlements. Build stopped.')
+subprocess.run(['codesign', '--verify', '--deep', '--strict', str(bundle)], check=True)
 print(json.dumps({'bundle': str(bundle), 'extensions': [str(extension) for extension in extensions],
                   'aboutVersion': version, 'nativeVersion': app_info['CFBundleShortVersionString'],
                   'buildNumber': app_info['CFBundleVersion'], 'appGroup': group,

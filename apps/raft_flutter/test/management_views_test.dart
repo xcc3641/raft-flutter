@@ -12,6 +12,7 @@ import 'package:raft_flutter/features/integrations_views.dart';
 import 'package:raft_flutter/features/provider_views.dart';
 import 'package:raft_flutter/features/billing_view.dart';
 import 'package:raft_flutter/features/labs_view.dart';
+import 'package:raft_flutter/features/mobile_settings_owner.dart';
 import 'package:raft_flutter/features/server_setup_gate.dart';
 import 'package:raft_flutter/features/account_connections_view.dart';
 import 'package:raft_flutter/features/agent_apps_view.dart';
@@ -887,7 +888,28 @@ void main() {
     await tester.pumpWidget(host(LabsView(controller: w)));
     await tester.pumpAndSettle();
     expect(find.text('Labs settings unavailable'), findsOneWidget);
+    expect(find.byKey(const Key('mobile-settings-direct-switch')), findsNothing);
   });
+  testWidgets(
+    'a compact debug Labs page shows the phone settings switch',
+    (tester) async {
+      final (w, _) = (await tester.runAsync(() => _fixture('owner')))!;
+      addTearDown(w.dispose);
+      addTearDown(MobileSettingsPreference.instance.resetForTest);
+      tester.view.physicalSize = const Size(390, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(host(LabsView(controller: w)));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('mobile-settings-direct-switch')), findsOneWidget);
+      expect(find.text('Labs settings unavailable'), findsOneWidget);
+      tester.view.physicalSize = const Size(1280, 900);
+      await tester.pumpWidget(host(LabsView(controller: w)));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('mobile-settings-direct-switch')), findsNothing);
+    },
+  );
   testWidgets('admin can read Stripe billing but cannot purchase or cancel', (
     tester,
   ) async {

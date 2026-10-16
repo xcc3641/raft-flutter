@@ -3,6 +3,46 @@
  "_doc": "State parity inventory (loading / empty / error / partial) per screen and panel. Read by apps/raft_flutter/test/state_parity_guard_test.dart. screens[].states[]: state = loading|empty|error|partial; variant = optional short text; web = yes|no (does the Web component render a DISTINCT such state); flutter = yes|partial|missing; parityCase = case ids or globs without the theme suffix (e.g. components.list-pages.saved.phone-*); status = covered (needs >=1 parityCase that resolves) | gap (needs justification and size S|M|L) | intentional / na (need justification) | fixing (being fixed in the current branch: needs justification and parityCase; resolution is skipped until it is flipped to covered). Optional: gapKind = case-missing (Flutter has it, no case) | impl-diff (Flutter differs from Web) | invalid-case (case exists but the Web capture does not show the state); caseValidity = react-checked (the cached React capture was inspected and shows the state) | invalid | unchecked. navigationCoverage maps every NavigationRegistry section id and settings tab id to the screen ids that cover it (or a justification string). Add a screen entry (and its states) whenever a screen or panel is added; a registry id that is not mapped fails the guard.",
  "screens": [
   {
+   "id": "settings.windows-tray",
+   "title": "Windows close-to-tray preference",
+   "webEntry": "Native Windows shell only",
+   "flutterEntry": "apps/raft_flutter/lib/features/windows_tray_settings.dart",
+   "states": [
+    {
+     "state": "loading",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "intentional",
+     "justification": "Native device preference is read once; switch is disabled until the runner replies. Widget tests cover pending state."
+    },
+    {
+     "state": "empty",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "A boolean device preference has no empty state; absent native preference defaults to enabled."
+    },
+    {
+     "state": "error",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "intentional",
+     "justification": "Native-only panel shows unavailable/save failure with retry; widget tests exercise readback and retry."
+    },
+    {
+     "state": "partial",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "One atomic native preference with no partial data."
+    }
+   ]
+  },
+  {
    "id": "auth.bootstrap",
    "title": "Auth bootstrap (restoring session / loading)",
    "webEntry": "packages/web/src/App.tsx",
@@ -2617,6 +2657,69 @@
      "parityCase": [],
      "status": "na",
      "justification": "Native-only page (no Web counterpart); official screens.settings.storage covers the default."
+    },
+    {
+     "state": "loading",
+     "variant": "message history usage measurement",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "Native-only account-wide device history; message_history_settings_test.dart checks this state."
+    },
+    {
+     "state": "error",
+     "variant": "message usage or settings could not be updated",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "Native-only account-wide device history; message_history_settings_test.dart checks this state."
+    },
+    {
+     "state": "partial",
+     "variant": "protected messages fill the limit",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "Native-only account-wide device history; message_history_settings_test.dart checks this state."
+    },
+    {
+     "state": "partial",
+     "variant": "freed message space awaits compaction",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "Native-only account-wide device history; message_history_settings_test.dart checks this state."
+    },
+    {
+     "state": "partial",
+     "variant": "lower message limit confirmation",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "Native-only history retention controls; message_history_settings_test.dart verifies confirmation and blocked cleanup."
+    },
+    {
+     "state": "partial",
+     "variant": "legacy full database cleanup confirmation",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "Native-only history retention controls; message_history_settings_test.dart verifies confirmation and blocked cleanup."
+    },
+    {
+     "state": "error",
+     "variant": "full cleanup blocked by unknown or insufficient device space",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "Native-only history retention controls; message_history_settings_test.dart verifies confirmation and blocked cleanup."
     }
    ]
   },
@@ -2683,6 +2786,50 @@
       "components.ext-settings.nav.*"
      ],
      "status": "covered"
+    }
+   ]
+  },
+  {
+   "id": "chat.saved-history-gap",
+   "title": "Chat: saved history gaps",
+   "webEntry": "packages/web/src (no device history counterpart)",
+   "flutterEntry": "apps/raft_flutter/lib/features/message_history_gaps.dart",
+   "states": [
+    {
+     "state": "loading",
+     "variant": "loading an unverified interval",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, explicit loading, retry and three themes at phone width."
+    },
+    {
+     "state": "empty",
+     "variant": "all visible rows belong to proved saved ranges",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, explicit loading, retry and three themes at phone width."
+    },
+    {
+     "state": "error",
+     "variant": "saved range metadata could not be checked; retry",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, explicit loading, retry and three themes at phone width."
+    },
+    {
+     "state": "partial",
+     "variant": "saved islands have an unverified interval",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "na",
+     "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, explicit loading, retry and three themes at phone width."
     }
    ]
   }

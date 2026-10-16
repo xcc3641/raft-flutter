@@ -42,13 +42,13 @@ void main() {
             'surface': 'complete',
             'blocksChat': false,
           };
+          late Future<void> opening;
           await tester.runAsync(() async {
-            unawaited(
-              w.openThreadIdentity(
-                parentChannelId: 'c1',
-                parentMessageId: 'parent',
-              ),
+            opening = w.openThreadIdentity(
+              parentChannelId: 'c1',
+              parentMessageId: 'parent',
             );
+            unawaited(opening);
             await Future<void>.delayed(const Duration(milliseconds: 20));
           });
           await tester.pumpWidget(
@@ -98,16 +98,12 @@ void main() {
           }
           await tester.runAsync(() async {
             resolution.complete({'threadChannelId': 'thread-1'});
-            // Wait for the resolution to be applied, not a fixed wall-clock
-            // slice: a loaded host can take longer than one short delay.
-            final deadline = DateTime.now().add(const Duration(seconds: 5));
-            while (w.presentedThreadParent == null &&
-                DateTime.now().isBefore(deadline)) {
-              await Future<void>.delayed(const Duration(milliseconds: 10));
-            }
+            // The parent request stays held below. Wait for the separate
+            // identity/reply load to finish before checking the resolved shell.
+            await opening.timeout(const Duration(seconds: 5));
           });
-          // The resolved parent reaches the header within a few frames even
-          // on a loaded host; from then on it must hold still.
+          // Apply the resolved identity to the header; the parent is still
+          // pending, and the header must then hold still.
           for (
             var settle = 0;
             settle < 30 &&

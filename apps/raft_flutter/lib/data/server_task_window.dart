@@ -1,9 +1,8 @@
-import 'dart:async';
-
 import 'package:raft_client/raft_client.dart';
 
 import 'resource_row_reconcile.dart';
 import 'resource_snapshot_cache.dart';
+import 'server_page_window.dart';
 import 'task_board_reconcile.dart';
 
 /// What one task event does to an accepted board.
@@ -173,75 +172,33 @@ bool patchTaskBoard(
 
 /// The one accepted workspace Tasks window. While a page is attached it only
 /// stores the board; while none is, it patches by id and never fetches.
-class ServerTaskWindow implements ServerTaskSlot {
+class ServerTaskWindow extends ServerPageWindow {
   ServerTaskWindow({
-    required this.client,
-    required this.events,
-    required this.snapshot,
+    required super.client,
+    required super.events,
+    required super.snapshot,
+    required super.serverId,
+    required super.identity,
     required this.belongs,
     required this.channelName,
-    required this.serverId,
-    required this.identity,
   });
 
-  final Object client;
-  final Stream<RaftEvent> events;
-  @override
-  TaskSnapshot snapshot;
   bool Function(Map<String, dynamic> task) belongs;
   String? Function(Object? channelId) channelName;
-  String? Function() serverId;
-  String Function() identity;
-  @override
-  bool needsRevalidate = false;
-  @override
-  int attached = 0;
-  StreamSubscription<RaftEvent>? _events;
-  var _disposed = false;
 
-  void adopt({
-    required TaskSnapshot snapshot,
-    required bool Function(Map<String, dynamic> task) belongs,
-    required String? Function(Object? channelId) channelName,
-    required String? Function() serverId,
-    required String Function() identity,
-  }) {
-    this.snapshot = snapshot;
-    this.belongs = belongs;
-    this.channelName = channelName;
-    this.serverId = serverId;
-    this.identity = identity;
-    needsRevalidate = false;
+  @override
+  TaskSnapshot get snapshot => super.snapshot as TaskSnapshot;
+
+  @override
+  void adoptWindow(ServerPageWindow fresh) {
+    super.adoptWindow(fresh);
+    final next = fresh as ServerTaskWindow;
+    belongs = next.belongs;
+    channelName = next.channelName;
   }
 
   @override
-  void attach() {
-    attached++;
-    _events?.cancel();
-    _events = null;
-  }
-
-  @override
-  void detach() {
-    if (attached == 0) return;
-    attached--;
-    if (attached == 0) ensureListening();
-  }
-
-  void ensureListening() {
-    if (_disposed || attached != 0 || _events != null) return;
-    _events = events.listen(_onEvent);
-  }
-
-  void dispose() {
-    _disposed = true;
-    _events?.cancel();
-    _events = null;
-    attached = 0;
-  }
-
-  void _onEvent(RaftEvent event) {
-    if (_disposed || attached != 0 || identity() != snapshot.identity) return;
+  void onSessionEvent(RaftEvent event) {
     if (event.name != 'connected' && !event.name.startsWith('task:')) return;
     switch (classifyTaskEvent(event, serverId: serverId())) {
       case TaskEventIgnored():
@@ -281,29 +238,17 @@ ServerTaskWindow holdServerTaskWindow(
   required String? Function() serverId,
   required String Function() identity,
 }) {
-  final current = cache.serverTasks;
-  if (current is ServerTaskWindow &&
-      current.snapshot.identity == snapshot.identity &&
-      identical(current.client, client)) {
-    current.adopt(
+  return holdServerPage(
+    cache,
+    serverTasksPage,
+    ServerTaskWindow(
+      client: client,
+      events: events,
       snapshot: snapshot,
       belongs: belongs,
       channelName: channelName,
       serverId: serverId,
       identity: identity,
-    );
-    return current;
-  }
-  final created = ServerTaskWindow(
-    client: client,
-    events: events,
-    snapshot: snapshot,
-    belongs: belongs,
-    channelName: channelName,
-    serverId: serverId,
-    identity: identity,
+    ),
   );
-  cache.keepServerTasks(created, created.dispose);
-  created.ensureListening();
-  return created;
 }

@@ -37,6 +37,7 @@ Future<Future<void> Function()> mountKeyboardChat(
   required LabImages images,
   required RaftFamily family,
   required bool dark,
+  bool useTestViewport = false,
 }) async {
   final channel = LabChannel('kb', mixKinds(40));
   for (var i = 0; i < channel.rows.length; i++) {
@@ -84,8 +85,8 @@ Future<Future<void> Function()> mountKeyboardChat(
   final dir = await Directory.systemTemp.createTemp('raft-lab-keyboard-');
   final content = LabNavigationContent();
   await NativeSystemFonts.instance.initialize();
-  await t.pumpWidget(
-    app.RaftApp(
+  final rootApp = app.RaftApp(
+      key: const ValueKey('lab-keyboard'),
       services: const AppServices.updatesDisabledForTestOrPreview(),
       sessionStore: client.sessionStore,
       createClient: (_, _, _) => client,
@@ -93,9 +94,29 @@ Future<Future<void> Function()> mountKeyboardChat(
       nativeContent: content,
       nativeSharing: NativeSharing(supported: false),
       openWorkspaceCache: () async => LabNavigationCache(File('${dir.path}/workspace.sqlite')),
-    ),
-  );
+    );
+  await t.pumpWidget(useTestViewport
+      ? MediaQuery.fromView(view: t.view, child: rootApp) : rootApp);
   await idle(const Duration(seconds: 2));
+  if (useTestViewport) {
+    await waitUntil(() => find.text('lab-kb', findRichText: true).evaluate().isNotEmpty ||
+        find.text('/lab', findRichText: true).hitTestable().evaluate().isNotEmpty,
+        limit: const Duration(seconds: 15));
+    if (find.text('lab-kb', findRichText: true).evaluate().isEmpty &&
+        find.text('/lab', findRichText: true).hitTestable().evaluate().isNotEmpty) {
+      await t.tap(find.text('/lab', findRichText: true));
+    }
+  }
+  if (await waitUntil(() => find.text('lab-kb', findRichText: true).evaluate().isNotEmpty,
+      limit: const Duration(seconds: 15)) < 0) {
+    final root = t.element(find.byType(app.RaftApp));
+    final actualView = View.of(root);
+    final text = find.byType(RichText).evaluate().map((e) => (e.widget as RichText).text.toPlainText()).take(30).join(' | ');
+    final media = MediaQuery.sizeOf(t.element(find.byType(Scaffold).first));
+    throw StateError('keyboard channel not listed; appView=${actualView.physicalSize.width}x${actualView.physicalSize.height}; '
+        'testView=${t.view.physicalSize.width}x${t.view.physicalSize.height}; media=${media.width}x${media.height}; '
+        'text=$text; requests=${api.hits}; misses=${api.misses}');
+  }
   await t.tap(find.text('lab-kb', findRichText: true));
   final opened = await waitUntil(
     () => find.byType(RaftComposer).evaluate().isNotEmpty,
@@ -119,15 +140,15 @@ Future<Future<void> Function()> mountKeyboardChat(
 /// animation windows. Each window carries the UI thread's on-CPU time.
 /// Profile switches record one timeline event per build, layout and paint
 /// so the summary can count them; they are restored before returning.
-Future<Map<String, Object?>> keyboardOpenClose(WidgetTester t) async {
+Future<Map<String, Object?>> keyboardOpenClose(WidgetTester t, {bool profilePhases = true}) async {
   final builds = debugProfileBuildsEnabled;
   final layouts = debugProfileLayoutsEnabled;
   final paints = debugProfilePaintsEnabled;
-  debugProfileBuildsEnabled = true;
-  debugProfileLayoutsEnabled = true;
-  debugProfilePaintsEnabled = true;
+  debugProfileBuildsEnabled = profilePhases;
+  debugProfileLayoutsEnabled = profilePhases;
+  debugProfilePaintsEnabled = profilePhases;
   try {
-    return await _keyboardOpenClose(t);
+    return {...await _keyboardOpenClose(t), 'phaseProfiling': profilePhases};
   } finally {
     debugProfileBuildsEnabled = builds;
     debugProfileLayoutsEnabled = layouts;

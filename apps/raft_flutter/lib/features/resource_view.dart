@@ -27,6 +27,7 @@ import '../data/activity_done_state.dart';
 import '../data/source_read_all_transport.dart';
 import '../data/resource_row_reconcile.dart';
 import '../data/resource_snapshot_cache.dart';
+import '../data/server_page_window.dart';
 import '../data/server_task_window.dart';
 import '../data/server_saved_window.dart';
 import 'server_task_scope.dart';
@@ -642,17 +643,12 @@ class _ResourceViewState extends State<ResourceView> {
     TaskSnapshot? snapshot;
     if (serverTaskPage) {
       // The workspace page no longer reads the `tasks` slot.
-      w.resourceSnapshots.remove(snapshotSection);
-      final window = w.resourceSnapshots.serverTasks;
-      if (window != null &&
-          window.snapshot.identity == identityAuthority &&
-          acceptsTaskChannel) {
-        window.attach();
-        window.needsRevalidate = false;
-        snapshot = window.snapshot;
-      } else if (window != null) {
-        w.resourceSnapshots.dropServerTasks();
-      }
+      snapshot = takeServerPage<TaskSnapshot>(
+        w.resourceSnapshots,
+        serverTasksPage,
+        identityAuthority,
+        accept: (_) => acceptsTaskChannel,
+      );
     } else {
       snapshot = w.resourceSnapshots.read<TaskSnapshot>(
         snapshotSection,
@@ -717,7 +713,7 @@ class _ResourceViewState extends State<ResourceView> {
         error != null ||
         rowsView == null) {
       w.resourceSnapshots.remove(snapshotSection);
-      if (serverTaskPage) w.resourceSnapshots.dropServerTasks();
+      if (serverTaskPage) w.resourceSnapshots.dropServerPage(serverTasksPage);
       return;
     }
     final snapshot = TaskSnapshot(
@@ -854,7 +850,7 @@ class _ResourceViewState extends State<ResourceView> {
         error != null ||
         rowsView == null) {
       w.resourceSnapshots.remove(widget.section);
-      if (savedPage) w.resourceSnapshots.dropServerSaved();
+      if (savedPage) w.resourceSnapshots.dropServerPage(serverSavedPage);
       return;
     }
     viewWindows.remove(rowsView);
@@ -1220,8 +1216,8 @@ class _ResourceViewState extends State<ResourceView> {
       unawaited(load(keep: true, quietErrors: rows.isNotEmpty));
       return;
     }
-    if (serverTaskPage) w.resourceSnapshots.dropServerTasks();
-    if (savedPage) w.resourceSnapshots.dropServerSaved();
+    if (serverTaskPage) w.resourceSnapshots.dropServerPage(serverTasksPage);
+    if (savedPage) w.resourceSnapshots.dropServerPage(serverSavedPage);
     setState(() {
       clearRows();
       resetAdvanced();
@@ -1828,12 +1824,12 @@ class _ResourceViewState extends State<ResourceView> {
       bindAuthors();
     }
     if (!identical(oldWidget.controller, w)) {
-      if (oldWidget.section == 'tasks' && oldWidget.channelId == null) {
-        final previous = oldWidget.controller.resourceSnapshots.serverTasks;
-        if (previous != null && previous.attached > 0) previous.detach();
-      }
-      if (oldWidget.section == 'saved' && oldWidget.channelId == null) {
-        final previous = oldWidget.controller.resourceSnapshots.serverSaved;
+      final section = oldWidget.section;
+      if (oldWidget.channelId == null &&
+          (section == serverTasksPage || section == serverSavedPage)) {
+        final previous = oldWidget.controller.resourceSnapshots.serverPage(
+          section,
+        );
         if (previous != null && previous.attached > 0) previous.detach();
       }
       oldWidget.controller.removeListener(authorityChanged);

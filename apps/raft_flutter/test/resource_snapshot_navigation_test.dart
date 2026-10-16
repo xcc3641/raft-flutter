@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_client/raft_client.dart';
 import 'package:raft_flutter/data/resource_snapshot_cache.dart';
+import 'package:raft_flutter/data/server_saved_window.dart';
 import 'package:raft_flutter/features/resource_view.dart';
 import 'package:raft_flutter/features/saved_sidebar_entry.dart';
 import 'package:raft_ui/raft_ui.dart';
@@ -37,6 +38,11 @@ void main() {
       ),
     ),
   );
+  ServerSavedWindow? heldSaved() {
+    final slot = w.resourceSnapshots.serverPage(serverSavedPage);
+    return slot is ServerSavedWindow ? slot : null;
+  }
+
   Widget away() => MaterialApp(
     theme: raftTheme(RaftFamily.elegant),
     home: const Scaffold(body: SizedBox.expand()),
@@ -129,7 +135,7 @@ void main() {
     dynamic state = tester.state(find.byType(ResourceView));
     expect(state.rows, hasLength(20));
     await tester.pumpWidget(away());
-    final held = w.resourceSnapshots.serverSaved;
+    final held = heldSaved();
     expect(held, isNotNull);
     expect(w.resourceSnapshots.read('saved', held!.snapshot.identity), isNull);
     w.hold = Completer<void>();
@@ -183,7 +189,7 @@ void main() {
     await tester.pumpWidget(away());
     await tester.pumpAndSettle();
     final queries = w.savedQueries.length;
-    final window = w.resourceSnapshots.serverSaved;
+    final window = heldSaved();
     w.saved.insert(0, {
       ...w.saved.first,
       'messageId': 'fresh',
@@ -261,7 +267,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(w.savedQueries, hasLength(queries));
     expect(
-      w.resourceSnapshots.serverSaved?.snapshot.rows.first['content'],
+      heldSaved()?.snapshot.rows.first['content'],
       'Edited away',
     );
     w.hold = Completer<void>();
@@ -283,7 +289,7 @@ void main() {
     final queries = w.savedQueries.length;
     client.emit('connected', const {});
     await tester.pump(const Duration(milliseconds: 300));
-    expect(w.resourceSnapshots.serverSaved?.needsRevalidate, isTrue);
+    expect(heldSaved()?.needsRevalidate, isTrue);
     expect(w.savedQueries, hasLength(queries));
     expect(find.text('Saved body 0'), findsNothing);
   });
@@ -298,7 +304,7 @@ void main() {
     final queries = w.savedQueries.length;
     client.emit('agent:seen', {'id': 'a1'});
     await tester.pump(const Duration(milliseconds: 300));
-    expect(w.resourceSnapshots.serverSaved?.needsRevalidate, isFalse);
+    expect(heldSaved()?.needsRevalidate, isFalse);
     expect(w.savedQueries, hasLength(queries));
   });
 
@@ -319,7 +325,7 @@ void main() {
     w.hold = null;
     await tester.pumpAndSettle();
     expect(
-      w.resourceSnapshots.serverSaved?.snapshot.rows.any(
+      heldSaved()?.snapshot.rows.any(
         (row) => row['content'] == 'Should not land',
       ),
       isFalse,
@@ -362,10 +368,10 @@ void main() {
     await tester.pumpAndSettle();
     final queries = w.savedQueries.length;
     w.revokeServer('s1');
-    expect(w.resourceSnapshots.serverSaved, isNull);
+    expect(heldSaved(), isNull);
     client.emit('message:deleted', {'id': 'saved1'});
     await tester.pump(const Duration(milliseconds: 300));
-    expect(w.resourceSnapshots.serverSaved, isNull);
+    expect(heldSaved(), isNull);
     expect(w.savedQueries, hasLength(queries));
   });
 
@@ -381,7 +387,7 @@ void main() {
     await tester.pumpWidget(page('saved'));
     await tester.pump();
     expect(find.text('Saved body 0'), findsNothing);
-    expect(w.resourceSnapshots.serverSaved, isNull);
+    expect(heldSaved(), isNull);
     w.hold!.complete();
     w.hold = null;
     await tester.pumpAndSettle();
@@ -399,7 +405,7 @@ void main() {
     await tester.pumpWidget(page('saved'));
     expect(skeleton, findsOneWidget);
     expect(find.text('Saved body 0'), findsNothing);
-    expect(w.resourceSnapshots.serverSaved, isNull);
+    expect(heldSaved(), isNull);
     w.hold!.complete();
     w.hold = null;
     await tester.pumpAndSettle();
@@ -410,9 +416,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pumpWidget(away());
     await tester.pumpAndSettle();
-    expect(w.resourceSnapshots.serverSaved, isNotNull);
+    expect(heldSaved(), isNotNull);
     unawaited(w.selectServer(RaftRecord({'id': 's2', 'role': 'owner'})));
-    expect(w.resourceSnapshots.serverSaved, isNull);
+    expect(heldSaved(), isNull);
     await tester.pumpAndSettle();
   });
 }

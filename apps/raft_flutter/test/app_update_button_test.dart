@@ -62,6 +62,25 @@ class _FakeUpdater implements AppUpdater {
     required AppImageHttpClientFactory httpClientFactory,
     Uri? origin,
   }) {}
+
+  @override
+  Future<void> Function()? beforeQuit;
+
+  @override
+  Future<void> Function() performRequiredExit = () async {};
+
+  @override
+  Future<void> quitAfterHook() async {
+    final hook = beforeQuit;
+    if (hook != null) {
+      try {
+        await hook();
+      } on Object {
+        // The required exit still proceeds.
+      }
+    }
+    await performRequiredExit();
+  }
 }
 
 /// An [AppImageUpdater] whose steps are scripted; only what the card calls.

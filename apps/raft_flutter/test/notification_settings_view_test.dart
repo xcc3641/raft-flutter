@@ -206,8 +206,8 @@ void main() {
       final before = reads();
       for (var i = 0; i < 3; i++) {
         w.channel = RaftChannel({'id': 'c$i', 'name': 'c$i', 'joined': true});
-        w.channelGeneration++;
-        w.threadGeneration++;
+        w.messageWindows.channelGeneration++;
+        w.messageWindows.threadGeneration++;
         w.notifyListeners();
         await t.pump();
         expect(card(t).muted, true, reason: 'switch $i');
@@ -460,7 +460,7 @@ void main() {
     s.enabled = false;
     s.notifyListeners();
     await t.pump();
-    expect(find.text('未开启'), findsOneWidget);
+    expect(find.text('未启用'), findsOneWidget);
     expect(find.text('开启通知'), findsOneWidget);
   });
   testWidgets('phone: unavailable disables the action and says why', (t) async {

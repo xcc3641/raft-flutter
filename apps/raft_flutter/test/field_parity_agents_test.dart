@@ -4,10 +4,10 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_client/raft_client.dart';
+import 'package:raft_flutter/data/migration_error.dart';
 import 'package:raft_flutter/data/workspace_entity_directory.dart';
 import 'package:raft_flutter/features/agent_avatar_projection.dart';
 import 'package:raft_flutter/features/agent_metadata_projection.dart';
-import 'package:raft_flutter/features/agent_migration_view.dart';
 import 'package:raft_flutter/features/computer_detail_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 
@@ -328,33 +328,9 @@ void main() {
   });
 
   group('agent migration view', () {
-    test('known and unknown states read as words', () {
-      expect(migrationStatusLabel('in_transit'), 'In progress');
-      expect(migrationStatusLabel('cancel_requested_post_flip'), 'Canceling');
-      expect(migrationStatusLabel('canceled_pre_flip'), 'Canceled');
-      expect(migrationStatusLabel('completed'), 'Complete');
-      expect(migrationStatusLabel('aborted'), 'Needs attention');
-      expect(migrationStatusLabel('waiting_for_target'), 'Waiting for target');
+    test('unknown states have no phase', () {
       expect(migrationPhase('waiting_for_target'), isNull);
-    });
-
-    test('abortReason maps to Web copy', () {
-      expect(
-        migrationAbortText('transfer-deadline'),
-        startsWith('The workspace transfer did not finish'),
-      );
-      expect(
-        migrationAbortText('prep-deadline', source: 'Mac'),
-        contains('Preparing the workspace on Mac'),
-      );
-      expect(
-        migrationAbortText('arrival-deadline', target: 'Box'),
-        contains('target Computer Box'),
-      );
-      expect(
-        migrationAbortText('mystery'),
-        startsWith('The migration stopped before it completed'),
-      );
+      expect(migrationPhase('in_transit'), 'active');
     });
   });
 }

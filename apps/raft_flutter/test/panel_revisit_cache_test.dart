@@ -125,8 +125,8 @@ void main() {
         }
 
         // Opening a thread / socket traffic does not re-fence the list.
-        w.threadGeneration++;
-        w.channelGeneration++;
+        w.messageWindows.threadGeneration++;
+        w.messageWindows.channelGeneration++;
         w.notifyListeners();
         await t.pump();
         expect(find.text('Loading files…'), findsNothing);

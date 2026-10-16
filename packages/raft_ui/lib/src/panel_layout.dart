@@ -920,6 +920,7 @@ class RaftPanelIconButton extends StatelessWidget {
     this.onPressed,
     this.iconSize = 14,
     this.anchorLink,
+    this.anchorKey,
     this.focusNode,
     this.onKeyboardActivate,
   });
@@ -935,6 +936,7 @@ class RaftPanelIconButton extends StatelessWidget {
   /// Overlay anchor at the painted button, including recipe hover/press
   /// translation. CSS menus use the trigger's transformed border box.
   final LayerLink? anchorLink;
+  final GlobalKey? anchorKey;
   final FocusNode? focusNode;
   final VoidCallback? onKeyboardActivate;
   @override
@@ -991,7 +993,11 @@ class RaftPanelIconButton extends StatelessWidget {
                 ),
         );
         if (anchorLink != null) {
-          button = CompositedTransformTarget(link: anchorLink!, child: button);
+          button = CompositedTransformTarget(
+            key: anchorKey,
+            link: anchorLink!,
+            child: button,
+          );
         }
         return Opacity(
           opacity: s.opacity ?? 1,

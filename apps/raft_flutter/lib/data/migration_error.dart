@@ -5,13 +5,51 @@
 // Web catalog entry; the display layer localizes it with raftText.
 //
 // The four codes whose Web copy is assembled from wire data (bundle / manifest
-// size, entry count, free disk) use the Web message's "no details" branch (the
-// ICU `select` arm for an absent `items` / `paths` / sizes), because this
-// screen does not parse the wire detail.
+// size, entry count, free disk) have their catalog text here in the Web
+// message's "no details" branch (the ICU `select` arm for an absent `items` /
+// `paths` / sizes); features/agent_migration_presentation.dart parses the wire
+// detail and picks the richer arm when it is there.
 
 import 'package:raft_client/raft_client.dart';
+import 'package:raft_ui/raft_ui.dart' show RaftUserError;
 
 import 'user_error.dart';
+
+/// Web components/agentMigration/state.ts migrationPhase: null for a state
+/// this client does not know.
+String? migrationPhase(String? state) => switch (state) {
+  'provisioning' ||
+  'prep' ||
+  'ready' ||
+  'in_transit' ||
+  'arriving' ||
+  'starting' ||
+  'cancel_requested_pre_flip' ||
+  'cancel_requested_post_flip' => 'active',
+  'canceled_pre_flip' || 'canceled_post_flip' => 'canceled',
+  'completed' => 'completed',
+  'aborted' || 'failed' => 'failed',
+  _ => null,
+};
+
+/// Web billing.ts `MIGRATION_PRO_PLAN_REQUIRED_CODE`.
+const migrationProPlanRequiredCode = 'MIGRATION_PRO_PLAN_REQUIRED';
+
+/// Web billing.ts `isMigrationProPlanRequiredError`: the start route refused
+/// because the Server is not on a Pro-capable plan.
+bool isMigrationProPlanRequiredError(Object? error) =>
+    error is RaftApiException &&
+    error.details['code'] == migrationProPlanRequiredCode;
+
+/// Web billing.ts `agentMigrationRequiresUpgrade`. The billing projection is
+/// advisory; an unavailable or unrecognized plan must not invent a denial the
+/// server cannot confirm. [trialActive] is `isTrialActive(now)`.
+bool agentMigrationRequiresUpgrade(Object? plan, {required bool trialActive}) =>
+    switch (plan) {
+      'pro' || 'founder' || 'partner' => false,
+      'free' => !trialActive,
+      _ => false,
+    };
 
 enum MigrationErrorContext { start, status, failed, aborted, cancel }
 
@@ -119,6 +157,10 @@ String migrationCodeText(
   String? reason,
 }) => _copy[code] ?? _fallback(context, reason);
 
+/// Whether [code] has dedicated catalog copy (Web errors.ts `Object.hasOwn`
+/// over the copy tables).
+bool migrationHasCopy(String? code) => _copy.containsKey(code);
+
 /// English source text for a failed migration request ([error] is what the
 /// API call threw). The server's own sentence is never shown.
 String migrationErrorText(Object error, MigrationErrorContext context) {
@@ -127,47 +169,33 @@ String migrationErrorText(Object error, MigrationErrorContext context) {
   return migrationCodeText(code is String ? code : null, context);
 }
 
-/// Web AgentMigrationCancelDialog: the stale / generic cancel copy with the
-/// safe technical code appended when there is one.
-String migrationCancelErrorText(Object error) {
+/// Web AgentMigrationCancelDialog: the stale / generic cancel copy; the safe
+/// technical code, when there is one, is appended as `message (CODE)`.
+({String message, String suffix}) migrationCancelErrorParts(Object error) {
   final code = error is RaftApiException ? error.details['code'] : null;
   logUserError(error, where: 'agent migration cancel');
   final stale =
       code == 'MIGRATION_REVISION_STALE' ||
       code == 'MIGRATION_CONCURRENT_UPDATE';
-  final message = stale
-      ? 'The migration changed before cancellation was submitted. Status was refreshed; review the current status and try again.'
-      : 'Cancellation could not be requested. Status was refreshed; keep both computers online and try again.';
-  return code is String && _safeTechnicalCode.hasMatch(code)
-      ? '$message ($code)'
-      : message;
-}
-
-/// Failure copy of a migration that ended (Web `migrationFailureCopyCode` +
-/// the `failed` / `aborted` contexts). [migration] is the status projection.
-String? migrationFailureText(Map<String, dynamic> migration) {
-  final state = migration['state'];
-  if (state == 'aborted') {
-    final reason = migration['abortReason'];
-    return _abortReasons[reason] ?? _abortedFallback;
-  }
-  if (state != 'failed') return null;
-  final transport = migration['transportErrorCode'];
-  final failure = migration['failureReason'];
-  final code = transport is String && transport.isNotEmpty
-      ? (_copy.containsKey(transport) || failure is! String || failure.isEmpty
-            ? transport
-            : failure)
-      : failure;
-  return migrationCodeText(
-    code is String ? code : null,
-    MigrationErrorContext.failed,
+  return (
+    message: stale
+        ? 'The migration moved on before your request went through. Check the latest status and try again.'
+        : "Couldn't cancel the migration. The status has been refreshed. Keep both computers online and try again.",
+    suffix: code is String && _safeTechnicalCode.hasMatch(code)
+        ? ' ($code)'
+        : '',
   );
 }
 
-/// Web `agent.migration.cancel{Pre,Post}AttentionMessage` for a cancellation
-/// Raft could not confirm.
-String migrationCancelAttentionText(Map<String, dynamic> migration) =>
-    migration['state'] == 'cancel_requested_post_flip'
-    ? 'Raft could not confirm cleanup after the computer switch. Keep both computers online and use the migration reference when asking for support.'
-    : 'Raft could not confirm cleanup on the source computer. Keep both computers online and use the migration reference when asking for support.';
+/// [migrationCancelErrorParts] as one English string.
+String migrationCancelErrorText(Object error) {
+  final parts = migrationCancelErrorParts(error);
+  return '${parts.message}${parts.suffix}';
+}
+
+/// [migrationCancelErrorParts] as a user error whose code suffix is added
+/// after the message is localized.
+RaftUserError migrationCancelUserError(Object error) {
+  final parts = migrationCancelErrorParts(error);
+  return RaftUserError(parts.message, suffix: parts.suffix);
+}

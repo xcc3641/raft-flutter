@@ -100,6 +100,10 @@ Map<String, dynamic> _errorDetails(Map? body) {
     // Form-validation issues (`[{code, pointer}]`); the pointer names the
     // field that failed (runtime form v2 create / edit).
     'issues',
+    // Agent migration start refusals: which computer lacks which runtime
+    // (COMPUTER_CAPABILITY_INSUFFICIENT) or needs a Raft Computer update
+    // (MIGRATION_RESUMABLE_CAPABILITY_REQUIRED); the view validates the shape.
+    'details',
   };
   dynamic freeze(dynamic value) {
     if (value is Map) {

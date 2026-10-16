@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -51,8 +52,10 @@ import 'platform/system_bars.dart';
 import 'platform/system_fonts.dart';
 import 'platform/app_update.dart';
 import 'platform/app_services.dart';
+import 'platform/app_window.dart';
 import 'platform/app_update_smoke.dart';
 import 'platform/background_notifications.dart';
+import 'platform/cache_exit.dart';
 
 final raftScreenshotKey = GlobalKey();
 
@@ -284,10 +287,12 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
       widget.sessionStore ?? SecureSessionStore(),
     );
     WidgetsBinding.instance.addObserver(this);
+    bindCacheExit(() => closeCacheForExit(cache?.close));
     RaftMemoryRelease.instance.install();
     NativeSystemFonts.instance.addListener(rebuildRoot);
     removeShareReceiver = sharing.registerReceiver(receiveSharedContent);
     content.onIncomingShare = () => unawaited(sharing.resume());
+    content.onForegroundChanged = syncWorkspaceForeground;
     // The few fixed words of a system notification (the unread count) follow
     // the member's display language, like the rest of the app.
     content.notifications.localize = (source) =>
@@ -964,7 +969,7 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
             identical(c, client) &&
             !showServerSelector &&
             serverSwitchLocation == null) {
-          workspace?.setForeground(true);
+          syncWorkspaceForeground();
         }
       });
       return;
@@ -1601,14 +1606,15 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
         rootRequest == request &&
         identical(client, c) &&
         identical(workspace, w) &&
-        c.user?.id == principal;
+        c.user?.id == principal &&
+        w.servers.any((s) => s.id == selected.id);
     setState(() {
       selectingServer = true;
       selectorError = null;
     });
     try {
       await w.flushCache();
-      if (!current() || !w.servers.any((s) => s.id == selected.id)) return;
+      if (!current()) return;
       if (w.server?.id != selected.id) {
         // A server with an on-device workspace opens as soon as that cache
         // is painted; its fresh channels and page revalidate in place.
@@ -1623,11 +1629,10 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
             if (!hydrated.isCompleted) hydrated.complete();
           },
         );
-        final settled = await Future.any([
+        if (!await Future.any([
           hydrated.future.then((_) => false),
           selecting.then((_) => true),
-        ]);
-        if (!settled) {
+        ])) {
           unawaited(
             selecting.then<void>(
               (_) {},
@@ -1647,48 +1652,46 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
           );
         }
       }
-      if (!current() ||
-          w.server?.id != selected.id ||
-          !w.servers.any((s) => s.id == selected.id)) {
-        return;
-      }
+      if (!current() || w.server?.id != selected.id) return;
       var uri = location ?? serverSurfaces[selected.id];
       // MainLayout DefaultRoute914–947 redirects a desktop server root to the
       // first actual channel with REPLACE. Mobile deliberately stays Home.
       if (resolveDesktopRoot && w.channels.isNotEmpty) {
-        final channel = w.channels.first;
         uri = RaftLocation.at(
           serverSlug: selected.string('slug'),
           route: RaftRoute.channel,
-          entityId: channel.id,
+          entityId: w.channels.first.id,
         ).uri;
-        if (w.channel?.id != channel.id) {
-          await w.selectChannel(channel, navigate: false);
-        }
-        if (!current()) return;
         appRouter.publish(uri, replace: true);
       }
       if (uri != null &&
-          uri.pathSegments.length >= 2 &&
-          uri.pathSegments[1] == selected.string('slug')) {
-        w.bindNavigation();
+          uri.pathSegments.elementAtOrNull(1) == selected.string('slug')) {
         // MainLayout useRailLegacyRedirect: legacy shapes REPLACE in place.
-        w.navigation.navigate(
-          RaftLocation.fromUri(RaftLocation.canonicalLegacy(uri)),
-          kind: RaftNavigationKind.replace,
-        );
+        final target = RaftLocation.fromUri(RaftLocation.canonicalLegacy(uri));
+        final routeChanged = w.location.uri != target.uri;
+        if (routeChanged) {
+          w.navigation.navigate(target, kind: RaftNavigationKind.replace);
+        }
+        // The accepted route wins over a different cached selection. Resolve
+        // without blocking the cached first frame or rewriting that route.
+        if ({RaftRoute.channel, RaftRoute.dm}.contains(target.route) &&
+            (routeChanged || w.channel?.id != target.entityId)) {
+          unawaited(
+            w.resolveConversationChannel(
+              target.entityId!,
+              preserveThread: target.thread != null,
+            ),
+          );
+        }
       }
       showServerSelector = false;
-      serverSwitchLocation = serverSwitchReturn = null;
-      chooserReturn = null;
+      chooserReturn = serverSwitchLocation = serverSwitchReturn = null;
       directoryLoading = false;
       content.bindWorkspace(w);
       workspaceChanged();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (current() && !showServerSelector && w.server?.id == selected.id) {
-          w.setForeground(
-            WidgetsBinding.instance.lifecycleState != AppLifecycleState.paused,
-          );
+          syncWorkspaceForeground();
         }
       });
       final prefs = await SharedPreferences.getInstance();
@@ -2056,6 +2059,15 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
     await NativeLaunchTheme.instance.set(value);
   }
 
+  void syncWorkspaceForeground() {
+    if (!mounted) return;
+    workspace?.setForeground(
+      content.appForeground &&
+          !showServerSelector &&
+          serverSwitchLocation == null,
+    );
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     workspace?.setForeground(
@@ -2091,6 +2103,14 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
   @override
   void didChangeLocales(List<Locale>? locales) => rebuildRoot();
 
+  /// The engine waits for this before it tears the background isolate down.
+  /// Completion, timeout, and failure all allow the exit.
+  @override
+  Future<AppExitResponse> didRequestAppExit() async {
+    await closeCacheForExit(cache?.close);
+    return AppExitResponse.exit;
+  }
+
   @override
   void dispose() {
     restoreRetry?.cancel();
@@ -2106,6 +2126,7 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
     unawaited(shareSession.dispose());
     RaftMemoryRelease.instance.uninstall();
     WidgetsBinding.instance.removeObserver(this);
+    bindCacheExit(null);
     NativeSystemFonts.instance.removeListener(rebuildRoot);
     unawaited(content.dispose());
     AttachmentHttp.close();
@@ -2154,25 +2175,29 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
       locale: locale,
       supportedLocales: const [Locale('en'), Locale('zh', 'CN')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      builder: (context, child) => AppServicesHost(
-        services: widget.services,
-        ownsAppUpdate: widget.ownsAppUpdate,
-        child: RaftTextScaling(
-          child: RepaintBoundary(
-            key: raftScreenshotKey,
-            child: DesktopTitleBar(
-              child: RaftTooltipProvider(
-                delay: const Duration(milliseconds: 600),
-                child: RaftViewportBreakpointScope(
-                  // Resolves the theme's font combinations once the app is idle.
-                  child: RaftFontWarmUpScope(
-                    child: RaftSystemBars(
-                      child: RaftErrorScope(
-                        format: raftAppErrorFormatter,
-                        child: RaftToastHost(
-                          child: KeyboardInsetGuard(
-                            imeVisible: platformImeVisibility,
-                            child: child!,
+      builder: (context, child) => AppWindowCommands(
+        navigatorKey: appRouter.navigatorKey,
+        openSection: workspace?.setSection,
+        child: AppServicesHost(
+          services: widget.services,
+          ownsAppUpdate: widget.ownsAppUpdate,
+          child: RaftTextScaling(
+            child: RepaintBoundary(
+              key: raftScreenshotKey,
+              child: DesktopTitleBar(
+                child: RaftTooltipProvider(
+                  delay: const Duration(milliseconds: 600),
+                  child: RaftViewportBreakpointScope(
+                    // Resolves the theme's font combinations once the app is idle.
+                    child: RaftFontWarmUpScope(
+                      child: RaftSystemBars(
+                        child: RaftErrorScope(
+                          format: raftAppErrorFormatter,
+                          child: RaftToastHost(
+                            child: KeyboardInsetGuard(
+                              imeVisible: platformImeVisibility,
+                              child: child!,
+                            ),
                           ),
                         ),
                       ),

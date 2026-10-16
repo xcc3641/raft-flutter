@@ -13,6 +13,10 @@ import 'package:raft_ui/raft_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'message_timeline.dart';
+import 'history_reading_anchor.dart';
+import 'message_history_gaps.dart';
+import '../data/message_history_memory.dart';
+import '../data/message_history_positions.dart';
 import 'row_extents.dart';
 
 import '../data/plan_history.dart';
@@ -55,6 +59,31 @@ import 'profile_preview.dart';
 import 'quoted_message_preview.dart';
 import 'message_task_projection.dart';
 import 'saved_sidebar_entry.dart';
+
+/// Phone channel timeline and the thread opened from that page. Present only
+/// while that page is the direct-read visit. Desktop, grid, task discussion
+/// and agent chat do not wrap this.
+class MobileChatDirectRead extends InheritedWidget {
+  const MobileChatDirectRead({
+    super.key,
+    required this.channel,
+    required this.thread,
+    required super.child,
+  });
+
+  final bool channel, thread;
+
+  static MobileChatDirectRead? maybeOf(BuildContext context) {
+    final found = context
+        .getElementForInheritedWidgetOfExactType<MobileChatDirectRead>()
+        ?.widget;
+    return found is MobileChatDirectRead ? found : null;
+  }
+
+  @override
+  bool updateShouldNotify(MobileChatDirectRead oldWidget) =>
+      channel != oldWidget.channel || thread != oldWidget.thread;
+}
 
 /// Controlled mounted-viewport action; no route, controller or data ownership.
 class ChatViewportHandle {
@@ -353,6 +382,10 @@ class _RaftChatViewState extends State<RaftChatView>
       }
       if (active) sync();
     }
+    if (!_directLatched && _directTimeline && presentationActive) {
+      _directLatched = true;
+      sync();
+    }
   }
 
   // Web ThreadPanel in-thread search (thread view only): the bar's field and
@@ -427,7 +460,38 @@ class _RaftChatViewState extends State<RaftChatView>
   final focusAnchors = <String, GlobalKey>{};
   Future<void> updates = Future.value();
   WorkspaceController get w => widget.controller;
-  List<RaftMessage> get rows => w.timeline(thread: widget.thread);
+
+  /// Latched once the phone direct scope is visible, so the first dependencies
+  /// pass reads the shared window before paint. Later dependency changes do
+  /// not sync again.
+  bool _directLatched = false;
+
+  MobileChatDirectRead? get _directScope {
+    if (!mounted) return null;
+    try {
+      return MobileChatDirectRead.maybeOf(context);
+    } on FlutterError {
+      return null;
+    }
+  }
+
+  bool get _directTimeline {
+    final scope = _directScope;
+    if (scope == null) return false;
+    return widget.thread ? scope.thread : scope.channel;
+  }
+
+  List<RaftMessage> get rows {
+    // Covered and non-phone timelines keep the controller projection. The
+    // foreground phone page reads the shared window, which already includes
+    // pending sends. A missing window falls back so the first frame is not
+    // emptied.
+    if (_directTimeline && presentationActive && w.presentationActive) {
+      final window = widget.thread ? w.threadWindow : w.messageWindow;
+      if (window != null && !window.retired) return window.timeline;
+    }
+    return w.timeline(thread: widget.thread);
+  }
   @override
   void initState() {
     super.initState();
@@ -794,6 +858,10 @@ class _RaftChatViewState extends State<RaftChatView>
     if (!mounted || viewport.positions.length != 1) return;
     final position = viewport.position;
     if (!position.hasContentDimensions) return;
+    final sampledId = widget.thread ? w.threadChannelId : w.channel?.id;
+    MessageHistoryMemory.sample(w, this, () {
+      if (mounted && sampledId == scope) saveReadingAnchor();
+    });
     // MessageTimeline.tsx AT_BOTTOM_THRESHOLD.
     final next = distanceFromLatest(position) <= 100;
     if (next != atBottom || (next && newMessageCount != 0)) {
@@ -805,7 +873,10 @@ class _RaftChatViewState extends State<RaftChatView>
       });
       // Source setNearBottom(true) -> markCurrentChannelRead: scrolling back
       // to the latest end reads what arrived while the reader was above it.
-      if (arrived) {
+      if (arrived && presentationActive) {
+        // A covered direct page shares the session receipt. It must not send
+        // one. Other pages keep the existing receipt rule.
+        if (_directTimeline && !w.presentationActive) return;
         final id = widget.thread ? w.threadChannelId : w.channel?.id;
         if (id != null && (w.unread[id] ?? 0) != 0) {
           unawaited(w.markRead(id));
@@ -816,10 +887,8 @@ class _RaftChatViewState extends State<RaftChatView>
 
   Future<void> returnToBottom() async {
     newMessageCount = 0;
-    // A thread has no history window; its button only scrolls to the end and
-    // must never reload the outer channel.
-    returningLatest = !widget.thread && w.hasNewer;
-    if (!widget.thread) await w.returnToLatest(navigate: w.section == 'chat');
+    returningLatest = widget.thread ? w.threadWindow?.hasNewer == true : w.hasNewer;
+    await w.returnToLatest(thread: widget.thread, navigate: w.section == 'chat');
     if (!mounted || returningLatest) return;
     showLatest();
     timelineScrolled();
@@ -852,7 +921,6 @@ class _RaftChatViewState extends State<RaftChatView>
   }
 
   @override
-  @override
   void didChangeMetrics() {
     if (reactionPicker != null) closeReactionPicker();
     saveReadingAnchor();
@@ -863,49 +931,25 @@ class _RaftChatViewState extends State<RaftChatView>
   /// resumes there. Only readers above the latest end need it.
   void saveReadingAnchor() {
     final id = widget.thread ? w.threadChannelId : w.channel?.id;
-    if (id == null ||
-        !mounted ||
-        atBottom ||
-        !viewport.hasClients ||
+    if (!mounted || id == null || scope != id ||
+        adapterWindow != (widget.thread ? w.threadGeneration : w.channelGeneration) || !viewport.hasClients ||
         viewport.positions.length != 1) {
       return;
     }
-    ReadingAnchor? best;
-    double bestTop = double.infinity;
-    void visit(Element element) {
-      final key = element.widget.key;
-      if (key is ValueKey<String> && key.value.startsWith('message-wrapper-')) {
-        final row = element.renderObject;
-        final Object? clip = row == null
-            ? null
-            : RenderAbstractViewport.maybeOf(row);
-        if (row is RenderBox &&
-            clip is RenderBox &&
-            row.attached &&
-            row.hasSize &&
-            clip.hasSize) {
-          final top =
-              row.localToGlobal(Offset.zero).dy -
-              clip.localToGlobal(Offset.zero).dy;
-          if (top + row.size.height > 1 && top < bestTop) {
-            bestTop = top;
-            best = ReadingAnchor(
-              key.value.substring('message-wrapper-'.length),
-              top,
-            );
-          }
-        }
-        return;
-      }
-      element.visitChildren(visit);
+    // A short restored context can end inside the viewport while newer rows
+    // remain on disk. Only the conversation's latest end clears its anchor.
+    if (atBottom && !(widget.thread ? w.threadWindow?.hasNewer == true : w.hasNewer)) {
+      w.messageWindows.clearReadingAnchor(id);
+      MessageHistoryPositions.save(w, id, null);
+    } else if (captureTimelineReadingAnchor(context) case final anchor?) {
+      w.saveReadingAnchor(id, anchor);
     }
-
-    (context as Element).visitChildren(visit);
-    if (best != null) w.saveReadingAnchor(id, best!);
   }
 
   @override
   void dispose() {
+    saveReadingAnchor();
+    MessageHistoryMemory.cancelSample(w, this);
     if (reportedBottomId case final id?) w.setTimelineAtBottom(id, true);
     WidgetsBinding.instance.removeObserver(this);
     widget.viewportHandle?.release(this);
@@ -1008,7 +1052,9 @@ class _RaftChatViewState extends State<RaftChatView>
   bool applyWindow(List<chat.Message> projected) {
     final current = adapter.messages;
     final wanted = {for (final m in projected) m.id};
-    final next = ordered(current, projected, wanted);
+    // The window owns ordering, including an optimistic row's confirmed
+    // server sequence. Keep row identity and reading anchors, not stale order.
+    final next = projected;
     var same = current.length == next.length;
     for (var i = 0; same && i < next.length; i++) {
       final a = current[i], b = next[i];
@@ -1018,6 +1064,16 @@ class _RaftChatViewState extends State<RaftChatView>
     }
     if (same) return false;
     final previousLast = current.lastOrNull?.id;
+    if (!atBottom && insertsBetweenRetainedRows(current.map((m) => m.id), next.map((m) => m.id)) ||
+        centerFirst != null && !wanted.contains(centerFirst) ||
+        centerAfter != null && !wanted.contains(centerAfter)) {
+      saveReadingAnchor();
+      final resume = w.messageWindows.readingAnchor(scope ?? '');
+      if (resume != null && wanted.contains(resume.messageKey)) {
+        replaceContext(next, resume: resume);
+        return true;
+      }
+    }
     retainCenter(current, wanted);
     adapter.setMessages(next, animated: false);
     ++windowRevision;
@@ -1039,39 +1095,6 @@ class _RaftChatViewState extends State<RaftChatView>
     }
     if (mounted) setState(() {});
     return true;
-  }
-
-  /// [projected], except that rows already shown keep their order: a row
-  /// whose position changes (e.g. a confirmed send sorting by its server seq)
-  /// stays where the reader saw it; new rows enter at their projected index.
-  static List<chat.Message> ordered(
-    List<chat.Message> current,
-    List<chat.Message> projected,
-    Set<String> wanted,
-  ) {
-    final shown = {for (final m in current) m.id};
-    final keptOrder = [
-      for (final m in current)
-        if (wanted.contains(m.id)) m.id,
-    ];
-    var k = 0, inOrder = true;
-    for (final m in projected) {
-      if (!shown.contains(m.id)) continue;
-      if (k >= keptOrder.length || keptOrder[k] != m.id) {
-        inOrder = false;
-        break;
-      }
-      k++;
-    }
-    if (inOrder) return projected;
-    final next = {for (final m in projected) m.id: m};
-    final list = [for (final id in keptOrder) next[id]!];
-    for (var i = 0; i < projected.length; i++) {
-      if (!shown.contains(projected[i].id)) {
-        list.insert(i.clamp(0, list.length), projected[i]);
-      }
-    }
-    return list;
   }
 
   int windowRevision = 0;
@@ -1200,11 +1223,11 @@ class _RaftChatViewState extends State<RaftChatView>
           projected,
           focus: pendingAcceptedMount ? null : target,
           resume:
-              enteringScope &&
+              (enteringScope || adapter.messages.isEmpty || adapterWindow != window) &&
                   target == null &&
                   !pendingAcceptedMount &&
                   id != null
-              ? w.takeReadingAnchor(id)
+              ? w.takeReadingAnchor(id) ?? w.messageWindows.readingAnchor(id)
               : null,
         );
         replaced = true;
@@ -1474,7 +1497,10 @@ class _RaftChatViewState extends State<RaftChatView>
     final followed = followedThreads.isFollowing(message.id);
     final task = taskProjection.taskFor(message);
     final guest = w.server?.string('role') == 'guest';
-    final supportsTasks = w.channel?.type != 'thread';
+    // Web MessageItem: an external_projection has no convert, reopen, or done.
+    final supportsTasks =
+        w.channel?.type != 'thread' &&
+        message.string('senderType') != 'external_projection';
     final saved = SavedCountStore.of(w).isSaved(message.id);
     final translation = w.translations.present(message);
     String? result;
@@ -3318,6 +3344,8 @@ class _RaftChatViewState extends State<RaftChatView>
               onLoadOlder: presentationActive
                   ? () => w.older(thread: widget.thread)
                   : null,
+              hasNewer: widget.thread ? w.threadWindow?.hasNewer == true : w.hasNewer,
+              onLoadNewer: presentationActive ? () => w.newer(thread: widget.thread) : null,
               onRecenter: (index, alignment) =>
                   recenter(first: messages[index].id, alignment: alignment),
               empty: widget.thread
@@ -3414,23 +3442,22 @@ class _RaftChatViewState extends State<RaftChatView>
               ? loadingBody
               : taskLoadingBody(loadingBody)
         : buildTimeline();
-    final historyWindow = !widget.thread && w.hasNewer;
+    final historyWindow = widget.thread ? w.threadWindow?.hasNewer == true : w.hasNewer;
     final bottomCount = historyWindow
         ? (w.unread[w.channel?.id] ?? 0)
         : newMessageCount;
-    final composeScope = w.draftScope(thread: widget.thread),
+    final thread = widget.thread;
+    final composeScope = w.draftScope(thread: thread),
         composeAuthority = workspaceAuthority(w);
-    var composeWindow = widget.thread
+    var composeWindow = thread
         ? w.threadGeneration
         : w.channelGeneration;
     bool currentComposer() =>
         mounted &&
-        composeScope == w.draftScope(thread: widget.thread) &&
+        composeScope == w.draftScope(thread: thread) &&
         composeAuthority == workspaceAuthority(w) &&
         composeWindow ==
-            (widget.thread ? w.threadGeneration : w.channelGeneration);
-    // Web `message.composer.attachmentsOnlyBody`, resolved while the context
-    // is live: the controller picks the form once it knows the file count.
+            (thread ? w.threadGeneration : w.channelGeneration);
     final onlyOne = raftFormat(context, '[{count} attachment]', {'count': 1});
     final manyBody = raftText(context, '[{count} attachments]');
     String attachmentsOnlyBody(int count) =>
@@ -3441,17 +3468,17 @@ class _RaftChatViewState extends State<RaftChatView>
       bool forceTask = false,
     }) async {
       if (!presentationActive || !currentComposer()) return false;
-      final submittedTask = !widget.thread && (alsoCreateTask || forceTask);
+      final submittedTask = !thread && (alsoCreateTask || forceTask);
       final submittedTaskRevision = taskChoiceRevision;
       final accepted = await w.send(
         text,
-        thread: widget.thread,
+        thread: thread,
         mentions: mentions,
         asTask: submittedTask,
         attachmentsOnlyBody: attachmentsOnlyBody,
         onWindowRefreshed: (window) {
           if (mounted &&
-              composeScope == w.draftScope(thread: widget.thread) &&
+              composeScope == w.draftScope(thread: thread) &&
               composeAuthority == workspaceAuthority(w)) {
             composeWindow = window;
           }
@@ -3464,12 +3491,10 @@ class _RaftChatViewState extends State<RaftChatView>
           alsoCreateTask) {
         setState(() => alsoCreateTask = false);
       }
-      // The composer handed this text off on submit; only a rejected send
-      // gives it back, even if the conversation changed meanwhile.
       return accepted;
     }
 
-    if (!widget.thread && w.channel == null) {
+    if (!thread && w.channel == null) {
       return RaftEmptyState(
         title: raftText(context, 'Welcome to Raft'),
         detail: raftText(
@@ -3478,7 +3503,7 @@ class _RaftChatViewState extends State<RaftChatView>
         ),
       );
     }
-    final (channelFooter, channelGraceBanner) = widget.thread
+    final (channelFooter, channelGraceBanner) = thread
         ? (threadFooterWidget(), null)
         : channelFooterWidgets();
     // Rows read breakpoint bands, not the raw window width, so a resize
@@ -3488,7 +3513,7 @@ class _RaftChatViewState extends State<RaftChatView>
       child: Column(
         children: [
           RaftToastPortal(controller: selectionToast),
-          if (widget.thread && search != null && search.isOpen)
+          if (thread && search != null && search.isOpen)
             RaftThreadSearchBar(
               controller: searchInput,
               focusNode: searchFocus,
@@ -3506,13 +3531,14 @@ class _RaftChatViewState extends State<RaftChatView>
                   key: const ValueKey('current-timeline'),
                   child: currentTimeline,
                 ),
+                MessageHistoryGapBanner(controller: w, thread: widget.thread),
                 if (historyWindow || !atBottom || newMessageCount > 0)
                   RaftTimelineBottomButton(
                     label: bottomCount > 0
                         ? raftFormat(
                             context,
                             // ThreadPanel.tsx:2619 uses its own shorter copy.
-                            widget.thread
+                            thread
                                 ? '{count} new'
                                 : '{count} new messages',
                             {'count': bottomCount},
@@ -3536,12 +3562,12 @@ class _RaftChatViewState extends State<RaftChatView>
             channelFooter
           else
             ValueListenableBuilder<int>(
-              valueListenable: w.draftChanges(thread: widget.thread),
+              valueListenable: w.draftChanges(thread: thread),
               builder: (context, revision, _) => RaftComposer(
                 // Web MessageInput drag-and-drop, paste and keyboard images.
                 frame: (_, composer, enabled) => ComposerFileDropTarget(
                   controller: w,
-                  thread: widget.thread,
+                  thread: thread,
                   active: () =>
                       enabled && presentationActive && currentComposer(),
                   child: composer,
@@ -3549,20 +3575,20 @@ class _RaftChatViewState extends State<RaftChatView>
                 onPasteAttachments: () => pasteComposerAttachments(
                   context,
                   w,
-                  thread: widget.thread,
+                  thread: thread,
                   active: () => presentationActive && currentComposer(),
                 ),
                 onContentInserted: (content) => insertComposerContent(
                   context,
                   w,
                   content,
-                  thread: widget.thread,
+                  thread: thread,
                   active: () => presentationActive && currentComposer(),
                 ),
                 clearOnSubmit: true,
                 accessoryRow: composerAccessory(),
                 autofocus:
-                    widget.thread &&
+                    thread &&
                     RaftDensityScope.of(context) == RaftDensity.desktop,
                 canAutofocus: () =>
                     presentationActive &&
@@ -3570,15 +3596,15 @@ class _RaftChatViewState extends State<RaftChatView>
                     w.client.user != null &&
                     w.can('viewChannel', resource: w.channel),
                 handle: composerHandle,
-                initialDraft: w.drafts[w.draftScope(thread: widget.thread)] ?? '',
-                draftRevision: revision + w.draftRevision(thread: widget.thread),
+                initialDraft: w.drafts[w.draftScope(thread: thread)] ?? '',
+                draftRevision: w.draftRevision(thread: thread),
                 onDraftChanged: (text) {
-                  if (currentComposer()) w.saveDraft(text, thread: widget.thread);
+                  if (currentComposer()) w.saveDraft(text, thread: thread);
                 },
                 key: ValueKey(
-                  'compose-${widget.thread ? w.threadParentMessageId : w.channel?.id}',
+                  'compose-${thread ? w.threadParentMessageId : w.channel?.id}',
                 ),
-                taskAction: !widget.thread && w.channel?.type != 'thread'
+                taskAction: !thread && w.channel?.type != 'thread'
                     ? RaftComposerTaskToggle(
                         key: const Key('composer-as-task'),
                         checked: alsoCreateTask,
@@ -3603,15 +3629,15 @@ class _RaftChatViewState extends State<RaftChatView>
                     attach(mediaOnly: true);
                   }
                 },
-                hasAttachments: w.uploads(thread: widget.thread).isNotEmpty,
+                hasAttachments: w.uploads(thread: thread).isNotEmpty,
                 attachments: composerAttachmentsFor(
                   context,
                   w,
-                  thread: widget.thread,
+                  thread: thread,
                   onPreview: previewDraftImage,
                 ),
                 submitSpinner: w
-                    .uploads(thread: widget.thread)
+                    .uploads(thread: thread)
                     .any(
                       (d) =>
                           d.checking ||
@@ -3623,16 +3649,16 @@ class _RaftChatViewState extends State<RaftChatView>
                     ? raftText(context, 'Channel conversion in progress')
                     : composerSendBlockTitle(
                         context,
-                        w.uploads(thread: widget.thread),
+                        w.uploads(thread: thread),
                       ),
                 onSendBlocked: w.conversationPaused
                     ? null
                     : () => raiseComposerSendBlockNotice(
                         context,
                         w,
-                        thread: widget.thread,
+                        thread: thread,
                       ),
-                hint: widget.thread
+                hint: thread
                     ? raftText(context, 'Message thread')
                     : w.channel?.type == 'dm'
                     // Web ChatPanel: a DM composer reads `Message @<peer>`.
@@ -3647,22 +3673,22 @@ class _RaftChatViewState extends State<RaftChatView>
                       }),
                 enabled:
                     presentationActive &&
-                    (widget.thread
+                    (thread
                         ? w.threadParentMessageId != null &&
                               w.threadSourceChannel?.archived != true &&
                               w.threadSourceChannel?.joined == true
                         : w.channel?.archived != true),
                 canSend:
                     !w.conversationPaused &&
-                    !w.sharedBlocked(thread: widget.thread) &&
-                    w.uploadsReady(thread: widget.thread),
+                    !w.sharedBlocked(thread: thread) &&
+                    w.uploadsReady(thread: thread),
                 suggestions: composerDirectory.suggestions,
                 onSuggestionsRequested: (prefix) {
                   if (presentationActive && currentComposer()) {
                     composerDirectory.request(prefix);
                   }
                 },
-                onForceTaskSendWithMentions: !widget.thread
+                onForceTaskSendWithMentions: !thread
                     ? (text, mentions) =>
                           sendCurrent(text, mentions, forceTask: true)
                     : null,

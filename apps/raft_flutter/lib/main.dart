@@ -13,6 +13,7 @@ import 'platform/android_performance_hint.dart';
 import 'platform/cache_hygiene.dart';
 import 'platform/cache_staging.dart';
 import 'platform/file_selection.dart' show configureAndroidPhotoPicker;
+import 'platform/memory_budgets.dart';
 import 'platform/system_proxy_bootstrap.dart';
 import 'platform/system_fonts.dart';
 
@@ -20,6 +21,7 @@ export 'app_root.dart';
 
 Future<void> main([List<String> args = const []]) async {
   RaftWidgetsFlutterBinding.ensureInitialized();
+  await RaftMemoryBudgets.initialize();
   configureAndroidPhotoPicker();
   await NativeSystemFonts.instance.initialize();
   await initializeSourceTimeFormatting();

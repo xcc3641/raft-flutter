@@ -16,6 +16,7 @@ import 'managed_agent_launcher.dart';
 import 'agent_scopes_view.dart';
 import 'agent_migration_view.dart';
 import 'agent_detail_view.dart';
+import 'agent_profile_rules.dart';
 import 'agent_metadata_catalog.dart' show sourceAgentActivities;
 import 'agent_metadata_projection.dart';
 import 'report_issue.dart';
@@ -1350,74 +1351,93 @@ class _FleetDetailState extends State<FleetDetail> {
     }
   }
 
-  Widget agentPanel(BuildContext context) => AgentDetailPanel(
-    controller: w,
-    agent: row,
-    machines: machines,
-    liveActivity: liveActivity,
-    initialTab: widget.initialTab,
-    clock: widget.clock,
-    initialTrajectoryLog: widget.initialTrajectoryLog,
-    busy: busy,
-    error: error,
-    onDismissError: () => setState(() => error = null),
-    canManage: allowed('editAgents'),
-    canViewPrivate: allowed('editAgents'),
-    canControlRuntime: allowed('controlAgentRuntime'),
-    actions: AgentDetailActions(
-      onEditAvatar: busy ? null : editAvatar,
-      onBack: widget.onClose ?? () => Navigator.of(context).maybePop(),
-      onClose: widget.closeAction ? widget.onClose : null,
-      backAlways: widget.backAlways,
-      onEditName: busy ? null : () => editField('displayName'),
-      onEditDescription: busy ? null : () => editField('description'),
-      onEditRole: busy ? null : () => editField('role'),
-      onEditRuntime: !external && row['machineId'] is String
-          ? editRuntime
-          : null,
-      onStartStop: () {
-        final starting =
-            agentRowAmbientDisplay(row, live: liveActivity).activity ==
-            'offline';
-        unawaited(
-          action(
-            () => runtimeCommand(starting ? 'start' : 'stop'),
-            // Web handleStop: `agent.detail.stopAgentFailed`.
-            fallback: starting ? raftGenericErrorText : 'Failed to stop agent',
-          ),
-        );
-      },
-      onRestartReset: () => action(restartReset),
-      onDelete: allowed('deleteAgents') ? remove : null,
-      onMessage: row['deletedAt'] == null ? () => action(message) : null,
-      // Web `AgentMigrationSection`: `agent_migration_v0` and a computer.
-      onMigrate:
-          allowed('migrateAgents') &&
-              w.agentMigrationEnabled &&
-              row['machineId'] is String
-          ? () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => AgentMigrationView(controller: w, agentId: id),
-              ),
-            )
-          : null,
-      onReportIssue:
-          reportIssueEnabled(widget.feedbackExportUrl ?? reportIssueBuildUrl) &&
-              allowed('editAgents') &&
-              row['deletedAt'] == null
-          ? reportIssue
-          : null,
-      onPermissions: allowed('editAgents')
-          ? () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => AgentScopesView(controller: w, agentId: id),
-              ),
-            )
-          : null,
-    ),
-  );
+  Widget agentPanel(BuildContext context) {
+    final access = agentProfileAccess(
+      agent: row,
+      currentServerId: serverId,
+      currentUserId: w.client.user?.id,
+      editAgents: allowed('editAgents'),
+      controlAgentRuntime: allowed('controlAgentRuntime'),
+      external: external,
+    );
+    final managed = access.canManage && !busy;
+    return AgentDetailPanel(
+      controller: w,
+      agent: row,
+      machines: machines,
+      liveActivity: liveActivity,
+      initialTab: widget.initialTab,
+      clock: widget.clock,
+      initialTrajectoryLog: widget.initialTrajectoryLog,
+      busy: busy,
+      error: error,
+      onDismissError: () => setState(() => error = null),
+      canManage: access.canManage,
+      canViewPrivate: access.canViewPrivate,
+      canControlRuntime: access.canControlRuntime,
+      actions: AgentDetailActions(
+        onEditAvatar: managed ? editAvatar : null,
+        onBack: widget.onClose ?? () => Navigator.of(context).maybePop(),
+        onClose: widget.closeAction ? widget.onClose : null,
+        backAlways: widget.backAlways,
+        onEditName: managed ? () => editField('displayName') : null,
+        onEditDescription: managed ? () => editField('description') : null,
+        onEditRole: managed ? () => editField('role') : null,
+        onEditRuntime: managed && !external && row['machineId'] is String
+            ? editRuntime
+            : null,
+        onStartStop: () {
+          final starting =
+              agentRowAmbientDisplay(row, live: liveActivity).activity ==
+              'offline';
+          unawaited(
+            action(
+              () => runtimeCommand(starting ? 'start' : 'stop'),
+              // Web handleStop: `agent.detail.stopAgentFailed`.
+              fallback: starting
+                  ? raftGenericErrorText
+                  : 'Failed to stop agent',
+            ),
+          );
+        },
+        onRestartReset: () => action(restartReset),
+        onDelete: access.canManage && allowed('deleteAgents') ? remove : null,
+        onMessage: !access.boundedPublic && row['deletedAt'] == null
+            ? () => action(message)
+            : null,
+        // Web `AgentMigrationSection`: `agent_migration_v0` and a computer.
+        onMigrate:
+            access.canManage &&
+                allowed('migrateAgents') &&
+                w.agentMigrationEnabled &&
+                row['machineId'] is String
+            ? () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      AgentMigrationView(controller: w, agentId: id),
+                ),
+              )
+            : null,
+        onReportIssue:
+            access.canManage &&
+                reportIssueEnabled(
+                  widget.feedbackExportUrl ?? reportIssueBuildUrl,
+                ) &&
+                row['deletedAt'] == null
+            ? reportIssue
+            : null,
+        onPermissions: access.canManage
+            ? () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => AgentScopesView(controller: w, agentId: id),
+                ),
+              )
+            : null,
+      ),
+    );
+  }
 
   /// Web `AgentById`: the id is not an agent this server holds (deleted,
   /// terminated or no access) once its list has loaded.

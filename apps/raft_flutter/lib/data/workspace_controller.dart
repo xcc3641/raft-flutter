@@ -18,6 +18,14 @@ import 'source_activity_unread_store.dart';
 import 'reaction_toggle.dart';
 import 'workspace_cache.dart';
 import 'workspace_composer.dart';
+import 'workspace_uploads.dart';
+import 'workspace_sends.dart';
+import 'conversation_window.dart';
+import 'workspace_message_windows.dart';
+
+export 'workspace_uploads.dart' show UploadDraft;
+export 'conversation_window.dart' show MessageContextLoadError;
+export 'workspace_message_windows.dart' show ReadingAnchor;
 import 'resource_snapshot_cache.dart';
 import 'user_activity.dart';
 import 'user_error.dart';
@@ -29,6 +37,12 @@ import 'navigation_registry.dart';
 import 'workspace_navigation.dart';
 import 'shared_draft_attachment.dart';
 import 'message_window_snapshot.dart';
+import 'message_history_pages.dart';
+import 'message_history_events.dart';
+import 'message_history_snapshots.dart';
+import 'message_history_navigation.dart';
+import 'message_history_positions.dart';
+import 'thread_window_snapshot.dart';
 import 'attachment_image_repository.dart';
 import 'cache_clear.dart';
 import 'attachment_url_cache.dart';
@@ -63,67 +77,6 @@ class WorkspaceThreadIdentity {
   final String? focusedMessageId;
 }
 
-class UploadDraft {
-  UploadDraft(this.filename, this.bytes, {required this.key}) : local = null;
-  UploadDraft.shared(SharedDraftAttachment file, {required this.key})
-    : filename = file.filename,
-      bytes = Uint8List(0),
-      local = file,
-      queued = true;
-
-  /// Per-controller identity for presentation (rows, hover, tests).
-  final int key;
-  final String filename;
-  final Uint8List bytes;
-  final SharedDraftAttachment? local;
-  int get sizeBytes => local?.sizeBytes ?? bytes.length;
-  bool queued = false;
-  var cancel = UploadCancellation();
-  double progress = 0;
-  // ignore: raft_lints/avoid_imperative_notice_state -- Per-upload failure on its draft chip; composer upload state owned by the lead (cleared on retry, removal or send).
-  String? id, error;
-
-  /// Web `uploadStatus: "validating"`: shown, but the selection check (size
-  /// ceiling, count, empty file) has not decided yet and nothing is sent.
-  bool checking = false;
-
-  /// Web `uploadCanRetry`: false once the selection check was interrupted.
-  bool canRetry = true;
-
-  /// Browser `File.type` of the picked name (file card meta, image preview).
-  String get mimeType => local?.mimeType ?? composerMimeType(filename);
-
-  /// The accepted upload record (`POST /attachments/upload`), so an
-  /// optimistic row can present the attachment before the message exists.
-  Map<String, dynamic>? metadata;
-}
-
-/// Web MessageInput `addOptimisticMessage`: the row presented from the moment
-/// the user sends until the server copy (HTTP receipt or socket echo, matched
-/// by `randomId`) replaces it. A failed send removes it and gives its text and
-/// files back to the draft, as Web `removeOptimisticMessage` +
-/// `restoreFailedSendDraft` do.
-class _PendingSend {
-  _PendingSend(this.randomId, this.row, this.draft, this.uploads);
-  final String randomId, draft;
-  final Map<String, dynamic> row;
-  final List<UploadDraft> uploads;
-}
-
-/// Web `message.composer.attachmentsOnlyBody` in English.
-String _attachmentsOnlyBody(int count) =>
-    count == 1 ? '[1 attachment]' : '[$count attachments]';
-
-/// Web `mergeFailedSendIntoDraft`.
-String _mergeFailedSendIntoDraft(String failed, String current) {
-  if (current.isEmpty) return failed;
-  if (failed.isEmpty) return current;
-  final separator = failed.endsWith('\n') || current.startsWith('\n')
-      ? ''
-      : '\n';
-  return '$failed$separator$current';
-}
-
 /// Web `isThreadAbsentLookupError` (threadStore.ts): only the route's explicit
 /// "no thread for this message" 404 means an empty thread. A 404 carrying a
 /// `code` is absent only for `THREAD_NOT_FOUND`; without a `code` the legacy
@@ -135,19 +88,6 @@ bool isThreadAbsentLookupError(Object? error) {
     return error.details['code'] == 'THREAD_NOT_FOUND';
   }
   return error.message == 'No thread found for this message';
-}
-
-/// Why a jump target's message context could not be shown.
-enum MessageContextLoadError { notFound, beyondHistory }
-
-/// A message row and the distance of its top below the timeline's top edge.
-class ReadingAnchor {
-  ReadingAnchor(this.messageKey, this.top) : _saved = Stopwatch()..start();
-  final String messageKey;
-  final double top;
-  final Stopwatch _saved;
-  static const lifetime = Duration(seconds: 3);
-  bool get fresh => _saved.elapsed <= lifetime;
 }
 
 class WorkspaceController extends ChangeNotifier {
@@ -206,7 +146,6 @@ class WorkspaceController extends ChangeNotifier {
           _revokedChannels.contains(requestedChannel)) {
         channel = null;
         channelLoading = false;
-        _pendingMessageContextChannelId = null;
         return;
       }
       if (channel?.id != requestedChannel) {
@@ -216,7 +155,6 @@ class WorkspaceController extends ChangeNotifier {
         ].where((record) => record.id == requestedChannel).firstOrNull;
         channelLoading =
             source.visibleIds[requestedChannel]?.isNotEmpty != true;
-        _pendingMessageContextChannelId = null;
       }
       return;
     }
@@ -230,25 +168,16 @@ class WorkspaceController extends ChangeNotifier {
     loadingOlder = source.loadingOlder;
     loading = source.loading;
     error = source.error;
-    channelGeneration = source.channelGeneration;
-    threadGeneration = source.threadGeneration;
     threadParent = source.threadParent;
     threadChannelId = source.threadChannelId;
     threadHasMore = source.threadHasMore;
     threadHistoryLimited = source.threadHistoryLimited;
     threadLoading = source.threadLoading;
     _threadIdentity = source._threadIdentity;
-    _threadIdentityWindow = source._threadIdentityWindow;
-    _threadIdentityNavigation = source._threadIdentityNavigation;
-    _threadIdentityToken = source._threadIdentityToken;
-    _threadIdentityAuthority = source._threadIdentityAuthority;
+    _threadVisit = source._threadVisit;
     _threadResolutionLoading = source._threadResolutionLoading;
     _threadParentLoading = source._threadParentLoading;
     _threadResolutionError = source._threadResolutionError;
-    _pendingMessageContextChannelId = source._pendingMessageContextChannelId;
-    _pendingMessageContextWindow = source._pendingMessageContextWindow;
-    _pendingMessageContextRetainsRows =
-        source._pendingMessageContextRetainsRows;
   }
 
   /// High-frequency socket events that never change workspace state.
@@ -280,10 +209,23 @@ class WorkspaceController extends ChangeNotifier {
     this.composer =
         composer ??
         presentationSource?.composer ??
-        WorkspaceComposer(owner: this, read: _cached, write: _save);
+        WorkspaceComposer(
+          owner: this,
+          read: _cached,
+          write: _save,
+          authority: () => (
+            client.origin,
+            client.generation,
+            client.user?.id,
+            client.serverId,
+            server?.string('role'),
+            jsonEncode(server?.json['permissions']),
+          ),
+        );
     if (presentationSource == null) {
       _removePlayerTrim = _playerSessions.installMemoryTrim();
     }
+    MessageHistoryPages.attach(this);
     _ownsFollowedThreads = followedThreads == null;
     this.followedThreads =
         followedThreads ??
@@ -310,6 +252,9 @@ class WorkspaceController extends ChangeNotifier {
     // listener. Surfaces that render entities listen to [entityDirectory]
     // (or a [WorkspaceEntitySelection] of it) directly.
     if (_ownsEntityDirectory) addListener(_entityAuthorityChanged);
+    if (presentationSource == null) {
+      this.composer.sends.attach(this, _sendChanged);
+    }
     subscription = presentationSource == null
         ? client.events.listen(_event)
         : const Stream<RaftEvent>.empty().listen((_) {});
@@ -324,6 +269,88 @@ class WorkspaceController extends ChangeNotifier {
 
   VoidCallback? _removeCacheClear;
   late final WorkspaceComposer composer;
+  late final WorkspaceMessageWindows messageWindows =
+      presentationSource?.messageWindows ??
+      WorkspaceMessageWindows(
+        authority: _messageWindowAuthority,
+        presentation: _messageWindowPresentation,
+        layout: _messageWindowLayout,
+        sends: composer.sends,
+        notRevoked: (id) => !_revokedChannels.contains(id),
+      );
+
+  WorkspaceController get _windowReceiver =>
+      presentationSource?._windowReceiver ?? this;
+
+  ConversationWindow? get messageWindow => messageWindows.channel(channel?.id);
+  ConversationWindow? get threadWindow =>
+      messageWindows.thread(threadParentChannelId, threadParentMessageId);
+
+  MessageWindowAuthority? _messageWindowAuthority(
+    ConversationWindowScope scope,
+  ) {
+    final resource = _threadChannelResource(scope.channelId);
+    if (_disposed ||
+        client.user == null ||
+        server == null ||
+        server!.id != client.serverId ||
+        _revokedServers.contains(server!.id) ||
+        _revokedChannels.contains(scope.channelId) ||
+        resource == null ||
+        !can('viewChannel', resource: resource)) {
+      return null;
+    }
+    final accepted = messageWindows.accepted[scope.channelId];
+    final authority = messageWindowAuthority(
+      server!.string('role'),
+      resource.json,
+    );
+    if (accepted != null &&
+        !accepted.matches(authority, _replyToken(scope.channelId))) {
+      return null;
+    }
+    return (
+      navigationAuthority,
+      ledger.generation,
+      _replyToken(scope.channelId),
+      authority,
+      jsonEncode(server!.json['permissions']),
+    );
+  }
+
+  (bool, bool) _messageWindowLayout(ConversationWindowScope scope) {
+    final selected = scope.parentMessageId == null
+        ? channel?.id == scope.channelId
+        : threadParentChannelId == scope.channelId &&
+              threadParentMessageId == scope.parentMessageId;
+    return (
+      selected,
+      selected &&
+          foreground &&
+          _chatTabPresented &&
+          (scope.parentMessageId == null ? _mainPresented : _threadPresented),
+    );
+  }
+
+  ConversationWindowSnapshot _messageWindowPresentation(bool thread) {
+    final rows = thread ? replies : messages;
+    return ConversationWindowSnapshot(
+      channelId: thread ? threadChannelId : channel?.id,
+      rows: rows,
+      timeline: timeline(thread: thread, rows: rows),
+      parent: thread ? presentedThreadParent : null,
+      loading: thread ? threadLoading : channelLoading,
+      loadingOlder: loadingOlder,
+      parentLoading: thread && threadParentLoading,
+      resolving: thread && threadResolutionLoading,
+      error: thread ? threadResolutionError : error,
+      hasMore: thread ? threadHasMore : hasMore,
+      hasNewer: thread ? messageWindows.contextHasNewer(threadChannelId) : hasNewer,
+      historyLimited: thread ? threadHistoryLimited : historyLimited,
+      highlightedMessageId: highlightedMessageId,
+      contextLoadError: thread ? null : contextLoadError,
+    );
+  }
 
   /// "Clear cache": lets go of what this workspace keeps in memory and can
   /// rebuild: decoded attachment pictures nobody shows, signed attachment URLs
@@ -763,6 +790,7 @@ class WorkspaceController extends ChangeNotifier {
       store: attachmentImageStore,
       maxEntries: budgets.attachmentImageEntries,
       maxDecodedBytes: budgets.attachmentImageDecodedBytes,
+      maxActiveDecodedBytes: budgets.attachmentImageActiveDecodedBytes,
       maxEncodedBytes: budgets.attachmentImageEncodedBytes,
     );
     // Decoded bitmaps are rebuildable from the byte store: let go of the
@@ -775,18 +803,10 @@ class WorkspaceController extends ChangeNotifier {
           '${repository.encodedByteCount} B encoded',
     );
     _removeImageTrimmer = RaftMemoryRelease.instance.addTrimmer(
-      (reason) {
-        final before = repository.decodedByteCount;
-        final dropped = repository.trimIdle();
-        if (!kReleaseMode) {
-          debugPrint(
-            '[raft-memory] ${reason.name}: dropped $dropped decoded images '
-            '(${before - repository.decodedByteCount} B), '
-            '${repository.entryCount} held '
-            '(${repository.decodedByteCount} B decoded)',
-          );
-        }
-      },
+      (reason) => repository.trimIdle(
+        pressure: reason == RaftMemoryTrim.pressure,
+        reason: reason.name,
+      ),
     );
     return repository;
   }
@@ -941,14 +961,14 @@ class WorkspaceController extends ChangeNotifier {
   void _invalidateChannelReplies(String id) {
     _channelReplyEpochs[id] = (_channelReplyEpochs[id] ?? 0) + 1;
     threadRepliesSync.revokeChannel(id);
-    _threadWindows.removeWhere((_, window) => window.parentChannelId == id);
+    messageWindows.invalidateParentThreads(id);
     if (channel?.id != id) _summariesByChannel.remove(id);
   }
 
   void _invalidateAllChannelReplies() {
     _replyAuthorityEpoch++;
     threadRepliesSync.reset();
-    _threadWindows.clear();
+    messageWindows.clearThreads();
     _summariesByChannel.removeWhere((id, _) => id != channel?.id);
   }
 
@@ -959,6 +979,12 @@ class WorkspaceController extends ChangeNotifier {
     if (known == null) return true;
     return const {'private', 'dm', 'joint', 'thread'}.contains(known.type);
   }
+
+  void _mergeThreadSummaries(String id, dynamic rows) => _summariesByChannel
+      .putIfAbsent(id, () => {})
+      .addAll(
+        _hydrateThreadSummaries(rows, id, expectedToken: _replyToken(id)),
+      );
 
   Map<String, dynamic> _hydrateThreadSummaries(
     dynamic raw,
@@ -1253,7 +1279,16 @@ class WorkspaceController extends ChangeNotifier {
     try {
       final result = await client.post(
         '/feature-flags/evaluate',
-        data: featureFlagEvaluateBody(keys: ['sync_core_messages_v0', notificationPrefsFlag, remoteComputerUpgradeFlag, agentMigrationFlag, runtimeFormV2WebFlag], serverId: id),
+        data: featureFlagEvaluateBody(
+          keys: [
+            'sync_core_messages_v0',
+            notificationPrefsFlag,
+            remoteComputerUpgradeFlag,
+            agentMigrationFlag,
+            runtimeFormV2WebFlag,
+          ],
+          serverId: id,
+        ),
       );
       if (_disposed ||
           request != _messageFlagRequest ||
@@ -1321,10 +1356,12 @@ class WorkspaceController extends ChangeNotifier {
 
   /// Writes every pending (debounced) change and completes once all queued
   /// device writes have landed.
-  Future<void> flushCache() {
+  Future<void> flushCache() async {
+    await MessageHistoryPages.storage(cache)?.receiver.settled;
+    await MessageHistoryPages.storage(cache)?.positionsSettled;
     if (_ownsEntityDirectory) entityDirectory.flushDevice();
     _translations?.flushDevice();
-    return Future.wait([_cacheWrites, composer.flushed]);
+    await Future.wait([_cacheWrites, composer.flushed]);
   }
 
   /// Stops all further device writes of this workspace and completes once
@@ -1398,15 +1435,13 @@ class WorkspaceController extends ChangeNotifier {
   /// This session owns one window; pages and platform adapters only borrow it.
   /// Server selection creates it before UI; standalone views can borrow a
   /// passive projection before selection. Neither path starts work by reading.
-  SourceActivityUnreadStore get activityUnread =>
-      _disposed
+  SourceActivityUnreadStore get activityUnread => _disposed
       ? throw StateError('Workspace session is disposed.')
       : presentationSource?.activityUnread ??
             (_activityUnread ??= SourceActivityUnreadStore(this));
 
   /// The existing session projection; reading it never constructs or starts it.
-  SourceActivityUnreadStore? get activityUnreadIfBound =>
-      _disposed
+  SourceActivityUnreadStore? get activityUnreadIfBound => _disposed
       ? null
       : presentationSource?.activityUnreadIfBound ?? _activityUnread;
 
@@ -1426,6 +1461,32 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  /// A workspace switch and loss of the active workspace retire the same
+  /// accepted windows and session projections before another read can publish.
+  void _resetServerWindows(String? id) {
+    historyLimited = threadHistoryLimited = false;
+    channel = null;
+    channels = [];
+    dms = [];
+    unread = {};
+    mentions = {};
+    newFlags = {};
+    _latestActivity.clear();
+    threadParent = null;
+    threadChannelId = null;
+    _summariesByChannel.clear();
+    highlightedMessageId = null;
+    messageWindows.channelGeneration++;
+    messageWindows.threadGeneration++;
+    messageWindows.switchServer(id);
+    readState.reset();
+    resourceSnapshots.clear();
+    _prefetched.clear();
+    reactionViewer.reset();
+    messageSync.reset();
+    syncCoreMessagesEnabled = false;
+  }
+
   void revokeServer(String id) {
     final principal = client.user?.id;
     if (principal == null) return;
@@ -1438,52 +1499,16 @@ class WorkspaceController extends ChangeNotifier {
     if (store != null && presentationSource == null) {
       unawaited(
         store
-            .purgeIdentity(
-              AttachmentImageKey.identityOf(origin, principal, id),
-            )
+            .purgeIdentity(AttachmentImageKey.identityOf(origin, principal, id))
             .catchError((Object _) {}),
       );
     }
     if (client.serverId == id) {
-      for (final list in _uploads.values) {
-        for (final draft in list) {
-          draft.cancel.cancel();
-        }
-      }
-      _uploads.clear();
       composer.clearOwnedBy(this);
-      _pendingSends.clear();
-      _shareHolds.clear();
-      visibleIds.clear();
-      _windowState.clear();
-      _diskOnlyWindows.clear();
-      _windowHistoryLimited.clear();
-      _threadWindows.clear();
-      historyLimited = threadHistoryLimited = false;
-      _contextWindows.clear();
-      channel = null;
-      channels = [];
-      dms = [];
+      _resetServerWindows(null);
       server = null;
-      unread = {};
-      mentions = {};
-      newFlags = {};
-      _latestActivity.clear();
       sidebarOrder = {};
-      threadParent = null;
-      threadChannelId = null;
-      _summariesByChannel.clear();
-      highlightedMessageId = null;
-      channelGeneration++;
-      threadGeneration++;
       error = null;
-      ledger.switchServer(null);
-      readState.reset();
-      resourceSnapshots.clear();
-      _prefetched.clear();
-      reactionViewer.reset();
-      messageSync.reset();
-      syncCoreMessagesEnabled = false;
       _messageFlagRequest++;
       if (ownsClient) client.selectServer(null);
       loading = false;
@@ -1534,12 +1559,22 @@ class WorkspaceController extends ChangeNotifier {
       return;
     }
     final origin = client.origin, serverId = server ?? client.serverId ?? '';
+    final windowScope = value is Map && const {'window', 'thread-window'}.contains(kind)
+        ? '${value['parentChannelId'] ?? id}'
+        : null;
+    final windowTicket = windowScope == null
+        ? null
+        : messageHistoryTicket(windowScope);
     final writing = _cacheWrites.then((_) async {
+      if (windowScope != null &&
+          (!cacheWritable || windowTicket != messageHistoryTicket(windowScope))) {
+        return;
+      }
       try {
         await cache!.write(origin, user, serverId, kind, id, value);
-      } catch (_) {
+      } catch (cause) {
         if (!_disposed) {
-          error ??= 'Local changes could not be saved on this device.';
+          error ??= MessageHistoryPages.saveError(cause);
           notifyListeners();
         }
         if (requiredSuccess) rethrow;
@@ -1566,77 +1601,23 @@ class WorkspaceController extends ChangeNotifier {
     unawaited(_saveDraftScope(scope));
   }
 
-  final _queuedSendTexts = <String, String>{};
-  Map<String, Set<String>> get _draftShareTokens => composer.shareTokens;
-  Future<void> _saveDraftScope(String scope, {bool requiredSuccess = false}) {
-    final pending = _pendingSends[scope] ?? <_PendingSend>[];
-    final files = [
-      ...?_uploads[scope],
-      for (final attempt in pending) ...attempt.uploads,
-    ].where((f) => f.local != null).toList();
-    return composer.saveDraft(
-      scope,
-      pendingText: pending.map((p) => p.draft),
-      queuedText: _queuedSendTexts[scope] ?? '',
-      files: [
-        for (final file in files)
-          (local: file.local!, id: file.id, metadata: file.metadata),
-      ],
-      requiredSuccess: requiredSuccess,
-    );
-  }
+  Future<void> _saveDraftScope(String scope, {bool requiredSuccess = false}) =>
+      composer.saveScope(scope, requiredSuccess: requiredSuccess);
 
-  /// Stage local queued files without uploading or replacing the user's draft.
   Future<void> stageSharedDraft(
     String text,
     List<SharedDraftAttachment> files, {
     String? sourceToken,
-  }) async {
+  }) {
     final scope = draftScope();
     if (scope == null) throw const RaftApiException('Choose a conversation.');
-    if (sourceToken != null &&
-        (_draftShareTokens[scope]?.contains(sourceToken) ?? false)) {
-      return;
-    }
-    final list = _uploads[scope] ??= [];
-    final additions = files
-        .where(
-          (f) => !list.any(
-            (u) =>
-                u.local != null &&
-                jsonEncode(u.local!.reference) == jsonEncode(f.reference),
-          ),
-        )
-        .toList();
-    if (list.length + additions.length > 10) {
-      throw const RaftApiException('Attach up to 10 files per message.');
-    }
-    final previous = drafts[scope] ?? '', generation = client.generation;
-    final staged = additions
-        .map((file) => UploadDraft.shared(file, key: _uploadKeys++))
-        .toList();
-    list.addAll(staged);
-    final next = text.trim();
-    if (next.isNotEmpty && previous.trim() != next) {
-      drafts[scope] = previous.isEmpty ? next : '$previous\n\n$next';
-    }
-    if (sourceToken != null) {
-      final tokens = _draftShareTokens[scope] ??= {};
-      tokens.add(sourceToken);
-      if (tokens.length > 64) tokens.remove(tokens.first);
-    }
-    try {
-      await _saveDraftScope(scope, requiredSuccess: true);
-    } catch (_) {
-      if (!_disposed && generation == client.generation) {
-        list.removeWhere(staged.contains);
-        drafts[scope] = previous;
-        _draftShareTokens[scope]?.remove(sourceToken);
-      }
-      rethrow;
-    }
-    _draftRevisions[scope] = (_draftRevisions[scope] ?? 0) + 1;
-    if (!_disposed) notifyListeners();
+    return composer.stageSharedDraft(
+      scope,
+      text,
+      files,
+      sourceToken: sourceToken,
+      persist: _saveDraftScope,
+    );
   }
 
   void updateDraftFromShare(String text) {
@@ -1653,43 +1634,42 @@ class WorkspaceController extends ChangeNotifier {
   ValueListenable<int> draftChanges({bool thread = false}) =>
       composer.changes(draftScope(thread: thread));
 
+  /// Capture the common session facts once; the window owner captures its
+  /// own epochs. A caller supplies only the operation-specific selection rule.
+  MessageWindowRequest _windowRequest(
+    String id, {
+    bool thread = false,
+    bool checkNavigation = false,
+    bool Function()? allowed,
+  }) {
+    final parent = thread ? threadParentChannelId : id;
+    final reply = _replyToken(parent), authority = _windowAuthority();
+    final revision = navigationRevision;
+    return messageWindows.request(
+      thread: thread,
+      allowed: () =>
+          reply == _replyToken(parent) &&
+          authority == _windowAuthority() &&
+          !_revokedChannels.contains(id) &&
+          (!checkNavigation || revision == navigationRevision) &&
+          (allowed?.call() ?? true),
+    );
+  }
+
   Future<void> _restoreDraft(String scope) async {
     final generation = ledger.generation;
     await composer.restore(
       scope,
       current: () => generation == ledger.generation && !_disposed,
       restoreFiles: (files) async {
-        final principal = client.user?.id;
-        if (restoreSharedAttachment != null && client.user != null) {
-          for (final row in files) {
-            if (row['ref'] is! Map) continue;
-            final file = await restoreSharedAttachment!(
-              Map<String, dynamic>.from(row['ref']),
-              client.origin,
-              principal!,
-            );
-            if (generation != ledger.generation || _disposed) return;
-            if (file == null) continue;
-            final list = _uploads[scope] ??= [];
-            if (list.any(
-              (u) =>
-                  u.local != null &&
-                  jsonEncode(u.local!.reference) == jsonEncode(file.reference),
-            )) {
-              continue;
-            }
-            final draft = UploadDraft.shared(file, key: _uploadKeys++);
-            if (row['id'] is String) {
-              draft.id = row['id'];
-              draft.queued = false;
-              draft.progress = 1;
-              if (row['metadata'] is Map) {
-                draft.metadata = Map<String, dynamic>.from(row['metadata']);
-              }
-            }
-            list.add(draft);
-          }
-        }
+        final principal = client.user?.id, origin = client.origin;
+        if (restoreSharedAttachment == null || principal == null) return;
+        await composer.uploads.restore(
+          scope,
+          files,
+          read: (reference) =>
+              restoreSharedAttachment!(reference, origin, principal),
+        );
       },
       restored: notifyListeners,
     );
@@ -1698,120 +1678,54 @@ class WorkspaceController extends ChangeNotifier {
   String _windowAuthority() =>
       messageWindowAuthority(server?.string('role'), channel?.json ?? const {});
 
-  Future<void> _saveWindow(String id, {bool thread = false}) async {
-    if (_disposed ||
-        channel == null ||
-        (thread ? id != threadChannelId : id != channel!.id) ||
-        _revokedChannels.contains(id) ||
-        hasNewer ||
-        highlightedMessageId != null) {
-      return;
-    }
-    final rows = (thread ? replies : messages);
-    _windowState[id] = (
-      _windowAuthority(),
-      thread ? threadHasMore : hasMore,
-      _replyToken(thread ? threadParentChannelId : id),
-    );
-    _windowHistoryLimited[id] = thread ? threadHistoryLimited : historyLimited;
-    _contextWindows.remove(id);
-    final saved = _save('window', id, {
-      'version': 1,
-      'authority': _windowAuthority(),
-      'windowKind': 'tail',
-      'messages': rows
-          .skip(
-            rows.length > messageWindowLimit
-                ? rows.length - messageWindowLimit
-                : 0,
-          )
-          .map((m) => m.json)
-          .toList(),
-      'parentChannelId': thread ? threadParentChannelId : id,
-      'hasMore': thread ? threadHasMore : hasMore,
-      'historyLimited': thread ? threadHistoryLimited : historyLimited,
-      'hasNewer': false,
-      'threadSummaries': thread
-          ? {}
-          : Map<String, dynamic>.from(threadSummaries),
-    });
-    final identity = _threadIdentity;
-    // Queued in the same turn as the window write, so one flush covers both.
-    if (thread && identity != null && identity.focusedMessageId == null) {
-      await _saveThreadWindow(identity, id);
-    }
-    await saved;
-  }
+  /// Device writes stop before logout purges are queued.
+  bool get cacheWritable => !_cacheRetired && !_disposed;
+  Object messageHistoryTicket(String id) => _replyToken(id);
+  void rejectHistoryRead(String id) => _windowReceiver._revokeChannel(id);
+  Future<void> saveHistoryWindow(String id, {bool thread = false}) =>
+      _windowReceiver._saveWindow(id, thread: thread);
 
-  /// A thread's accepted tail, keyed by its parent message so a later open
-  /// (including after restart) paints it before any lookup. It belongs to
-  /// the parent channel: that channel's revocation purges it.
-  Future<void> _saveThreadWindow(
-    WorkspaceThreadIdentity identity,
-    String threadId,
-  ) async {
-    final authority = _threadResourceAuthority(identity.parentChannelId);
-    if (authority == null ||
-        _revokedChannels.contains(identity.parentChannelId) ||
-        _revokedChannels.contains(threadId)) {
-      return;
-    }
-    final rows = replies;
-    final parent = threadParent;
-    await _save('thread-window', identity.parentMessageId, {
-      'version': 1,
-      'windowKind': 'tail',
-      'authority': authority,
-      'parentChannelId': identity.parentChannelId,
-      'threadChannelId': threadId,
-      if (parent != null &&
-          parent.id == identity.parentMessageId &&
-          parent.channelId == identity.parentChannelId)
-        'parent': parent.json,
-      'messages': rows
-          .skip(
-            rows.length > messageWindowLimit
-                ? rows.length - messageWindowLimit
-                : 0,
-          )
-          .map((m) => m.json)
-          .toList(),
-      'hasMore': threadHasMore,
-      'historyLimited': threadHistoryLimited,
-    });
-  }
+  Future<void> _saveWindow(String id, {bool thread = false}) =>
+      MessageHistorySnapshots.save(
+        this, id, thread: thread,
+        identity: _threadIdentity, replyToken: _replyToken, write: _save,
+      );
 
-  bool _acceptCachedWindow(dynamic page, String id) =>
-      page is Map &&
-      page['version'] == 1 &&
-      page['windowKind'] == 'tail' &&
-      page['hasNewer'] != true &&
-      page['authority'] == _windowAuthority() &&
-      can('viewChannel', resource: channel) &&
-      !_revokedChannels.contains(id) &&
-      !_revokedServers.contains(server?.id) &&
-      page['parentChannelId'] == channel?.id;
+  /// Disk windows retain canonical versions already held in memory. Only the
+  /// bootstrap replaces visible membership and starts from disk summaries.
+  bool _restoreCachedTail(
+    String id,
+    dynamic page,
+    MessageWindowRequest request, {
+    String? replyAuthority,
+    bool replace = false,
+  }) {
+    if (!MessageHistorySnapshots.restore(this, id, page, request, replace: replace,
+        allowed: () => !_revokedServers.contains(server?.id))) {
+      return false;
+    }
+    _summariesByChannel[id] = {
+      ..._hydrateThreadSummaries(
+        page['threadSummaries'],
+        id,
+        expectedToken: replyAuthority ?? _replyToken(id),
+      ),
+      if (!replace) ...?_summariesByChannel[id],
+    };
+    return true;
+  }
 
   late final StreamSubscription<RaftEvent> subscription;
-  final _ledger = MessageLedger();
-  MessageLedger get ledger => presentationSource?.ledger ?? _ledger;
+  MessageLedger get ledger => messageWindows.ledger;
   final _reactionViewer = ReactionViewerLedger();
   ReactionViewerLedger get reactionViewer =>
       presentationSource?.reactionViewer ?? _reactionViewer;
   final Map<String, Future<void>> _reactionWrites = {};
   final Map<String, Future<void>> _viewerLoads = {};
-  final Map<String, List<UploadDraft>> _uploads = {};
+  Map<String, List<UploadDraft>> get _uploads => composer.uploads.byScope;
   Map<String, ComposerSendAttempt> get _attempts => composer.attempts;
 
-  /// Optimistic rows by draft scope, in send order.
-  final Map<String, List<_PendingSend>> _pendingSends = {};
-
-  /// `randomId`s this session sent; their rows keep one presentation key
-  /// from the optimistic row through the server copy.
-  final Set<String> _localRandomIds = {};
   bool _disposed = false;
-  Future<String?>? _creatingThread;
-  int? _creatingThreadWindow;
   int _stateStamp = 0;
   @override
   void notifyListeners() {
@@ -1822,6 +1736,7 @@ class WorkspaceController extends ChangeNotifier {
     if (!_disposed) {
       _syncScopeVisits();
       _ensureSyncIdentity();
+      if (presentationSource == null) messageWindows.synchronize();
       super.notifyListeners();
     }
   }
@@ -1918,12 +1833,9 @@ class WorkspaceController extends ChangeNotifier {
       (presentationSource?._uploads ?? _uploads)[draftScope(thread: thread)] ??
       [];
   bool uploadsReady({bool thread = false}) =>
-      !(presentationSource?._queuedSendTexts ?? _queuedSendTexts).containsKey(
-        draftScope(thread: thread),
-      ) &&
-      uploads(
-        thread: thread,
-      ).every((u) => u.id != null || u.queued && u.error == null);
+      !composer.sends.queued(draftScope(thread: thread)) &&
+      uploads(thread: thread)
+          .every((u) => u.id != null || u.queued && u.error == null);
 
   /// Web MessageInput composer error banner per draft scope. Each message is a
   /// [CauseNotice] bound to the composer visit that raised it (Web resets the
@@ -1935,8 +1847,9 @@ class WorkspaceController extends ChangeNotifier {
     final scope = draftScope(thread: thread);
     return scope == null
         ? null
-        : (presentationSource?._composerNotices ?? _composerNotices)
-              .messageFor(scope);
+        : (presentationSource?._composerNotices ?? _composerNotices).messageFor(
+            scope,
+          );
   }
 
   /// Web MessageInput `setError` outside a file selection (for example the
@@ -2003,7 +1916,7 @@ class WorkspaceController extends ChangeNotifier {
   /// is held, Send is off: `null` = still checking, a string = the check
   /// refused it and this notice (an English key) shows on the composer. The
   /// draft and the staged files stay either way.
-  final Map<String, String?> _shareHolds = {};
+  Map<String, String?> get _shareHolds => composer.uploads.holds;
   Map<String, String?> get shareHolds =>
       presentationSource?.shareHolds ?? _shareHolds;
   bool sharedBlocked({bool thread = false}) =>
@@ -2062,27 +1975,11 @@ class WorkspaceController extends ChangeNotifier {
     if (source != null) return source.adoptResolvedDm(pendingId, real);
     if (_disposed) return;
     final wasOpen = channel?.id == pendingId;
-    final text = drafts.remove(pendingId);
-    final moved = _uploads.remove(pendingId);
-    final tokens = _draftShareTokens.remove(pendingId);
-    _draftRevisions.remove(pendingId);
-    final hold = _shareHolds.containsKey(pendingId)
-        ? _shareHolds.remove(pendingId)
-        : null;
-    if (text != null && text.isNotEmpty) {
-      final held = drafts[real.id];
-      drafts[real.id] = held == null || held.isEmpty ? text : '$held\n\n$text';
-    }
-    if (moved != null) (_uploads[real.id] ??= []).addAll(moved);
-    if (tokens != null) (_draftShareTokens[real.id] ??= {}).addAll(tokens);
-    if (hold != null) _shareHolds[real.id] = hold;
-    _draftRevisions[real.id] = (_draftRevisions[real.id] ?? 0) + 1;
+    composer.adoptScope(pendingId, real.id);
     _channelRowSeq[real.id] = ++_channelReadSeq;
     if (wasOpen) channel = real;
     _putChannelRow(real);
     notifyListeners();
-    unawaited(composer.removeStoredDraft(pendingId));
-    unawaited(_saveDraftScope(real.id));
     if (wasOpen) {
       await selectChannel(
         [
@@ -2133,17 +2030,6 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  /// Selections are decided in the order they were made (Web
-  /// `attachmentSelectionQueueRef`): a later batch counts the files an earlier
-  /// one accepted.
-  Future<void> _selectionQueue = Future.value();
-  int _uploadKeys = 0;
-
-  /// Web `addFiles` + `decideMessageAttachmentSelection` + upload. Every file
-  /// shows at once as a checking chip (Web `validating`); then an unknown
-  /// ceiling refuses the whole batch, and empty, oversize and over-count
-  /// files are dropped with the Web messages. Accepted files transfer
-  /// in turn. [text] localizes a message key.
   Future<void> attachSelection(
     List<({String name, Uint8List bytes})> files, {
     bool thread = false,
@@ -2153,30 +2039,10 @@ class WorkspaceController extends ChangeNotifier {
     if (source != null) {
       return source.attachSelection(files, thread: thread, text: text);
     }
-    final scope = draftScope(thread: thread);
-    if (scope == null || files.isEmpty) return Future.value();
-    final generation = ledger.generation;
-    final authority = _uploadAuthority();
-    bool current() =>
-        generation == ledger.generation &&
-        scope == draftScope(thread: thread) &&
-        authority == _uploadAuthority();
-    final batch = [
-      for (final file in files)
-        UploadDraft(file.name, file.bytes, key: _uploadKeys++)..checking = true,
-    ];
-    (_uploads[scope] ??= []).addAll(batch);
-    notifyListeners();
-    Future<void> decide() => _decideSelection(
-      scope,
-      batch,
-      thread: thread,
-      current: current,
-      text: text,
-    );
-    final run = _selectionQueue.then((_) => decide(), onError: (_) => decide());
-    _selectionQueue = run.catchError((Object _) {});
-    return run;
+    if (draftScope(thread: thread) == null || _disposed) {
+      return Future<void>.value();
+    }
+    return composer.uploads.select(files, _uploadVisit(thread), text: text);
   }
 
   String _uploadAuthority() => jsonEncode([
@@ -2190,119 +2056,9 @@ class WorkspaceController extends ChangeNotifier {
     channel?.json['channelCapabilities'],
   ]);
 
-  Future<void> _decideSelection(
-    String scope,
-    List<UploadDraft> batch, {
-    required bool thread,
-    required bool Function() current,
-    required String Function(String key, Map<String, Object> args) text,
-  }) async {
-    final limit = await uploadLimitBytes();
-    if (_disposed) return;
-    final list = _uploads[scope];
-    if (!current()) {
-      // Web markInterruptedUploads: the check never finished for this draft.
-      for (final draft in batch) {
-        if (!draft.checking) continue;
-        draft.checking = false;
-        draft.canRetry = false;
-        draft.error =
-            'File checking was interrupted. Remove it and attach again.';
-      }
-      notifyListeners();
-      return;
-    }
-    // Rows the user removed meanwhile release their slot.
-    final alive = [
-      for (final d in batch)
-        if (list?.contains(d) ?? false) d,
-    ];
-    if (alive.isEmpty) return;
-    final accepted = <UploadDraft>[];
-    var count = 0, empty = 0;
-    final oversize = <int>[];
-    var slots = (10 - list!.where((d) => !d.checking).length).clamp(0, 10);
-    if (limit != null) {
-      for (final draft in alive) {
-        if (draft.bytes.isEmpty) {
-          empty++;
-        } else if (draft.bytes.length > limit) {
-          oversize.add(draft.bytes.length);
-        } else if (slots <= 0) {
-          count++;
-        } else {
-          accepted.add(draft);
-          slots--;
-        }
-      }
-    }
-    for (final draft in alive) {
-      draft.checking = false;
-      if (!accepted.contains(draft)) list.remove(draft);
-    }
-    final parts = <String>[
-      if (limit == null)
-        text(
-          'The upload size limit could not be checked. Try again in a moment.',
-          const {},
-        ),
-      // Web ICU plurals (`one` / `other`).
-      if (count > 0)
-        text(
-          count == 1
-              ? 'Only {max} attachments per message. {extra} extra file skipped.'
-              : 'Only {max} attachments per message. {extra} extra files skipped.',
-          {'max': 10, 'extra': count},
-        ),
-      if (empty > 0)
-        text(
-          empty == 1
-              ? '{count} empty file skipped.'
-              : '{count} empty files skipped.',
-          {'count': empty},
-        ),
-      if (oversize.isNotEmpty)
-        text('Max {maxSize} per file. Current largest file is {largest}.', {
-          'maxSize': _limitLabel(limit!),
-          'largest': _bytesLabel(oversize.reduce((a, b) => a > b ? a : b)),
-        }),
-    ];
-    _raiseComposerNotice(scope, parts.isEmpty ? null : parts.join(' '));
-    if (list.isEmpty) _uploads.remove(scope);
-    notifyListeners();
-    // One transfer at a time, each fenced by the authority the selection was
-    // made under: after a conversation, role or account change the files that
-    // have not started are dropped rather than sent under the new authority.
-    for (final draft in accepted) {
-      if (!current()) {
-        _uploads[scope]?.remove(draft);
-        if (_uploads[scope]?.isEmpty ?? false) _uploads.remove(scope);
-        notifyListeners();
-        continue;
-      }
-      await _transferUpload(draft, thread: thread);
-    }
-  }
-
-  /// Web `utils/attachmentUploadErrorPresentation.ts`: the server's `UPLOAD_*`
-  /// code or text, the "storage timed out" mapping, else `uploadRetryHint`.
   @visibleForTesting
-  static String uploadErrorText(Object failure) => _isStorageTimeout(failure)
-      ? _storageTimedOut
-      : userErrorText(
-          failure,
-          fallback: 'File no longer available or upload failed. Tap to retry.',
-          codeText: _uploadCodeText,
-          where: 'upload attachment',
-        );
-
-  static const _storageTimedOut =
-      'The file reached Raft, but saving it timed out.';
-
-  /// Web `SERVER_UPLOAD_ERROR_MESSAGE_ID`.
-  static bool _isStorageTimeout(Object failure) =>
-      failure is RaftApiException &&
-      failure.message == 'Attachment storage timed out';
+  static String uploadErrorText(Object failure) =>
+      WorkspaceUploads.uploadErrorText(failure);
 
   /// A 403 whose reason is membership revocation (not a transient failure).
   static bool _isNotServerMember(Object failure) =>
@@ -2310,106 +2066,22 @@ class WorkspaceController extends ChangeNotifier {
       failure.status == 403 &&
       failure.message == 'Not a member of this server';
 
-  static const _uploadCodeText = {
-    'UPLOAD_COMPLETE_FAILED': 'The upload could not be completed.',
-    'UPLOAD_SESSION_EXPIRED': 'Upload session expired.',
-    'UPLOAD_SESSION_CANCELED': 'Upload session was canceled.',
-    'UPLOAD_OBJECT_MISMATCH': 'Uploaded object failed verification.',
-    'UPLOAD_SESSION_STATUS_FAILED': 'The upload session could not be checked.',
-    'UPLOAD_SESSION_CREATE_FAILED': 'The upload session could not be created.',
-    'UPLOAD_CAPABILITY_FAILED': 'Upload capability could not be checked.',
-    'UPLOAD_INVALID_REQUEST': 'The attachment is empty.',
-    'UPLOAD_TOO_LARGE': 'The attachment exceeds the plan limit.',
-    'UPLOAD_OBJECT_PUT_UNCERTAIN':
-        'The upload response was lost. Retry to safely resume this upload.',
-    'UPLOAD_STALLED':
-        'The upload stopped making progress. Check your connection and try again.',
-  };
-
-  static String _limitLabel(int bytes) => bytes % (1024 * 1024) == 0
-      ? '${bytes ~/ (1024 * 1024)}MB'
-      : _bytesLabel(bytes);
-
-  static String _bytesLabel(int bytes) {
-    if (bytes <= 0) return '0B';
-    const units = ['B', 'KB', 'MB', 'GB'];
-    var value = bytes.toDouble();
-    var unit = 0;
-    while (value >= 1024 && unit < units.length - 1) {
-      value /= 1024;
-      unit++;
-    }
-    return '${unit == 0 ? value.toStringAsFixed(0) : value.toStringAsFixed(1)}${units[unit]}';
-  }
-
-  Future<void> attachUpload(
-    String name,
-    Uint8List bytes, {
-    bool thread = false,
-  }) async {
-    final source = presentationSource;
-    if (source != null) {
-      return source.attachUpload(name, bytes, thread: thread);
-    }
-    final scope = draftScope(thread: thread);
-    if (scope == null) return;
-    if (bytes.isEmpty) {
-      throw const RaftApiException('Empty files cannot be uploaded.');
-    }
-    if (uploads(thread: thread).length >= 10) {
-      throw const RaftApiException('Attach up to 10 files per message.');
-    }
-    final draft = UploadDraft(name, bytes, key: _uploadKeys++);
-    (_uploads[scope] ??= []).add(draft);
-    await _transferUpload(draft, thread: thread);
-  }
-
-  Future<void> retryUpload(UploadDraft draft, {bool thread = false}) async {
-    final source = presentationSource;
-    if (source != null) {
-      return source.retryUpload(draft, thread: thread);
-    }
-    if (!uploads(thread: thread).contains(draft) ||
-        draft.error == null ||
-        !draft.canRetry) {
-      return;
-    }
-    draft.cancel = UploadCancellation();
-    draft.error = null;
-    draft.progress = 0;
-    await _transferUpload(draft, thread: thread);
-  }
-
-  Future<void> _transferUpload(
-    UploadDraft draft, {
-    required bool thread,
-  }) async {
-    final generation = ledger.generation;
-    final idBefore = channel?.id;
-    final scope = draftScope(thread: thread);
-    draft.queued = false;
-    notifyListeners();
-    try {
-      final id = thread ? await ensureThread() : idBefore;
-      if (id == null ||
-          generation != ledger.generation ||
-          _disposed ||
-          draft.cancel.cancelled ||
-          !(_uploads[scope]?.contains(draft) ?? false)) {
-        return;
-      }
-      void progress(int sent, int total) {
-        if (generation != ledger.generation ||
-            draft.cancel.cancelled ||
-            _disposed) {
-          return;
-        }
-        draft.progress = total > 0 ? sent / total : 0;
-        notifyListeners();
-      }
-
-      final files = draft.local != null
-          ? await client.uploadStream(
+  ComposerUploadVisit _uploadVisit(bool thread) {
+    final scope = draftScope(thread: thread)!;
+    final generation = ledger.generation, authority = _uploadAuthority();
+    return ComposerUploadVisit(
+      scope: scope,
+      channelId: channel?.id,
+      thread: thread,
+      selectionCurrent: () =>
+          !_disposed &&
+          generation == ledger.generation &&
+          scope == draftScope(thread: thread) &&
+          authority == _uploadAuthority(),
+      resolveThread: ensureThread,
+      limit: uploadLimitBytes,
+      upload: (id, draft, progress) => draft.local != null
+          ? client.uploadStream(
               id,
               draft.local!.openRead,
               draft.sizeBytes,
@@ -2418,69 +2090,49 @@ class WorkspaceController extends ChangeNotifier {
               onProgress: progress,
               mimeType: composerMimeType(draft.filename),
             )
-          : await client.upload(
+          : client.upload(
               id,
               draft.bytes,
               draft.filename,
               cancellation: draft.cancel,
+              onProgress: progress,
               mimeType: composerMimeType(draft.filename),
-              onProgress: (sent, total) {
-                if (generation != ledger.generation ||
-                    draft.cancel.cancelled ||
-                    _disposed) {
-                  return;
-                }
-                draft.progress = total > 0 ? sent / total : 0;
-                notifyListeners();
-              },
-            );
-      if (generation != ledger.generation ||
-          draft.cancel.cancelled ||
-          _disposed ||
-          !(_uploads[scope]?.contains(draft) ?? false)) {
-        return;
-      }
-      draft.id = files.single['id'];
-      draft.metadata = files.single;
-      draft.progress = 1;
-      if (draft.local != null && scope != null) await _saveDraftScope(scope);
-    } catch (e) {
-      if (!draft.cancel.cancelled &&
-          generation == ledger.generation &&
-          !_disposed) {
-        draft.error = uploadErrorText(e);
-      }
-    } finally {
-      notifyListeners();
-    }
+            ),
+      persist: _saveDraftScope,
+      notice: (message) => _raiseComposerNotice(scope, message),
+    );
   }
 
-  Future<void> _releaseSharedUploads(Iterable<UploadDraft> files) async {
-    for (final file in files) {
-      try {
-        await file.local?.release();
-      } catch (_) {
-        // Local cleanup failure cannot turn an accepted message into a failed
-        // send. Account/scope cleanup also retires these private inbox files.
-      }
-    }
+  Future<void> attachUpload(
+    String name,
+    Uint8List bytes, {
+    bool thread = false,
+  }) async {
+    final source = presentationSource;
+    if (source != null) return source.attachUpload(name, bytes, thread: thread);
+    if (draftScope(thread: thread) == null || _disposed) return;
+    await composer.uploads.attach(name, bytes, _uploadVisit(thread));
+  }
+
+  Future<void> retryUpload(UploadDraft draft, {bool thread = false}) async {
+    final source = presentationSource;
+    if (source != null) return source.retryUpload(draft, thread: thread);
+    if (draftScope(thread: thread) == null || _disposed) return;
+    await composer.uploads.retry(draft, _uploadVisit(thread));
+  }
+
+  Future<void> _transferUpload(
+    UploadDraft draft, {
+    required bool thread,
+  }) async {
+    if (draftScope(thread: thread) == null || _disposed) return;
+    await composer.uploads.transfer(draft, _uploadVisit(thread));
   }
 
   void removeUpload(UploadDraft draft, {bool thread = false}) {
     final source = presentationSource;
-    if (source != null) {
-      source.removeUpload(draft, thread: thread);
-      return;
-    }
-    draft.cancel.cancel();
-    // The caller may be disposing a view after selection changed.
-    for (final entry in _uploads.entries) {
-      if (entry.value.remove(draft) && draft.local != null) {
-        unawaited(_saveDraftScope(entry.key));
-      }
-    }
-    if (draft.local != null) unawaited(_releaseSharedUploads([draft]));
-    notifyListeners();
+    if (source != null) return source.removeUpload(draft, thread: thread);
+    composer.uploads.remove(draft, _saveDraftScope);
   }
 
   final _readState = ReadStateLedger();
@@ -2491,36 +2143,14 @@ class WorkspaceController extends ChangeNotifier {
   final _resourceSnapshots = ResourceSnapshotCache();
   ResourceSnapshotCache get resourceSnapshots =>
       presentationSource?.resourceSnapshots ?? _resourceSnapshots;
-  final Map<String, Set<String>> _pagevisibleIds = {};
-  Map<String, Set<String>> get visibleIds =>
-      presentationSource?.visibleIds ?? _pagevisibleIds;
-  final Map<String, (String, bool, String)> _pageWindowState = {};
-  Map<String, (String, bool, String)> get _windowState =>
-      presentationSource?._windowState ?? _pageWindowState;
-
-  /// Accepted reply windows by parent message (Source threadStore keeps a
-  /// thread's messages after it closes): reopening shows them at once and
-  /// revalidates in the background. Bound to the authority that accepted them.
-  final Map<String, _ThreadWindow> _pageThreadWindows = {};
-  Map<String, _ThreadWindow> get _threadWindows =>
-      presentationSource?._threadWindows ?? _pageThreadWindows;
-  final Set<String> _contextWindows = {};
+  Map<String, Set<String>> get visibleIds => messageWindows.visibleIds;
   bool hasNewer = false, threadHasMore = false;
   bool threadHistoryLimited = false, historyLimited = false;
-  final Map<String, bool> _pageWindowHistoryLimited = {};
-  Map<String, bool> get _windowHistoryLimited =>
-      presentationSource?._windowHistoryLimited ?? _pageWindowHistoryLimited;
   String? highlightedMessageId;
-  String? _pendingMessageContextChannelId;
-  int? _pendingMessageContextWindow;
-  bool _pendingMessageContextRetainsRows = false;
-  final Map<String, bool> _contextWindowHasNewer = {};
 
   /// Pending unknown context; cross-channel cached tails are not that context.
   String? get pendingMessageContextChannelId =>
-      _pendingMessageContextWindow == channelGeneration
-      ? _pendingMessageContextChannelId
-      : null;
+      messageWindows.pendingContextChannelId;
   List<RaftRecord> servers = [];
   List<RaftChannel> channels = [], dms = [];
   Map<String, int> unread = {};
@@ -2545,29 +2175,13 @@ class WorkspaceController extends ChangeNotifier {
   );
   RaftChannel? channel;
   WorkspaceThreadIdentity? _threadIdentity;
-  int _threadIdentityWindow = -1, _threadIdentityNavigation = -1;
-  String? _threadIdentityToken, _threadIdentityAuthority;
+  MessageWindowRequest? _threadVisit;
   bool _threadResolutionLoading = false, _threadParentLoading = false;
   // ignore: raft_lints/avoid_imperative_notice_state -- Cleared when a thread opens or closes and hidden whenever threadIdentity is stale.
   String? _threadResolutionError;
 
   WorkspaceThreadIdentity? get threadIdentity =>
-      !_disposed &&
-          _threadIdentityWindow == threadGeneration &&
-          _threadIdentityNavigation == navigationRevision &&
-          _threadIdentityToken ==
-              _replyToken(_threadIdentity?.parentChannelId) &&
-          (_threadIdentityAuthority == null ||
-              _threadIdentityAuthority ==
-                  _threadResourceAuthority(_threadIdentity?.parentChannelId)) &&
-          !_revokedChannels.contains(_threadIdentity?.parentChannelId) &&
-          !_revokedChannels.contains(threadChannelId) &&
-          can(
-            'viewChannel',
-            resource: _threadChannelResource(_threadIdentity?.parentChannelId),
-          )
-      ? _threadIdentity
-      : null;
+      _threadVisit?.current == true ? _threadIdentity : null;
   bool get threadResolutionLoading =>
       threadIdentity != null && _threadResolutionLoading;
   bool get threadParentLoading =>
@@ -2621,22 +2235,17 @@ class WorkspaceController extends ChangeNotifier {
   /// Bound to the channel and server it was raised for: it reads as null in
   /// any other one (a channel replaced without a re-open, a server switch).
   MessageContextLoadError? get contextLoadError {
-    if (_contextLoadError != null &&
-        (_contextLoadChannelId != channel?.id ||
-            _contextLoadServerId != server?.id)) {
-      _contextLoadError = null;
+    if (_contextFailure?.$2 != (channel?.id, server?.id)) {
+      _contextFailure = null;
     }
-    return _contextLoadError;
+    return _contextFailure?.$1;
   }
 
-  set contextLoadError(MessageContextLoadError? value) {
-    _contextLoadError = value;
-    _contextLoadChannelId = channel?.id;
-    _contextLoadServerId = server?.id;
-  }
+  set contextLoadError(MessageContextLoadError? value) => _contextFailure =
+      value == null ? null : (value, (channel?.id, server?.id));
 
-  MessageContextLoadError? _contextLoadError;
-  String? _contextLoadChannelId, _contextLoadServerId;
+  (MessageContextLoadError, (String?, String?))? _contextFailure;
+
   final navigation = WorkspaceNavigation();
   String _unboundSection = 'chat';
   String? _navigationAuthority;
@@ -2712,7 +2321,8 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  int channelGeneration = 0, threadGeneration = 0;
+  int get channelGeneration => messageWindows.channelGeneration;
+  int get threadGeneration => messageWindows.threadGeneration;
 
   /// Accepted thread summaries ("N replies" rows) per parent channel, keyed
   /// by parent message. Like the channel's message window they outlive a
@@ -2738,81 +2348,29 @@ class WorkspaceController extends ChangeNotifier {
   /// Summaries held for [channelId] (selected or not).
   Map<String, dynamic> threadSummariesFor(String channelId) =>
       Map.unmodifiable(_summariesByChannel[channelId] ?? const {});
-  // Ledger rows are replaced, never mutated, on every change: one wrapper per
-  // row version lets presenters reuse work for unchanged rows (identity).
-  final _presentedRows = Expando<RaftMessage>('presented rows');
-  RaftMessage _presented(Map<String, dynamic> row) =>
-      presentationSource?._presented(row) ??
-      (_presentedRows[row] ??= RaftMessage(row));
-
-  List<RaftMessage> get messages =>
-      channel == null ||
-          (pendingMessageContextChannelId == channel!.id &&
-              !_pendingMessageContextRetainsRows)
-      ? []
-      : ledger
-            .messages(channel!.id)
-            .where((m) => visibleIds[channel!.id]?.contains(m['id']) ?? false)
-            .map(_presented)
-            .toList();
+  List<RaftMessage> get messages => messageWindows.rows(channel?.id);
 
   /// Same membership as [messages], in constant time (no list projection).
-  bool presentsMessage(String? id) {
-    final current = channel;
-    if (id == null || current == null) return false;
-    if (pendingMessageContextChannelId == current.id &&
-        !_pendingMessageContextRetainsRows) {
-      return false;
-    }
-    return (visibleIds[current.id]?.contains(id) ?? false) &&
-        ledger.contains(current.id, id);
-  }
+  bool presentsMessage(String? id) =>
+      messageWindows.retainsContextRows(channel?.id) &&
+      messageWindows.containsVisible(channel?.id, id);
 
   /// Same membership as [replies], in constant time.
-  bool presentsReply(String? id) {
-    final thread = threadChannelId;
-    if (id == null || thread == null) return false;
-    return (visibleIds[thread]?.contains(id) ?? false) &&
-        ledger.contains(thread, id);
-  }
+  bool presentsReply(String? id) =>
+      messageWindows.containsVisible(threadChannelId, id);
 
-  List<RaftMessage> get replies => threadChannelId == null
-      ? []
-      : ledger
-            .messages(threadChannelId!)
-            .where(
-              (m) => visibleIds[threadChannelId!]?.contains(m['id']) ?? false,
-            )
-            .map(_presented)
-            .toList();
+  List<RaftMessage> get replies => messageWindows.rows(threadChannelId);
 
-  /// The presented timeline: [messages] or [replies] followed by this
-  /// scope's optimistic rows (Web `addOptimisticMessage` places them after
-  /// every persisted row). A row whose server copy is already presented is
-  /// dropped, whichever of HTTP or socket delivered it. Like Web ThreadPanel,
-  /// optimistic rows stay hidden while an older window is presented.
-  List<RaftMessage> timeline({bool thread = false}) {
-    final rows = thread ? replies : messages;
-    final scope = draftScope(thread: thread);
-    final pending = scope == null
-        ? null
-        : (presentationSource?._pendingSends ?? _pendingSends)[scope];
-    if (pending == null ||
-        pending.isEmpty ||
-        !thread &&
-            (hasNewer || pendingMessageContextChannelId == channel?.id)) {
-      return rows;
-    }
-    final confirmed = {
-      for (final row in rows)
-        if (row.json['randomId'] is String) row.json['randomId'],
-    };
-    return [
-      ...rows,
-      for (final send in pending)
-        if (!confirmed.contains(send.randomId)) _presented(send.row),
-    ];
-  }
+  /// Web display order uses server sequence, with a display-only coordinate
+  /// for pending rows. Context windows keep their existing admission policy.
+  List<RaftMessage> timeline({bool thread = false, List<RaftMessage>? rows}) =>
+      messageWindows.project(
+        rows ?? (thread ? replies : messages),
+        draftScope(thread: thread),
+        context:
+            !thread &&
+            (hasNewer || pendingMessageContextChannelId == channel?.id),
+      );
 
   /// Stable presentation identity: a row sent from this session keeps its
   /// optimistic key after the server copy replaces it, so the timeline
@@ -2822,7 +2380,7 @@ class WorkspaceController extends ChangeNotifier {
       return presentationSource!.messageKey(message);
     }
     final randomId = message.json['randomId'];
-    return randomId is String && _localRandomIds.contains(randomId)
+    return randomId is String && composer.sends.localId(randomId)
         ? 'optimistic-$randomId'
         : message.id;
   }
@@ -3081,51 +2639,16 @@ class WorkspaceController extends ChangeNotifier {
     final restoredTranslations = translations.restore();
     unawaited(entityDirectory.preload());
     followedThreads.start();
-    ledger.switchServer(next.id);
-    readState.reset();
-    resourceSnapshots.clear();
-    _prefetched.clear();
-    reactionViewer.reset();
-    messageSync.reset();
-    syncCoreMessagesEnabled = false;
+    composer.clearOwnedBy(this);
+    _resetServerWindows(next.id);
     refreshMessageSyncFlag();
     loadSidebar();
-    for (final drafts in _uploads.values) {
-      for (final d in drafts) {
-        d.cancel.cancel();
-      }
-    }
-    _uploads.clear();
-    composer.clearOwnedBy(this);
-    _pendingSends.clear();
-    _localRandomIds.clear();
-    _shareHolds.clear();
-    visibleIds.clear();
-    _windowState.clear();
-    _windowHistoryLimited.clear();
-    _diskOnlyWindows.clear();
-    _threadWindows.clear();
-    historyLimited = threadHistoryLimited = false;
-    _contextWindows.clear();
     _revokedChannels.clear();
     _channelRowSeq.clear();
     // The new server's socket connects for the first time.
     _connectedBefore = _roomsJoinedPending = false;
     _gapSyncedThrough = null;
-    highlightedMessageId = null;
     hasNewer = false;
-    channels = [];
-    dms = [];
-    channel = null;
-    threadParent = null;
-    threadChannelId = null;
-    _summariesByChannel.clear();
-    unread = {};
-    mentions = {};
-    newFlags = {};
-    _latestActivity.clear();
-    channelGeneration++;
-    threadGeneration++;
     final selectionAtStart = channelGeneration,
         threadAtStart = threadGeneration,
         navigationAtStart = navigationRevision;
@@ -3153,29 +2676,18 @@ class WorkspaceController extends ChangeNotifier {
         final replyAuthority = replyIdentity == _syncIdentity()
             ? _replyToken(initial.id)
             : '';
+        final request = messageWindows.request(
+          allowed: () => generation == client.generation,
+        );
         final page = await _cached('window', initial.id);
         if (generation != client.generation) return;
-        if (_acceptCachedWindow(page, initial.id)) {
-          final rows = acceptedWindowRows(page['messages'], initial.id);
-          ledger.ingest(rows, expectedGeneration: ledger.generation);
-          visibleIds[initial.id] = rows.map((e) => e['id'] as String).toSet();
-          hasMore = page['hasMore'] == true;
-          historyLimited = page['historyLimited'] == true;
-          hasNewer = page['hasNewer'] == true;
-          // Record the authority the disk rows were accepted under, so a
-          // later selection under different facts drops them first.
-          _windowState[initial.id] = (
-            _windowAuthority(),
-            hasMore,
-            _replyToken(initial.id),
-          );
-          _windowHistoryLimited[initial.id] = historyLimited;
-          _diskOnlyWindows.add(initial.id);
-          _summariesByChannel[initial.id] = _hydrateThreadSummaries(
-            page['threadSummaries'],
-            initial.id,
-            expectedToken: replyAuthority,
-          );
+        if (_restoreCachedTail(
+          initial.id,
+          page,
+          request,
+          replyAuthority: replyAuthority,
+          replace: true,
+        )) {
           await _restoreDraft(initial.id);
         }
       }
@@ -3393,7 +2905,7 @@ class WorkspaceController extends ChangeNotifier {
     if (latest != null && maxRead >= latest) {
       count = 0;
     } else if (rows.isNotEmpty &&
-        !_contextWindows.contains(id) &&
+        !messageWindows.isContext(id) &&
         !(id == channel?.id && hasNewer) &&
         RaftMessage(rows.first).seq <= maxRead) {
       count = rows
@@ -3505,7 +3017,7 @@ class WorkspaceController extends ChangeNotifier {
           if (c.id != channel?.id &&
               !_prefetched.contains(c.id) &&
               !_revokedChannels.contains(c.id) &&
-              _windowState[c.id] == null &&
+              messageWindows.accepted[c.id] == null &&
               (unread[c.id] ?? 0) > 0 &&
               can('viewChannel', resource: c))
             c,
@@ -3514,43 +3026,38 @@ class WorkspaceController extends ChangeNotifier {
         if (!stillCurrent()) return;
         _prefetched.add(c.id);
         final authority = authorityOf(c), reply = _replyToken(c.id);
+        final request = messageWindows.request(
+          allowed: () =>
+              stillCurrent() &&
+              reply == _replyToken(c.id) &&
+              channel?.id != c.id &&
+              messageWindows.accepted[c.id] == null &&
+              !_revokedChannels.contains(c.id) &&
+              authority == authorityOf(c) &&
+              can('viewChannel', resource: c),
+        );
         try {
           // The channel's task chips load with its first page.
           unawaited(MessageTaskCache.of(client).warm(this, c.id));
-          final page = await client.messagePage(c.id);
-          if (!stillCurrent() ||
-              reply != _replyToken(c.id) ||
-              channel?.id == c.id ||
-              _windowState[c.id] != null ||
-              _revokedChannels.contains(c.id) ||
-              authority != authorityOf(c) ||
-              !can('viewChannel', resource: c)) {
-            continue;
-          }
-          final rows = (page['messages'] as List? ?? const [])
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .where((e) => e['channelId'] == c.id && e['id'] is String)
-              .toList();
+          final page = await MessageHistoryPages.read(this, request, c.id);
+          if (!request.current) continue;
+          final rows = acceptedWindowRows(page['messages'], c.id);
           if (rows.isEmpty) continue;
-          ledger.ingest(rows, expectedGeneration: generation);
           final limited = page['historyLimited'] == true;
-          visibleIds[c.id] = rows.map((e) => e['id'] as String).toSet();
-          _windowState[c.id] = (
+          messageWindows.acceptRows(request, c.id, rows, replace: true);
+          await MessageHistoryPages.record(this, request, page);
+          if (!request.current) continue;
+          messageWindows.rememberWindow(
+            request,
+            c.id,
             authority,
             !limited && rows.length >= 50,
             reply,
+            historyLimited: limited,
           );
-          _windowHistoryLimited[c.id] = limited;
           // Reply rows are part of the window: a first open renders them in
           // the same frame as the prefetched messages.
-          _summariesByChannel[c.id] = {
-            ...?_summariesByChannel[c.id],
-            ..._hydrateThreadSummaries(
-              page['threadSummariesByParentMessageId'],
-              c.id,
-              expectedToken: reply,
-            ),
-          };
+          _mergeThreadSummaries(c.id, page['threadSummariesByParentMessageId']);
         } catch (_) {
           // Best effort: the channel opens normally on demand.
         }
@@ -3561,32 +3068,25 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   void _revokeChannel(String id) {
-    final sharedPrincipal = client.user?.id, sharedServer = client.serverId;
+    final origin = client.origin,
+        principal = client.user?.id,
+        serverId = client.serverId;
     // Content just handed over from a share is kept when its destination is
     // refused: the composer says so and Send stays off, nothing is discarded.
     final keepShared = _shareHolds.containsKey(id);
     if (keepShared) {
-      _shareHolds[id] =
-          'This conversation is no longer available. Your draft and files are kept.';
+      _shareHolds[id] = 'This conversation is no longer available. Your draft and files are kept.';
     }
-    if (!keepShared && sharedPrincipal != null && sharedServer != null) {
-      unawaited(
-        discardSharedScope?.call(
-          client.origin,
-          sharedPrincipal,
-          sharedServer,
-          id,
-        ),
-      );
+    if (!keepShared && principal != null && serverId != null) {
+      unawaited(discardSharedScope?.call(origin, principal, serverId, id));
     }
-    final origin = client.origin,
-        principal = client.user?.id,
-        serverId = client.serverId;
     final messageIds = <dynamic>{
       ...ledger.messages(id).map((m) => m['id']),
       ...threadRepliesSync.parentMessageIdsForChannel(id),
-      if (_threadIdentity?.parentChannelId == id)
+      if (_threadIdentity != null &&
+          (_threadIdentity!.parentChannelId == id || threadChannelId == id))
         _threadIdentity!.parentMessageId,
+      if (threadChannelId == id && threadParent != null) threadParent!.id,
     };
     final threadIds = <String>{
       for (final message in ledger.messages(id))
@@ -3615,41 +3115,27 @@ class WorkspaceController extends ChangeNotifier {
       // Stored images, preview files and documents of the channel go too,
       // also when no decoded image was ever held this session.
       _purgeStoredChannel(scope);
-      ledger.revokeChannel(scope);
+      messageWindows.revokeChannel(scope);
       messageSync.revokeChannel(scope);
       threadRepliesSync.revokeChannel(scope);
       notificationPrefsSync.revokeChannel(scope);
-      visibleIds.remove(scope);
-      _windowState.remove(scope);
-      _diskOnlyWindows.remove(scope);
-      _contextWindows.remove(scope);
+      messageWindows.discardWindow(scope);
       unread.remove(scope);
       _clearMention(scope);
       _latestActivity.remove(scope);
       _summariesByChannel.remove(scope);
-      _threadWindows.removeWhere(
-        (_, window) =>
-            window.parentChannelId == scope || window.threadChannelId == scope,
-      );
+      messageWindows.revokeThreads(scope);
       if (serverId != null && principal != null) {
         readState.revoke(serverId, principal, scope);
       }
+      composer.retireScope(scope, keepFiles: keepShared && scope == id);
       if (keepShared && scope == id) continue;
-      for (final draft in _uploads.remove(scope) ?? <UploadDraft>[]) {
-        draft.cancel.cancel();
-        if (draft.local != null) unawaited(_releaseSharedUploads([draft]));
-      }
       _attempts.remove(scope);
-      _pendingSends.remove(scope);
     }
     for (final messageId in messageIds) {
       final scope = 'thread:$messageId';
       _attempts.remove(scope);
-      _pendingSends.remove(scope);
-      for (final draft in _uploads.remove(scope) ?? <UploadDraft>[]) {
-        draft.cancel.cancel();
-        if (draft.local != null) unawaited(_releaseSharedUploads([draft]));
-      }
+      composer.retireScope(scope);
       reactionViewer.remove(messageId);
       for (final bucket in _summariesByChannel.values) {
         bucket.remove(messageId);
@@ -3657,11 +3143,13 @@ class WorkspaceController extends ChangeNotifier {
     }
     if (channel?.id == id && !keepShared) {
       channel = null;
-      channelGeneration++;
+      _missingConversationChannelId = id;
+      messageWindows.channelGeneration++;
     }
     if (threadParent?.channelId == id ||
         _threadIdentity?.parentChannelId == id ||
-        threadIds.contains(threadChannelId)) {
+        threadIds.contains(threadChannelId) ||
+        threadChannelId == id) {
       closeThread();
     }
     _persistReadState();
@@ -3976,9 +3464,11 @@ class WorkspaceController extends ChangeNotifier {
         ...dms,
       ].where((c) => c.id == channel!.id).firstOrNull;
       if (channel == null) {
-        if (threadChannelId != null) ledger.revokeChannel(threadChannelId!);
+        if (threadChannelId != null) {
+          messageWindows.revokeChannel(threadChannelId!);
+        }
         closeThread();
-        channelGeneration++;
+        messageWindows.channelGeneration++;
       }
     }
     notifyListeners();
@@ -4188,7 +3678,7 @@ class WorkspaceController extends ChangeNotifier {
   void _roomsJoined() {
     SourceActivityUnreadStore.activateForRooms(this);
     _roomsJoinedPending = false;
-    if (ledger.watermark > BigInt.zero) client.resume(ledger.watermark);
+    unawaited(MessageHistoryEvents.resume(this));
     // A reconnect and a resume can both ask within a second; the tail read a
     // moment ago already covers them.
     if (_due('gap', freshness: const Duration(seconds: 3))) {
@@ -4243,7 +3733,7 @@ class WorkspaceController extends ChangeNotifier {
     if (!client.connected || silent) {
       client.connect();
     } else {
-      if (ledger.watermark > BigInt.zero) client.resume(ledger.watermark);
+      unawaited(MessageHistoryEvents.resume(this));
       if (_due('gap', freshness: const Duration(seconds: 3))) {
         unawaited(syncVisibleScopes());
       }
@@ -4278,7 +3768,7 @@ class WorkspaceController extends ChangeNotifier {
 
     final thread = threadChannelId, main = channel?.id;
     final targets = [
-      if (thread != null && !threadLoading) thread,
+      if (thread != null && !threadLoading && !messageWindows.contextHasNewer(thread)) thread,
       if (main != null &&
           main != thread &&
           !hasNewer &&
@@ -4304,38 +3794,28 @@ class WorkspaceController extends ChangeNotifier {
 
   Future<bool> _syncGap(String id) async {
     final thread = id == threadChannelId;
-    var cursor = BigInt.zero;
-    for (final row in ledger.messages(id)) {
-      if (visibleIds[id]?.contains(row['id']) != true) continue;
-      final seq = RaftMessage(row).seq;
-      if (seq > cursor) cursor = seq;
-    }
+    var cursor = messageWindows.newestVisibleSequence(id);
     if (cursor == BigInt.zero) return true;
-    final generation = ledger.generation,
-        window = thread ? threadGeneration : channelGeneration,
-        owner = thread ? threadParentChannelId : id,
-        reply = _replyToken(owner),
-        authority = _windowAuthority();
-    bool current() =>
-        !_disposed &&
-        generation == ledger.generation &&
-        window == (thread ? threadGeneration : channelGeneration) &&
-        reply == _replyToken(owner) &&
-        authority == _windowAuthority() &&
-        !_revokedChannels.contains(id) &&
-        (thread ? threadChannelId == id : channel?.id == id && !hasNewer);
+    final owner = thread ? threadParentChannelId : id;
+    final request = _windowRequest(
+      id,
+      thread: thread,
+      allowed: () =>
+          thread ? threadChannelId == id && !messageWindows.contextHasNewer(id) : channel?.id == id && !hasNewer,
+    );
     try {
       while (true) {
-        final page = await client.get(
-          '/messages/sync',
-          query: {
-            'since_seq': '$cursor',
-            'channel_id': id,
-            'limit': _gapPageLimit,
+        final page = await MessageHistoryPages.read(
+          this, request, id,
+          thread: thread, after: cursor, limit: _gapPageLimit, localFirst: false,
+          remote: () async => {
+            'messages': await client.get('/messages/sync', query: {
+              'since_seq': '$cursor', 'channel_id': id, 'limit': _gapPageLimit,
+            }),
           },
         );
-        if (!current()) return false;
-        final listed = page is List ? page : const [];
+        if (!request.current) return false;
+        final listed = page['messages'] is List ? page['messages'] as List : const [];
         final rows = [
           for (final row in listed.whereType<Map>())
             if (row['channelId'] == id && row['id'] is String)
@@ -4346,10 +3826,9 @@ class WorkspaceController extends ChangeNotifier {
           for (final row in rows)
             if (!ledger.contains(id, row['id'] as String)) row,
         ];
-        ledger.ingest(rows, expectedGeneration: generation);
-        visibleIds
-            .putIfAbsent(id, () => {})
-            .addAll(rows.map((row) => row['id'] as String));
+        messageWindows.acceptRows(request, id, rows);
+        if (!await MessageHistoryPages.record(this, request, page)) return false;
+        if (!request.current) return false;
         var next = cursor;
         for (final row in rows) {
           final seq = RaftMessage(row).seq;
@@ -4368,7 +3847,9 @@ class WorkspaceController extends ChangeNotifier {
       return true;
     } on RaftApiException catch (e) {
       // Lost access is decided by the channel read and its revocation path.
-      if (current() && owner != null && (e.status == 403 || e.status == 404)) {
+      if (request.current &&
+          owner != null &&
+          (e.status == 403 || e.status == 404)) {
         unawaited(refreshChannel(owner));
       }
       return false;
@@ -4421,6 +3902,9 @@ class WorkspaceController extends ChangeNotifier {
         s.id == id ? RaftRecord({...s.json, 'role': role}) : s,
     ];
     if (server?.id == id) {
+      if (server?.string('role') != role) {
+        _replyAuthorityEpoch++;
+      }
       server = RaftRecord({...server!.json, 'role': role});
       _ensureSyncIdentity();
       refreshMessageSyncFlag();
@@ -4462,8 +3946,7 @@ class WorkspaceController extends ChangeNotifier {
       return;
     }
     if (_disposed) return;
-    RaftRecord patch(RaftRecord value) =>
-        value.id == serverId
+    RaftRecord patch(RaftRecord value) => value.id == serverId
         ? RaftRecord({...value.json, 'avatarUrl': avatarUrl})
         : value;
     servers = servers.map(patch).toList();
@@ -4636,36 +4119,27 @@ class WorkspaceController extends ChangeNotifier {
     channel = next;
     hasNewer = false;
     if (!retainThread) highlightedMessageId = null;
-    final priorWindow = _windowState[next.id];
+    final priorWindow = messageWindows.accepted[next.id];
     final replyAuthority = _replyToken(next.id);
-    if (priorWindow != null &&
-        (priorWindow.$1 != _windowAuthority() ||
-            priorWindow.$3 != replyAuthority)) {
-      visibleIds.remove(next.id);
-      _windowState.remove(next.id);
-      _diskOnlyWindows.remove(next.id);
-      _windowHistoryLimited.remove(next.id);
+    final compatible =
+        priorWindow != null &&
+        priorWindow.matches(_windowAuthority(), replyAuthority);
+    if (priorWindow != null && !compatible) {
+      messageWindows.discardWindow(next.id);
       _summariesByChannel.remove(next.id);
     }
-    hasMore =
-        priorWindow != null &&
-        priorWindow.$1 == _windowAuthority() &&
-        priorWindow.$3 == replyAuthority &&
-        priorWindow.$2;
-    historyLimited =
-        priorWindow != null &&
-            priorWindow.$1 == _windowAuthority() &&
-            priorWindow.$3 == replyAuthority
-        ? _windowHistoryLimited[next.id] == true
-        : false;
-    if (_contextWindows.remove(next.id) && !retainContextUntilAccepted) {
-      visibleIds.remove(next.id);
+    hasMore = compatible && priorWindow.hasMore;
+    historyLimited = compatible && priorWindow.historyLimited;
+    // Keep the accepted context kind until its replacement tail is accepted.
+    if (!retainContextUntilAccepted &&
+        messageWindows.setContextMode(liveWindowWrite, next.id, null)) {
+      messageWindows.hideWindow(next.id);
     }
     if (navigate) section = 'chat';
     if (!retainThread) {
       threadParent = null;
       threadChannelId = null;
-      threadGeneration++;
+      messageWindows.threadGeneration++;
     }
     loadingOlder = false;
     channelLoading = true;
@@ -4686,27 +4160,20 @@ class WorkspaceController extends ChangeNotifier {
       _clearMention(next.id);
       _persistUnread();
     }
-    final window = ++channelGeneration;
-    final generation = ledger.generation;
-    final authority = _windowAuthority();
-    final navigationWindow = navigationRevision;
-    bool current() =>
-        !_disposed &&
-        window == channelGeneration &&
-        navigationWindow == navigationRevision &&
-        generation == ledger.generation &&
-        channel?.id == next.id &&
-        authority == _windowAuthority() &&
-        replyAuthority == _replyToken(next.id) &&
-        !_revokedChannels.contains(next.id) &&
-        can('viewChannel', resource: channel);
+    messageWindows.channelGeneration++;
+    final request = _windowRequest(
+      next.id,
+      checkNavigation: true,
+      allowed: () =>
+          channel?.id == next.id && can('viewChannel', resource: channel),
+    );
     notifyListeners();
     if (isPendingDm(next)) {
       // A DM that is not on the server yet has nothing to read: only its
       // saved draft, then the composer.
       await _restoreDraft(next.id);
       onDraftRestored?.call();
-      if (current()) {
+      if (request.current) {
         channelLoading = false;
         notifyListeners();
       }
@@ -4719,34 +4186,17 @@ class WorkspaceController extends ChangeNotifier {
     // The composer can take staged content from here on; the message page
     // below is still loading.
     onDraftRestored?.call();
-    if (!current()) return;
+    if (!request.current) return;
     try {
-      final page = retainContextUntilAccepted
+      final page = retainContextUntilAccepted && MessageHistoryPages.storage(cache) == null
           ? null
           : await _cached('window', next.id);
-      if (!current()) return;
-      if (_acceptCachedWindow(page, next.id)) {
-        final rows = acceptedWindowRows(page['messages'], next.id);
-        // The ledger may be newer than disk after a live event. Ingest applies
-        // its canonical versions/tombstones; visibility is never raw cache data.
-        ledger.ingest(rows, expectedGeneration: generation);
-        visibleIds
-            .putIfAbsent(next.id, () => {})
-            .addAll(rows.map((e) => e['id'] as String));
-        hasMore = page['hasMore'] == true;
-        historyLimited = page['historyLimited'] == true;
-        _windowState[next.id] = (authority, hasMore, replyAuthority);
-        _windowHistoryLimited[next.id] = historyLimited;
-        _diskOnlyWindows.add(next.id);
-        // Memory is never older than disk: held summaries win.
-        _summariesByChannel[next.id] = {
-          ..._hydrateThreadSummaries(
-            page['threadSummaries'],
-            next.id,
-            expectedToken: replyAuthority,
-          ),
-          ...?_summariesByChannel[next.id],
-        };
+      if (!request.current) return;
+      if (!retainContextUntilAccepted && await MessageHistoryPositions.restoreMain(this, request, next.id)) {
+        if (request.current) await _save('selection', '', next.id);
+        return;
+      }
+      if (_restoreCachedTail(next.id, page, request, replace: retainContextUntilAccepted)) {
         notifyListeners();
       }
       final retained = retainContextUntilAccepted
@@ -4754,24 +4204,25 @@ class WorkspaceController extends ChangeNotifier {
           : messages.map((m) => m.json).toList();
       final retainedHasMore = hasMore;
       client.joinChannel(next.id);
-      final fresh = await client.messagePage(next.id);
-      if (!current()) return;
+      final fresh = await MessageHistoryPages.read(this, request, next.id);
+      if (!request.current) return;
       _acceptFreshTail(
         next.id,
         fresh,
         retained: retained,
         retainedHasMore: retainedHasMore,
-        generation: generation,
-        replyAuthority: replyAuthority,
+        request: request,
       );
+      await MessageHistoryPages.record(this, request, fresh);
+      if (!request.current) return;
       channelLoading = false;
       notifyListeners();
       await _saveWindow(next.id);
-      if (!current()) return;
+      if (!request.current) return;
       await _save('selection', '', next.id);
-      if (current() && autoRead) await markRead(next.id);
+      if (request.current && autoRead) await markRead(next.id);
     } catch (e) {
-      if (current()) {
+      if (request.current) {
         if (e is RaftApiException && (e.status == 403 || e.status == 404)) {
           _revokeChannel(next.id);
         } else {
@@ -4779,7 +4230,7 @@ class WorkspaceController extends ChangeNotifier {
         }
       }
     } finally {
-      if (current()) {
+      if (request.current) {
         channelLoading = false;
         notifyListeners();
       }
@@ -4800,18 +4251,21 @@ class WorkspaceController extends ChangeNotifier {
     Map<String, dynamic> fresh, {
     required List<Map<String, dynamic>> retained,
     required bool retainedHasMore,
-    required int generation,
-    required String replyAuthority,
+    required MessageWindowRequest request,
   }) {
-    final rows = (fresh['messages'] as List)
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList();
-    ledger.ingest(rows, expectedGeneration: generation);
-    _diskOnlyWindows.remove(id);
+    if (!request.current) return;
+    final rows = acceptedWindowRows(fresh['messages'], id);
+    messageWindows.setDiskOnly(request, id, false);
     historyLimited = fresh['historyLimited'] == true;
-    visibleIds[id] = fresh['historyLimited'] == true
-        ? rows.map((e) => e['id'] as String).toSet()
-        : reconcileTailWindow(retained, rows);
+    messageWindows.acceptRows(
+      request,
+      id,
+      rows,
+      visible: historyLimited
+          ? rows.map((e) => e['id'] as String)
+          : reconcileTailWindow(retained, rows),
+      replace: true,
+    );
     final held = _summariesByChannel[id] ?? const {};
     _summariesByChannel[id] = {
       for (final row in retained)
@@ -4819,7 +4273,7 @@ class WorkspaceController extends ChangeNotifier {
       ..._hydrateThreadSummaries(
         fresh['threadSummariesByParentMessageId'],
         id,
-        expectedToken: replyAuthority,
+        expectedToken: _replyToken(id),
       ),
     };
     hasMore =
@@ -4829,171 +4283,62 @@ class WorkspaceController extends ChangeNotifier {
             : rows.length >= 50);
   }
 
-  final Set<String> _tailRevalidations = {};
-
   /// Source ChatPanel shows a retained bucket at once and re-reads the tail
   /// behind it. Used where a held window is shown without [selectChannel]
   /// (a jump to a message the window holds, a live seq gap): the first page is
   /// merged into the open window by [_acceptFreshTail], so rows already shown
   /// keep their place and only the missing newer rows are added.
   Future<void> _revalidateTail(String id) async {
-    final open = channel;
-    if (open == null || open.id != id || !_tailRevalidations.add(id)) return;
-    final window = channelGeneration,
-        generation = ledger.generation,
-        authority = _windowAuthority(),
-        replyAuthority = _replyToken(id);
-    bool current() =>
-        !_disposed &&
-        window == channelGeneration &&
-        generation == ledger.generation &&
-        channel?.id == id &&
-        !hasNewer &&
-        authority == _windowAuthority() &&
-        replyAuthority == _replyToken(id) &&
-        !_revokedChannels.contains(id) &&
-        can('viewChannel', resource: channel);
+    if (channel?.id != id || !messageWindows.beginTailRevalidation(id)) {
+      return;
+    }
+    final request = _windowRequest(
+      id,
+      allowed: () =>
+          channel?.id == id &&
+          !hasNewer &&
+          can('viewChannel', resource: channel),
+    );
     try {
       final retained = messages.map((m) => m.json).toList();
       final retainedHasMore = hasMore;
-      final fresh = await client.messagePage(id);
-      if (!current()) return;
+      final fresh = await MessageHistoryPages.read(this, request, id);
+      if (!request.current) return;
       _acceptFreshTail(
         id,
         fresh,
         retained: retained,
         retainedHasMore: retainedHasMore,
-        generation: generation,
-        replyAuthority: replyAuthority,
+        request: request,
       );
+      await MessageHistoryPages.record(this, request, fresh);
+      if (!request.current) return;
       notifyListeners();
       await _saveWindow(id);
     } catch (e) {
-      if (current() &&
+      if (request.current &&
           e is RaftApiException &&
           (e.status == 403 || e.status == 404)) {
         _revokeChannel(id);
       }
       // Any other failure leaves the shown window as it was.
     } finally {
-      _tailRevalidations.remove(id);
+      messageWindows.endTailRevalidation(id);
     }
   }
 
-  /// A channel that is not open keeps its accepted in-memory tail current:
-  /// Source messageStore appends a live message to every cached bucket. A
-  /// window that is only on disk, a context window and one accepted under
-  /// other facts are not extended; they are revalidated when opened.
-  bool _retainsLiveTail(String id) {
-    final held = _windowState[id];
-    if (held == null ||
-        _contextWindows.contains(id) ||
-        _diskOnlyWindows.contains(id) ||
-        (visibleIds[id]?.isEmpty ?? true)) {
-      return false;
-    }
-    final row = [...channels, ...dms].where((c) => c.id == id).firstOrNull;
-    return row != null &&
-        held.$1 == messageWindowAuthority(server?.string('role'), row.json) &&
-        held.$3 == _replyToken(id);
-  }
+  Future<void> older({bool thread = false}) => _windowReceiver._older(thread);
 
-  /// Rows this channel's ledger holds beyond the window's newest row (they
-  /// arrived while the window was not following live events) join the window
-  /// ahead of the live row, and the tail is read to fill what no event
-  /// carried.
-  void _fillWindowGap(String id, String liveId) {
-    final visible = visibleIds[id];
-    if (visible == null || visible.isEmpty) return;
-    BigInt newest = BigInt.zero;
-    for (final held in visible) {
-      final seq = BigInt.tryParse('${ledger.message(id, held)?['seq']}');
-      if (seq != null && seq > newest) newest = seq;
-    }
-    if (newest == BigInt.zero) return;
-    var gap = false;
-    for (final row in ledger.messages(id)) {
-      final seq = BigInt.tryParse('${row['seq']}');
-      if (seq != null &&
-          seq > newest &&
-          row['id'] != liveId &&
-          !visible.contains(row['id'])) {
-        visible.add(row['id'] as String);
-        gap = true;
-      }
-    }
-    if (gap) unawaited(_revalidateTail(id));
-  }
-
-  Future<void> older({bool thread = false}) async {
-    final source = presentationSource;
-    if (source != null) {
-      return source.older(thread: thread);
-    }
-    final current = thread ? replies : messages;
-    if (loadingOlder ||
-        (thread ? !threadHasMore : !hasMore) ||
-        current.isEmpty) {
-      return;
-    }
-    loadingOlder = true;
-    final id = thread ? threadChannelId! : channel!.id;
-    final window = thread ? threadGeneration : channelGeneration;
-    final generation = ledger.generation;
-    final owner = thread ? threadParentChannelId : id;
-    final replyAuthority = _replyToken(owner);
-    final authority = _windowAuthority();
-    bool currentWindow() =>
-        !_disposed &&
-        window == (thread ? threadGeneration : channelGeneration) &&
-        generation == ledger.generation &&
-        authority == _windowAuthority() &&
-        replyAuthority == _replyToken(owner) &&
-        !_revokedChannels.contains(id);
-    notifyListeners();
-    try {
-      final page = await client.messagePage(id, before: current.first.seq);
-      if (!currentWindow()) {
-        return;
-      }
-      final rows = (page['messages'] as List);
-      ledger.ingest(
-        rows.map((e) => Map<String, dynamic>.from(e)),
-        expectedGeneration: generation,
-      );
-      visibleIds
-          .putIfAbsent(id, () => {})
-          .addAll(rows.map((e) => e['id'] as String));
-      if (thread) {
-        threadHistoryLimited = page['historyLimited'] == true;
-        threadHasMore = !threadHistoryLimited && rows.length >= 50;
-      } else {
-        historyLimited = page['historyLimited'] == true;
-        hasMore = !historyLimited && rows.length >= 50;
-      }
-      if (!thread) {
-        _summariesByChannel
-            .putIfAbsent(id, () => {})
-            .addAll(
-              _hydrateThreadSummaries(
-                page['threadSummariesByParentMessageId'],
-                id,
-                expectedToken: replyAuthority,
-              ),
-            );
-      }
-      await _saveWindow(id, thread: thread);
-    } catch (e) {
-      if (currentWindow()) {
-        error = userErrorText(e, where: 'load older messages');
-      }
-    } finally {
-      if (currentWindow()) {
-        loadingOlder = false;
-        notifyListeners();
-      }
-    }
-  }
+  Future<void> newer({bool thread = false}) =>
+      _windowReceiver._pageHistory(thread, newer: true);
+  Future<void> loadHistoryGap(BigInt before, {bool thread = false}) =>
+      _windowReceiver._pageHistory(thread, gapBefore: before);
+  Future<void> _older(bool thread) => _pageHistory(thread);
+  Future<void> _pageHistory(bool thread, {bool newer = false, BigInt? gapBefore}) =>
+      MessageHistoryNavigation.page(this, thread: thread, newer: newer,
+        gapBefore: gapBefore,
+        requestFor: (id) => _windowRequest(id, thread: thread),
+        summaries: _mergeThreadSummaries);
 
   bool _mayMarkRead(String id) {
     if (!foreground ||
@@ -5006,41 +4351,30 @@ class WorkspaceController extends ChangeNotifier {
         id != channel?.id && id != threadChannelId) {
       return false;
     }
-    final current = location;
-    // Source mobile thread folds the parent channel immediately from the URI.
-    // A prior Activity layout callback cannot admit its concurrently loaded tail.
-    if (id == channel?.id && mobileNavigation && current.thread != null) {
-      return false;
-    }
-    final content = current.content;
-    final mainRoute =
-        (current.route == RaftRoute.channel || current.route == RaftRoute.dm) &&
-        current.entityId == channel?.id;
+    final current = location, content = current.content;
     final previewMounted =
         current.route == RaftRoute.search ||
         current.route == RaftRoute.activity;
-    final mainPreview =
+    if (id == channel?.id) {
+      // Source mobile thread folds the parent channel immediately from the URI.
+      // A prior Activity layout callback cannot admit its concurrently loaded tail.
+      if (mobileNavigation && current.thread != null) return false;
+      return (current.route == RaftRoute.channel ||
+                  current.route == RaftRoute.dm) &&
+              current.entityId == channel?.id ||
+          previewMounted &&
+              (content?.kind == RaftContentKind.channel ||
+                  content?.kind == RaftContentKind.dm) &&
+              content?.id == channel?.id;
+    }
+    // The initial admission guard already restricted this id to the open thread.
+    return current.thread != null &&
+            current.thread?.channelId == threadParentChannelId &&
+            current.thread?.itemId == threadParentMessageId ||
         previewMounted &&
-        (content?.kind == RaftContentKind.channel ||
-            content?.kind == RaftContentKind.dm) &&
-        content?.id == channel?.id;
-    final threadRoute =
-        current.thread?.channelId == threadParentChannelId &&
-        current.thread?.itemId == threadParentMessageId &&
-        current.thread != null;
-    final threadPreview =
-        previewMounted &&
-        content?.kind == RaftContentKind.thread &&
-        content?.id == threadChannelId;
-    return id == channel?.id
-        ? mainRoute || mainPreview
-        : id == threadChannelId && (threadRoute || threadPreview);
+            content?.kind == RaftContentKind.thread &&
+            content?.id == threadChannelId;
   }
-
-  /// Windows painted from disk whose first fresh page has not arrived yet.
-  /// Their tail may be stale, so they never send a read receipt (nor clear
-  /// the unread count) until revalidated.
-  final Set<String> _diskOnlyWindows = {};
 
   /// Open conversations whose timeline is scrolled above the latest end
   /// (reported by the chat view on the edge only, never per frame).
@@ -5054,41 +4388,29 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  final Map<String, ReadingAnchor> _readingAnchors = {};
-
   /// Where the reader was in a conversation when its timeline is about to be
   /// rebuilt for another layout (fold / unfold). The next timeline that
   /// mounts for [conversationId] shortly after resumes there; an anchor that
   /// is not claimed promptly is a stale position and is ignored.
   void saveReadingAnchor(String conversationId, ReadingAnchor anchor) {
-    final source = presentationSource;
-    if (source != null) return source.saveReadingAnchor(conversationId, anchor);
-    _readingAnchors[conversationId] = anchor;
+    messageWindows.saveReadingAnchor(conversationId, anchor);
+    MessageHistoryPositions.save(this, conversationId, anchor);
   }
-
-  ReadingAnchor? takeReadingAnchor(String conversationId) {
-    final source = presentationSource;
-    if (source != null) return source.takeReadingAnchor(conversationId);
-    final anchor = _readingAnchors.remove(conversationId);
-    return anchor != null && anchor.fresh ? anchor : null;
-  }
+  ReadingAnchor? takeReadingAnchor(String conversationId) =>
+      messageWindows.takeReadingAnchor(conversationId);
 
   /// Read receipts sent per scope: lets an optimistic open-time clear know
   /// whether the receipt that backs it was ever sent.
   final Map<String, int> _readPosts = {};
 
-  Future<void> markRead(String id) async {
-    final source = presentationSource;
-    if (source != null) {
-      return source.markRead(id);
-    }
-    if (!foreground ||
-        _diskOnlyWindows.contains(id) ||
-        id == channel?.id && (!_mainPresented || !_chatTabPresented) ||
-        id == threadChannelId && !_threadPresented ||
-        !_mayMarkRead(id) ||
-        id != channel?.id && id != threadChannelId ||
-        id == channel?.id && hasNewer) {
+  Future<void> markRead(String id) => _windowReceiver._markRead(id);
+
+  /// Windows painted from disk whose first fresh page has not arrived yet.
+  /// Their tail may be stale, so they never send a read receipt (nor clear
+  /// the unread count) until revalidated.
+
+  Future<void> _markRead(String id) async {
+    if (messageWindows.isDiskOnly(id) || !_mayMarkRead(id)) {
       return;
     }
     final rows = ledger
@@ -5241,27 +4563,14 @@ class WorkspaceController extends ChangeNotifier {
     // Shared content whose destination is not confirmed yet is never sent.
     if (sharedBlocked(thread: thread)) return false;
     error = null;
-    final generation = ledger.generation;
-    final principal = client.user?.id, serverId = client.serverId;
-    final origin = client.origin, clientGeneration = client.generation;
     final intendedScope = draftScope(thread: thread);
-    final intendedChannel = channel?.id, intendedParent = threadParentMessageId;
-    final role = server?.string('role');
+    if (intendedScope == null) return false;
+    final scope = intendedScope, intendedChannel = channel?.id;
+    final intendedParent = threadParentMessageId, role = server?.string('role');
     var window = thread ? threadGeneration : channelGeneration;
-    final selectedAttachments = attachments == null
-        ? null
-        : List<String>.unmodifiable(attachments);
-    bool sameAccount() =>
+    bool current() =>
         !_disposed &&
-        generation == ledger.generation &&
-        principal == client.user?.id &&
-        serverId == client.serverId &&
-        origin == client.origin &&
-        clientGeneration == client.generation &&
-        !_revokedChannels.contains(intendedChannel);
-    bool currentSend() =>
-        sameAccount() &&
-        intendedScope == draftScope(thread: thread) &&
+        scope == draftScope(thread: thread) &&
         intendedChannel == channel?.id &&
         (!thread || intendedParent == threadParentMessageId) &&
         window == (thread ? threadGeneration : channelGeneration) &&
@@ -5275,281 +4584,122 @@ class WorkspaceController extends ChangeNotifier {
           'name': mention['name'],
         }),
     ];
-    if (intendedScope == null) return false;
-    final scope = intendedScope;
-    final uploaded = List<UploadDraft>.of(uploads(thread: thread));
-    if (uploaded.any((u) => u.queued)) {
-      if (_queuedSendTexts.containsKey(scope)) return false;
-      _queuedSendTexts[scope] = text;
-      unawaited(_saveDraftScope(scope));
-      try {
-        final limit = await uploadLimitBytes();
-        if (!currentSend()) return false;
-        if (limit == null ||
-            uploaded.any((u) => u.local != null && u.sizeBytes > limit)) {
-          error = limit == null
-              ? 'The upload size limit could not be checked. Try again in a moment.'
-              : 'A shared file exceeds the upload size limit.';
-          notifyListeners();
-          return false;
-        }
-        for (final upload in uploaded.where((u) => u.queued)) {
-          if (!currentSend()) return false;
-          await _transferUpload(upload, thread: thread);
-          if (!currentSend() || upload.id == null) return false;
-        }
-      } finally {
-        _queuedSendTexts.remove(scope);
-      }
-    }
-    if (uploaded.any((u) => u.id == null)) {
-      error =
-          '${const RaftApiException('Wait for uploads to finish, or remove the failed file.')}';
-      notifyListeners();
-      return false;
-    }
-    final ids = selectedAttachments ?? uploaded.map((u) => u.id!).toList();
-    // The server rejects an empty `content` even with `attachmentIds`; Web
-    // MessageInput sends `message.composer.attachmentsOnlyBody` ("[1
-    // attachment]") for a message that has files and no text. The draft keeps
-    // the typed text, so a failed send restores an empty draft, not the body.
-    final body = text.trim().isEmpty && ids.isNotEmpty
-        ? (attachmentsOnlyBody ?? _attachmentsOnlyBody)(ids.length)
-        : text;
-    final fingerprint = jsonEncode([
+    return composer.sends.send(
       text,
-      ids,
-      if (selectedMentions.isNotEmpty) selectedMentions,
-      if (asTask) true,
-    ]);
-    // A failed send keeps its randomId so retrying the same draft cannot
-    // duplicate a message the server did accept. A second send of the same
-    // text while the first is still in flight is a new message.
-    final retained = _attempts[scope];
-    final freshAttempt =
-        retained == null ||
-        retained.fingerprint != fingerprint ||
-        retained.inFlight;
-    final attempt = freshAttempt
-        ? ComposerSendAttempt(fingerprint, randomId ?? client.newRandomId())
-        : retained;
-    _attempts[scope] = attempt;
-    attempt.inFlight = true;
-    final sentId = attempt.randomId;
-    // Web MessageInput: the optimistic row appears and the composer's files
-    // leave with it before any request; a failure gives both back.
-    final user = client.user;
-    final selectedUploads = [
-      for (final upload in uploaded)
-        if (ids.contains(upload.id)) upload,
-    ];
-    final pending = _PendingSend(
-      sentId,
-      {
-        'id': 'optimistic-$sentId',
-        'randomId': sentId,
-        'channelId': thread ? threadChannelId : intendedChannel,
-        'senderId': user?.id ?? '',
-        'senderType': 'user',
-        // Web MessageInput: displayName || name (an empty displayName is
-        // missing).
-        'senderName': user?.firstNonEmpty(const ['displayName', 'name']) ?? '',
-        'messageType': 'chat',
-        'content': body,
-        if (selectedMentions.isNotEmpty) 'mentions': selectedMentions,
-        'createdAt': DateTime.now().toUtc().toIso8601String(),
-        if (selectedUploads.isNotEmpty)
-          'attachments': [
-            for (final upload in selectedUploads)
-              upload.metadata ??
-                  {
-                    'id': upload.id,
-                    'filename': upload.filename,
-                    'sizeBytes': upload.sizeBytes,
-                  },
-          ],
-        'pendingSend': true,
-      },
-      text,
-      selectedUploads,
-    );
-    (_pendingSends[scope] ??= []).add(pending);
-    _localRandomIds.add(sentId);
-    // Web MessageInput clears its banner and the previous send's delivery
-    // warnings once a send is accepted, so a notice about the old draft (a
-    // blocked send, a skipped file) cannot outlive it.
-    (presentationSource?._composerNotices ?? _composerNotices).clear(scope);
-    (presentationSource?.sendWarnings ?? sendWarnings).remove(scope);
-    if (selectedUploads.isNotEmpty) {
-      _uploads[scope]?.removeWhere(selectedUploads.contains);
-      if (_uploads[scope]?.isEmpty ?? false) _uploads.remove(scope);
-    }
-    notifyListeners();
-
-    void settle() {
-      attempt.inFlight = false;
-      final list = _pendingSends[scope];
-      list?.remove(pending);
-      if (list != null && list.isEmpty) _pendingSends.remove(scope);
-    }
-
-    bool delivered(String? id) =>
-        id != null &&
-        ledger.messages(id).any((row) => row['randomId'] == sentId);
-
-    // Web `restoreFailedSendDraft`: restore into the scope that owned the
-    // send, never into whichever conversation is current now.
-    bool fail([Object? cause]) {
-      settle();
-      if (sameAccount()) {
-        final restored = _mergeFailedSendIntoDraft(
-          pending.draft,
-          drafts[scope] ?? '',
-        );
-        drafts[scope] = restored;
-        if (pending.uploads.isNotEmpty) {
-          _uploads[scope] = [...pending.uploads, ...?_uploads[scope]];
-        }
-        unawaited(_saveDraftScope(scope));
-        if (cause != null && currentSend()) {
+      client: client,
+      attachments: attachments,
+      mentions: selectedMentions,
+      randomId: randomId,
+      asTask: asTask,
+      attachmentsOnlyBody:
+          attachmentsOnlyBody ??
+          (count) => count == 1 ? '[1 attachment]' : '[$count attachments]',
+      visit: ComposerSendVisit(
+        scope: scope,
+        channelId: thread ? threadChannelId : intendedChannel,
+        parentChannelId: intendedChannel,
+        displaySeq: ledger.watermark,
+        author: {
+          'senderId': client.user?.id ?? '',
+          'senderType': 'user',
+          'senderName':
+              client.user?.firstNonEmpty(const ['displayName', 'name']) ?? '',
+        },
+        current: current,
+        prepare: () async {
+          if (!thread && hasNewer && channel != null) {
+            final refreshing = selectChannel(channel!);
+            window = channelGeneration;
+            await refreshing;
+            if (!current()) return null;
+            onWindowRefreshed?.call(window);
+          }
+          if (!current()) return null;
+          return thread ? await ensureThread() : intendedChannel;
+        },
+        limit: uploadLimitBytes,
+        transfer: (file) => _transferUpload(file, thread: thread),
+        started: () {
+          _composerNotices.clear(scope);
+          sendWarnings.remove(scope);
+        },
+        failed: (cause) {
           error = userErrorText(
             cause,
             fallback: 'Failed to send message',
             where: 'send message',
           );
-        }
-      }
-      notifyListeners();
-      return false;
-    }
+          notifyListeners();
+        },
+        received: (sent) {
+          pendingMentionActions[scope] = normalizePendingMentionActions(
+            sent.receipt['pendingMentionActions'],
+          );
+          sendWarnings[scope] = (
+            unresolved: [
+              for (final handle
+                  in (sent.receipt['unresolvedMentionHandles'] as List? ??
+                      const []))
+                if (handle is String) handle,
+            ],
+            agentStopped:
+                (sent.receipt['deliveryWarnings'] as List? ?? const []).any(
+                  (w) =>
+                      w is Map &&
+                      w['targetType'] == 'agent' &&
+                      w['reason'] == 'agent_stopped' &&
+                      w['targetId'] is String &&
+                      (w['targetId'] as String).isNotEmpty,
+                ),
+          );
+        },
+      ),
+    );
+  }
 
-    try {
-      if (!thread && hasNewer && channel != null) {
-        final refreshing = selectChannel(channel!);
-        // selectChannel starts synchronously. Only this intentional refresh may
-        // advance the window; navigation during its awaits must cancel send.
-        window = channelGeneration;
-        await refreshing;
-        if (!currentSend()) return fail();
-        onWindowRefreshed?.call(window);
+  /// Project session delivery into each existing accepted window. This does
+  /// not create another ledger or move a page's current selection.
+  void _sendChanged(String scope, RaftMessage? accepted) {
+    if (_disposed) return;
+    final selected = scope == draftScope() || scope == draftScope(thread: true);
+    if (accepted != null && !_revokedChannels.contains(accepted.channelId)) {
+      final id = accepted.channelId;
+      if (id == channel?.id && !hasNewer ||
+          id == threadChannelId ||
+          messageWindows.retainsLiveTail(id)) {
+        messageWindows.acceptRows(liveWindowWrite, id, [accepted.json]);
+        unawaited(_saveWindow(id, thread: id == threadChannelId));
       }
-      if (!currentSend()) return fail();
-      final id = thread ? await ensureThread() : intendedChannel;
-      if (id == null || !currentSend()) return fail();
-      if (freshAttempt) {
-        await composer.saveAttempt(scope, attempt, channelId: channel?.id);
-      }
-      if (!currentSend()) return fail();
-      final sent = await client.sendWithReceipt(
-        id,
-        body,
-        attachments: ids,
-        mentions: selectedMentions.isEmpty ? null : selectedMentions,
-        randomId: sentId,
-        asTask: asTask,
-      );
-      final message = sent.message;
-      settle();
-      if (sameAccount() && pending.uploads.any((file) => file.local != null)) {
-        await _saveDraftScope(scope);
-        await _releaseSharedUploads(pending.uploads);
-      }
-      if (_attempts[scope]?.randomId == sentId) {
-        _attempts.remove(scope);
-        composer.saveAttempt(scope, null);
-      }
-      if (!currentSend()) {
-        notifyListeners();
-        return true;
-      }
-      // Web MessageInput replaces the strip with each send's receipt.
-      pendingMentionActions[scope] = normalizePendingMentionActions(
-        sent.receipt['pendingMentionActions'],
-      );
-      sendWarnings[scope] = (
-        unresolved: [
-          for (final handle
-              in (sent.receipt['unresolvedMentionHandles'] as List? ??
-                  const []))
-            if (handle is String) handle,
-        ],
-        // Web `normalizeDeliveryWarnings`: agent targets stopped only.
-        agentStopped: (sent.receipt['deliveryWarnings'] as List? ?? const [])
-            .any(
-              (w) =>
-                  w is Map &&
-                  w['targetType'] == 'agent' &&
-                  w['reason'] == 'agent_stopped' &&
-                  w['targetId'] is String &&
-                  (w['targetId'] as String).isNotEmpty,
-            ),
-      );
-      ledger.ingest([
-        {...message.json, 'randomId': message.json['randomId'] ?? sentId},
-      ], expectedGeneration: generation);
-      visibleIds.putIfAbsent(id, () => {}).add(message.id);
-      _saveWindow(id, thread: thread);
-      notifyListeners();
-      return true;
-    } catch (e) {
-      // The socket echo already presented the accepted copy.
-      if (sameAccount() &&
-          delivered(thread ? threadChannelId : intendedChannel)) {
-        settle();
-        if (pending.uploads.any((file) => file.local != null)) {
-          await _saveDraftScope(scope);
-          await _releaseSharedUploads(pending.uploads);
-        }
-        notifyListeners();
-        return true;
-      }
-      return fail(e);
     }
+    if (selected) notifyListeners();
   }
 
   Future<String?> ensureThread() async {
     if (presentationSource != null) return presentationSource!.ensureThread();
     if (threadChannelId != null) return threadChannelId;
-    if (_creatingThreadWindow == threadGeneration && _creatingThread != null) {
-      return _creatingThread;
-    }
-    final window = threadGeneration;
-    _creatingThreadWindow = window;
-    final pending = _createThread();
-    _creatingThread = pending;
-    try {
-      return await pending;
-    } finally {
-      if (_creatingThreadWindow == window) {
-        _creatingThread = null;
-        _creatingThreadWindow = null;
-      }
-    }
+    return messageWindows.createThread(_createThread);
   }
 
   Future<String?> _createThread() async {
     final parentId = threadParentMessageId,
         parentChannelId = threadParentChannelId;
     if (parentId == null || parentChannelId == null) return null;
-    final generation = ledger.generation, window = threadGeneration;
-    final navigationWindow = navigationRevision,
-        token = _replyToken(parentChannelId),
-        authority = _windowAuthority();
+    final request = _windowRequest(
+      parentChannelId,
+      thread: true,
+      checkNavigation: true,
+      allowed: () =>
+          parentId == threadParentMessageId &&
+          parentChannelId == threadParentChannelId,
+    );
     final value = await client.post(
       '/channels/$parentChannelId/threads',
       data: {'parentMessageId': parentId},
     );
-    if (generation != ledger.generation ||
-        window != threadGeneration ||
-        navigationWindow != navigationRevision ||
-        token != _replyToken(parentChannelId) ||
-        authority != _windowAuthority() ||
-        parentId != threadParentMessageId ||
-        parentChannelId != threadParentChannelId) {
+    if (!request.current) {
       throw const RaftApiException('The thread changed. Please retry.');
     }
     threadChannelId = value['threadChannelId'];
-    visibleIds.putIfAbsent(threadChannelId!, () => {});
     client.joinChannel(threadChannelId!);
     notifyListeners();
     return threadChannelId;
@@ -5559,19 +4709,13 @@ class WorkspaceController extends ChangeNotifier {
     RaftMessage parent, {
     String? focusedMessageId,
     bool navigate = true,
-  }) =>
-      presentationSource?.openThread(
-        parent,
-        focusedMessageId: focusedMessageId,
-        navigate: navigate,
-      ) ??
-      _openThreadIdentity(
-        parent.channelId,
-        parent.id,
-        focusedMessageId: focusedMessageId,
-        navigate: navigate,
-        acceptedParent: parent,
-      );
+  }) => _windowReceiver._openThreadIdentity(
+    parent.channelId,
+    parent.id,
+    focusedMessageId: focusedMessageId,
+    navigate: navigate,
+    acceptedParent: parent,
+  );
 
   /// Opens a real thread identity independently of its parent metadata.
   /// [initialThreadChannelId] is the accepted inbox row's existing channel;
@@ -5582,21 +4726,13 @@ class WorkspaceController extends ChangeNotifier {
     String? focusedMessageId,
     String? initialThreadChannelId,
     bool navigate = true,
-  }) =>
-      presentationSource?.openThreadIdentity(
-        parentChannelId: parentChannelId,
-        parentMessageId: parentMessageId,
-        focusedMessageId: focusedMessageId,
-        initialThreadChannelId: initialThreadChannelId,
-        navigate: navigate,
-      ) ??
-      _openThreadIdentity(
-        parentChannelId,
-        parentMessageId,
-        focusedMessageId: focusedMessageId,
-        initialThreadChannelId: initialThreadChannelId,
-        navigate: navigate,
-      );
+  }) => _windowReceiver._openThreadIdentity(
+    parentChannelId,
+    parentMessageId,
+    focusedMessageId: focusedMessageId,
+    initialThreadChannelId: initialThreadChannelId,
+    navigate: navigate,
+  );
 
   Future<void> _openThreadIdentity(
     String parentChannelId,
@@ -5631,47 +4767,40 @@ class WorkspaceController extends ChangeNotifier {
         requestAuthority = _replyToken(parentChannelId),
         messageAuthority = _threadResourceAuthority(parentChannelId),
         generation = ledger.generation;
-    final window = ++threadGeneration;
-    bool current() =>
-        !_disposed &&
-        navigationWindow == navigationRevision &&
-        requestAuthority == _replyToken(parentChannelId) &&
-        (messageAuthority == null ||
-            messageAuthority == _threadResourceAuthority(parentChannelId)) &&
-        window == threadGeneration &&
-        generation == ledger.generation &&
-        !_revokedChannels.contains(parentChannelId) &&
-        !_revokedChannels.contains(threadChannelId) &&
-        can('viewChannel', resource: _threadChannelResource(parentChannelId));
+    messageWindows.threadGeneration++;
+    final request = messageWindows.request(
+      thread: true,
+      allowed: () =>
+          navigationWindow == navigationRevision &&
+          requestAuthority == _replyToken(parentChannelId) &&
+          (messageAuthority == null ||
+              messageAuthority == _threadResourceAuthority(parentChannelId)) &&
+          !_revokedChannels.contains(parentChannelId) &&
+          !_revokedChannels.contains(threadChannelId) &&
+          can('viewChannel', resource: _threadChannelResource(parentChannelId)),
+    );
     _threadIdentity = WorkspaceThreadIdentity(
       parentChannelId: parentChannelId,
       parentMessageId: parentMessageId,
       focusedMessageId: focusedMessageId,
     );
-    _threadIdentityWindow = window;
-    _threadIdentityNavigation = navigationWindow;
-    _threadIdentityToken = requestAuthority;
-    _threadIdentityAuthority = messageAuthority;
-    final cachedWindow = _threadWindows[parentMessageId];
+    _threadVisit = request;
+    final held = messageWindows.matchingThread(
+      parentChannelId,
+      parentMessageId,
+      requestAuthority,
+      messageAuthority,
+    );
     final cached =
-        cachedWindow != null &&
-            cachedWindow.parentChannelId == parentChannelId &&
-            cachedWindow.token == requestAuthority &&
-            cachedWindow.authority == messageAuthority &&
-            cachedWindow.generation == generation &&
+        held != null &&
             (knownThreadChannelId == null ||
-                knownThreadChannelId == cachedWindow.threadChannelId) &&
-            !_revokedChannels.contains(cachedWindow.threadChannelId) &&
-            (visibleIds[cachedWindow.threadChannelId]?.isNotEmpty ?? false) &&
+                knownThreadChannelId == held.threadChannelId) &&
+            (visibleIds[held.threadChannelId]?.isNotEmpty ?? false) &&
             (focusedMessageId == null ||
-                visibleIds[cachedWindow.threadChannelId]!.contains(
-                  focusedMessageId,
-                ))
-        ? cachedWindow
+                visibleIds[held.threadChannelId]!.contains(focusedMessageId))
+        ? held
         : null;
-    if (cachedWindow != null && cached == null) {
-      _threadWindows.remove(parentMessageId);
-    }
+    if (cached == null) messageWindows.forgetThread(parentMessageId);
     threadParent = acceptedParent ?? cached?.parent;
     threadChannelId = knownThreadChannelId ?? cached?.threadChannelId;
     threadLoading = cached == null;
@@ -5684,7 +4813,9 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
     Future<void> restoreCurrentDraft() async {
       final scope = 'thread:$parentMessageId';
-      if (await composer.restoreText(scope, current)) notifyListeners();
+      if (await composer.restoreText(scope, () => request.current)) {
+        notifyListeners();
+      }
     }
 
     unawaited(restoreCurrentDraft());
@@ -5696,7 +4827,7 @@ class WorkspaceController extends ChangeNotifier {
           '/messages/context/$parentMessageId',
           query: {'channelId': parentChannelId},
         );
-        if (!current()) return;
+        if (!request.current) return;
         final rows = acceptedWindowRows(page['messages'], parentChannelId);
         final parent = rows
             .where((row) => row['id'] == parentMessageId)
@@ -5709,18 +4840,23 @@ class WorkspaceController extends ChangeNotifier {
             liveParent ?? (parent == null ? null : RaftMessage(parent));
         // A background revalidation never takes away a shown parent.
         if (resolved != null || threadParent == null) threadParent = resolved;
-        _threadWindows[parentMessageId]?.parent = threadParent;
+        messageWindows.cacheThreadParent(
+          request,
+          parentMessageId,
+          threadParent,
+        );
       } catch (_) {
-        if (!current()) return;
+        if (!request.current) return;
         if (cached?.parent == null) threadParent = null;
       } finally {
-        if (current()) {
+        if (request.current) {
           _threadParentLoading = false;
           notifyListeners();
         }
       }
     }
 
+    Map<String, dynamic>? readingPage;
     Future<void> resolveReplies() async {
       try {
         if (threadChannelId == null) {
@@ -5734,59 +4870,62 @@ class WorkspaceController extends ChangeNotifier {
             // empty thread; any other failure raises the in-panel Retry.
             if (!isThreadAbsentLookupError(e)) rethrow;
           }
-          if (!current()) return;
+          if (!request.current) return;
           _threadResolutionLoading = false;
           if (info == null) return;
           threadChannelId = info['threadChannelId'];
-          if (!current()) return;
+          if (!request.current) return;
           notifyListeners();
         }
-        final page = focusedMessageId == null
-            ? await client.messagePage(threadChannelId!)
-            : await client.get(
-                '/messages/context/$focusedMessageId',
-                query: {'channelId': threadChannelId},
-              );
-        if (!current()) return;
-        final rows = acceptedWindowRows(page['messages'], threadChannelId!);
-        ledger.ingest(rows, expectedGeneration: generation);
-        visibleIds[threadChannelId!] = rows
-            .map((row) => row['id'] as String)
-            .toSet();
-        _diskOnlyWindows.remove(threadChannelId);
-        threadHistoryLimited = page['historyLimited'] == true;
-        threadHasMore = focusedMessageId == null
-            ? !threadHistoryLimited && rows.length >= 50
-            : page['hasOlder'] == true;
+        readingPage ??= focusedMessageId == null ? await MessageHistoryPositions.restore(this, request, threadChannelId!, thread: true) : null;
+        final focused = focusedMessageId != null || readingPage != null;
+        final page = readingPage ?? (focusedMessageId == null
+            ? await MessageHistoryPages.read(this, request, threadChannelId!, thread: true)
+            : await MessageHistoryPages.context(this, request, threadChannelId!, focusedMessageId, thread: true));
+        if (!request.current) return;
+        final boundary = messageWindows.acceptThreadPage(
+          request, threadChannelId!, page,
+          focused: focused,
+          retainOlder: cached?.contextWindow == false || cached == null && messageWindows.isDiskOnly(threadChannelId),
+          retainedHasMore: threadHasMore,
+        );
+        await MessageHistoryPages.record(this, request, page);
+        if (!request.current) return;
+        threadHistoryLimited = boundary.limited;
+        threadHasMore = boundary.more;
         client.joinChannel(threadChannelId!);
         threadLoading = false;
-        _threadWindows[parentMessageId] = _ThreadWindow(
-          parentChannelId: parentChannelId,
-          threadChannelId: threadChannelId!,
-          token: requestAuthority,
-          authority: messageAuthority,
-          generation: generation,
-          hasMore: threadHasMore,
-          historyLimited: threadHistoryLimited,
-          parent: threadParent ?? cached?.parent,
+        messageWindows.cacheThread(
+          request,
+          parentMessageId,
+          CachedMessageThread(
+            parentChannelId,
+            threadChannelId!,
+            requestAuthority,
+            messageAuthority,
+            generation,
+            threadHasMore,
+            threadHistoryLimited,
+            threadParent ?? cached?.parent,
+            contextWindow: focused,
+          ),
         );
+        messageWindows.setContextMode(request, threadChannelId!,
+          focused ? page['hasNewer'] == true : null);
         notifyListeners();
         await markRead(threadChannelId!);
-        if (current()) _saveWindow(threadChannelId!, thread: true);
+        if (request.current) _saveWindow(threadChannelId!, thread: true);
       } catch (e) {
-        final diskOnly = threadChannelId;
-        if (current() &&
-            diskOnly != null &&
-            _diskOnlyWindows.contains(diskOnly) &&
-            e is RaftApiException &&
+        final denied = threadChannelId;
+        if (request.current && denied != null && e is RaftApiException &&
             (e.status == 403 || e.status == 404)) {
-          // A denied lookup never leaves an on-device window on screen.
-          _diskOnlyWindows.remove(diskOnly);
-          visibleIds.remove(diskOnly);
-          _save('thread-window', parentMessageId, null);
+          _revokeChannel(denied);
+          threadLoading = false;
+          _threadResolutionLoading = false;
+          notifyListeners();
         }
         // A cached window stays readable when its revalidation fails.
-        if (current() && cached == null) {
+        if (request.current && cached == null) {
           // ThreadPanel's in-panel "Couldn't load this thread" + Retry; Web raises
           // no workspace-level error for it.
           _threadResolutionError = userErrorText(
@@ -5796,7 +4935,7 @@ class WorkspaceController extends ChangeNotifier {
           );
         }
       } finally {
-        if (current()) {
+        if (request.current) {
           _threadResolutionLoading = false;
           threadLoading = false;
           notifyListeners();
@@ -5807,9 +4946,9 @@ class WorkspaceController extends ChangeNotifier {
     /// A tail thread with no window in memory paints its on-device window
     /// (previous visit or previous process) while the lookup revalidates.
     Future<void> restoreDiskWindow() async {
-      if (cached != null || focusedMessageId != null) return;
+      if (cached != null && !cached.contextWindow || focusedMessageId != null) return;
       final page = await _cached('thread-window', parentMessageId);
-      if (!current() || !threadLoading || page is! Map) return;
+      if (!request.current || !threadLoading && cached?.contextWindow != true || page is! Map) return;
       final threadId = page['threadChannelId'];
       if (page['version'] != 1 ||
           page['windowKind'] != 'tail' ||
@@ -5821,11 +4960,13 @@ class WorkspaceController extends ChangeNotifier {
           _revokedChannels.contains(threadId)) {
         return;
       }
+      readingPage = await MessageHistoryPositions.restoreThread(this, request, threadId, page);
+      if (readingPage != null) { _threadResolutionLoading = false; _threadParentLoading = threadParent == null; return; }
       final rows = acceptedWindowRows(page['messages'], threadId);
       if (rows.isEmpty) return;
-      ledger.ingest(rows, expectedGeneration: generation);
-      visibleIds[threadId] = rows.map((row) => row['id'] as String).toSet();
-      _diskOnlyWindows.add(threadId);
+      messageWindows.acceptRows(request, threadId, rows, replace: true);
+      messageWindows.setDiskOnly(request, threadId, true);
+      messageWindows.setContextMode(request, threadId, null);
       threadChannelId = threadId;
       final parent = page['parent'];
       if (threadParent == null &&
@@ -5842,7 +4983,8 @@ class WorkspaceController extends ChangeNotifier {
       notifyListeners();
     }
 
-    unawaited(restoreDiskWindow());
+    await restoreDiskWindow();
+    if (!request.current) return;
     // Source threadStore opens an accepted inbox row's known channel directly,
     // without a lookup. Parent metadata and focused replies load independently.
     final replies = resolveReplies();
@@ -5888,22 +5030,8 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   /// Source ChatPanel.handleBackToBottom reloads latest when newer is unloaded.
-  Future<void> returnToLatest({bool navigate = true}) async {
-    final source = presentationSource;
-    if (source != null) {
-      return source.returnToLatest(navigate: navigate);
-    }
-    final selected = channel;
-    if (selected == null) return;
-    clearHighlightedMessage(highlightedMessageId);
-    if (hasNewer) {
-      await selectChannel(
-        selected,
-        navigate: navigate,
-        retainContextUntilAccepted: true,
-      );
-    }
-  }
+  Future<void> returnToLatest({bool navigate = true, bool thread = false}) =>
+      MessageHistoryNavigation.latest(_windowReceiver, thread: thread, navigate: navigate);
 
   /// [replaceEntry] makes the destination take over the current history
   /// entry instead of pushing (Web openThreadParentMessageRoute, mobile).
@@ -5927,16 +5055,16 @@ class WorkspaceController extends ChangeNotifier {
     var navigationWindow = navigationRevision;
     var authority = _windowAuthority();
     final replyAuthority = _replyToken(channelId);
-    final window = ++channelGeneration;
-    bool owned() =>
-        !_disposed &&
-        generation == ledger.generation &&
-        window == channelGeneration &&
-        navigationWindow == navigationRevision &&
-        authority == _windowAuthority() &&
-        replyAuthority == _replyToken(channelId) &&
-        !_revokedChannels.contains(channelId);
-    if (_rejectRevokedConversation(channelId) || !owned()) return;
+    messageWindows.channelGeneration++;
+    final request = messageWindows.request(
+      thread: false,
+      allowed: () =>
+          navigationWindow == navigationRevision &&
+          authority == _windowAuthority() &&
+          replyAuthority == _replyToken(channelId) &&
+          !_revokedChannels.contains(channelId),
+    );
+    if (_rejectRevokedConversation(channelId) || !request.current) return;
     var next = [
       ...channels,
       ...dms,
@@ -5949,31 +5077,25 @@ class WorkspaceController extends ChangeNotifier {
       // Source ChannelById/ensureChannel resolves failed metadata to its
       // unavailable body. UI callbacks may not await this request; neither a
       // global async exception nor a retained conversation owns the failure.
-      if (owned()) {
+      if (request.current) {
         _missingConversationChannelId = channelId;
         notifyListeners();
       }
       return;
     }
-    if (!owned() || !can('viewChannel', resource: next)) return;
+    if (!request.current || !can('viewChannel', resource: next)) return;
     if (messageId == null) {
       await selectChannel(next, navigate: navigate);
       return;
     }
     final sameChannel = channel?.id == channelId;
     authority = messageWindowAuthority(server?.string('role'), next.json);
-    final knownWindow = _windowState[channelId];
+    final knownWindow = messageWindows.accepted[channelId];
     final compatibleWindow =
-        knownWindow?.$1 == authority && knownWindow?.$3 == replyAuthority;
+        knownWindow?.matches(authority, replyAuthority) == true;
     final cachedTarget =
         compatibleWindow &&
-        ledger
-            .messages(channelId)
-            .any(
-              (row) =>
-                  row['id'] == messageId &&
-                  visibleIds[channelId]?.contains(messageId) == true,
-            );
+        messageWindows.containsVisible(channelId, messageId);
     channel = next;
     if (navigate) {
       if (replaceEntry && server != null) {
@@ -5996,60 +5118,62 @@ class WorkspaceController extends ChangeNotifier {
     }
     threadParent = null;
     threadChannelId = null;
-    threadGeneration++;
+    messageWindows.threadGeneration++;
     loadingOlder = false;
     error = null;
     highlightedMessageId = messageId;
     if (cachedTarget) {
-      hasMore = sameChannel ? hasMore : knownWindow!.$2;
+      MessageHistoryPages.recheckContext(this, request, channelId, messageId);
+      hasMore = sameChannel ? hasMore : knownWindow!.hasMore;
       hasNewer = sameChannel
           ? hasNewer
-          : _contextWindows.contains(channelId) &&
-                _contextWindowHasNewer[channelId] == true;
-      historyLimited = _windowHistoryLimited[channelId] == true;
+          : messageWindows.contextHasNewer(channelId);
+      historyLimited = messageWindows.historyLimit(channelId);
       channelLoading = false;
-      _pendingMessageContextChannelId = null;
-      _pendingMessageContextWindow = null;
+      messageWindows.finishContextVisit(request);
       notifyListeners();
       // The held window is shown at once, but a window this channel left (or
       // that came from disk) may be behind the server: read the tail quietly
       // and merge it without moving the reading position.
-      if ((!sameChannel || _diskOnlyWindows.contains(channelId)) &&
+      if ((!sameChannel || messageWindows.isDiskOnly(channelId)) &&
           !hasNewer &&
-          !_contextWindows.contains(channelId)) {
+          !messageWindows.isContext(channelId)) {
         unawaited(_revalidateTail(channelId));
       }
       return;
     }
     channelLoading = true;
-    _pendingMessageContextChannelId = channelId;
-    _pendingMessageContextWindow = window;
     // Source preserves the destination's already accepted memory bucket while
     // its context GET waits. A disk/unaccepted bucket or an earlier principal,
     // server or capability epoch cannot grant this cross-channel projection.
-    _pendingMessageContextRetainsRows = sameChannel || compatibleWindow;
+    messageWindows.beginContextVisit((
+      channelId: channelId,
+      request: request,
+      retainRows: sameChannel || compatibleWindow,
+    ));
     if (!sameChannel) {
       // Held summaries belong to the held window; an incompatible window
       // takes its summaries with it.
       if (!compatibleWindow) _summariesByChannel.remove(channelId);
       if (compatibleWindow) {
-        hasMore = knownWindow!.$2;
-        hasNewer =
-            _contextWindows.contains(channelId) &&
-            _contextWindowHasNewer[channelId] == true;
-        historyLimited = _windowHistoryLimited[channelId] == true;
+        hasMore = knownWindow!.hasMore;
+        hasNewer = messageWindows.contextHasNewer(channelId);
+        historyLimited = messageWindows.historyLimit(channelId);
       }
     }
     bool current() =>
-        owned() &&
+        request.current &&
         channel?.id == channelId &&
         can('viewChannel', resource: channel);
+    void settled() {
+      messageWindows.finishContextVisit(request);
+      channelLoading = false;
+      notifyListeners();
+    }
+
     notifyListeners();
     try {
-      final context = await client.get(
-        '/messages/context/$messageId',
-        query: {'channelId': channelId},
-      );
+      final context = await MessageHistoryPages.context(this, request, channelId, messageId);
       if (!current()) return;
       final target = context['canonicalTarget'];
       if (target is Map && target['kind'] == 'thread') {
@@ -6068,38 +5192,23 @@ class WorkspaceController extends ChangeNotifier {
         // outer channel tail. Keep both accepted rows and reply focus while it
         // is pending; do not pass through selectChannel's thread reset/cache.
         try {
-          final tail = await client.messagePage(channelId);
+          final tail = await MessageHistoryPages.read(this, request, channelId);
           if (!current()) return;
-          final accepted = acceptedWindowRows(tail['messages'], channelId);
-          ledger.ingest(accepted, expectedGeneration: generation);
-          visibleIds[channelId] = accepted
-              .map((row) => row['id'] as String)
-              .toSet();
-          _contextWindows.remove(channelId);
-          _contextWindowHasNewer.remove(channelId);
-          historyLimited = tail['historyLimited'] == true;
-          hasMore = !historyLimited && accepted.length >= 50;
-          hasNewer = false;
-          _windowState[channelId] = (authority, hasMore, replyAuthority);
-          _windowHistoryLimited[channelId] = historyLimited;
-          _summariesByChannel[channelId] = {
-            ...?_summariesByChannel[channelId],
-            ..._hydrateThreadSummaries(
-              tail['threadSummariesByParentMessageId'],
-              channelId,
-              expectedToken: replyAuthority,
-            ),
-          };
+          final accepted = _acceptContextPage(
+            request,
+            channelId,
+            tail,
+            context: false,
+          );
+          await MessageHistoryPages.record(this, request, tail);
+          if (!current()) return;
           final refreshedParent = accepted
               .where((row) => row['id'] == parentId)
               .firstOrNull;
           if (parentChannelId == channelId && refreshedParent != null) {
             threadParent = RaftMessage(refreshedParent);
           }
-          _pendingMessageContextChannelId = null;
-          _pendingMessageContextWindow = null;
-          channelLoading = false;
-          notifyListeners();
+          settled();
           await markRead(channelId);
           if (current()) await _saveWindow(channelId);
         } catch (e) {
@@ -6108,38 +5217,16 @@ class WorkspaceController extends ChangeNotifier {
             _revokeChannel(channelId);
           } else {
             error = userErrorText(e, where: 'load message context');
-            _pendingMessageContextChannelId = null;
-            _pendingMessageContextWindow = null;
-            channelLoading = false;
-            notifyListeners();
+            settled();
           }
         }
       } else {
-        final accepted = acceptedWindowRows(context['messages'], channelId);
+        _acceptContextPage(request, channelId, context);
+        await MessageHistoryPages.record(this, request, context);
+        if (!current()) return;
         final targetId = context['targetMessageId'] as String? ?? messageId;
-        ledger.ingest(accepted, expectedGeneration: generation);
-        _contextWindows.add(channelId);
-        visibleIds[channelId] = accepted.map((e) => e['id'] as String).toSet();
-        hasMore = context['hasOlder'] == true;
-        hasNewer = context['hasNewer'] == true;
-        historyLimited = false;
-        _windowState[channelId] = (authority, hasMore, replyAuthority);
-        _windowHistoryLimited[channelId] = false;
-        _contextWindowHasNewer[channelId] = hasNewer;
-        _summariesByChannel[channelId] = {
-          ...?_summariesByChannel[channelId],
-          ..._hydrateThreadSummaries(
-            context['threadSummariesByParentMessageId'],
-            channelId,
-            expectedToken: replyAuthority,
-          ),
-        };
         highlightedMessageId = targetId;
-        _pendingMessageContextChannelId = null;
-        _pendingMessageContextWindow = null;
-        channelLoading = false;
-        // Publish the accepted window, summaries and pagination as one event.
-        notifyListeners();
+        settled();
         await markRead(channelId);
       }
     } catch (e) {
@@ -6147,8 +5234,7 @@ class WorkspaceController extends ChangeNotifier {
       if (e is RaftApiException && e.status == 403) {
         _revokeChannel(channelId);
       } else {
-        _pendingMessageContextChannelId = null;
-        _pendingMessageContextWindow = null;
+        messageWindows.finishContextVisit(request);
         highlightedMessageId = null;
         // Source falls back to latest after a missing/unavailable context.
         final fallback = selectChannel(
@@ -6169,12 +5255,39 @@ class WorkspaceController extends ChangeNotifier {
       }
     } finally {
       if (current()) {
-        _pendingMessageContextChannelId = null;
-        _pendingMessageContextWindow = null;
-        channelLoading = false;
-        notifyListeners();
+        settled();
       }
     }
+  }
+
+  /// Context and canonical-thread fallback pages publish the same accepted
+  /// row versions, boundaries and reply summaries before any notification.
+  List<Map<String, dynamic>> _acceptContextPage(
+    MessageWindowRequest request,
+    String id,
+    dynamic page, {
+    bool context = true,
+  }) {
+    if (!request.current) return [];
+    final rows = acceptedWindowRows(page['messages'], id);
+    historyLimited = !context && page['historyLimited'] == true;
+    hasMore = context
+        ? page['hasOlder'] == true
+        : !historyLimited && rows.length >= 50;
+    hasNewer = context && page['hasNewer'] == true;
+    messageWindows.rememberWindow(
+      request,
+      id,
+      _windowAuthority(),
+      hasMore,
+      _replyToken(id),
+      historyLimited: historyLimited,
+      rows: rows,
+      replace: true,
+    );
+    messageWindows.setContextMode(request, id, context ? hasNewer : null);
+    _mergeThreadSummaries(id, page['threadSummariesByParentMessageId']);
+    return rows;
   }
 
   /// Web ChatPanel `joinChannel(channel.id)`: join the open channel, then
@@ -6273,18 +5386,17 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void closeThread({bool navigate = true}) {
-    final source = presentationSource;
-    if (source != null) {
-      source.closeThread(navigate: navigate);
-      return;
-    }
+  void closeThread({bool navigate = true}) =>
+      _windowReceiver._closeThread(navigate);
+
+  void _closeThread(bool navigate) {
     if (navigate && location.thread != null) {
       final next = location.withQuery({'thread': null});
       navigation.navigate(next, kind: location.panelNavigationKindTo(next));
     }
-    threadGeneration++;
+    messageWindows.threadGeneration++;
     _threadIdentity = null;
+    _threadVisit = null;
     _threadResolutionLoading = _threadParentLoading = false;
     _threadResolutionError = null;
     threadParent = null;
@@ -6788,9 +5900,7 @@ class WorkspaceController extends ChangeNotifier {
       if (_due('sidebar')) loadSidebar();
       // A reconnect refreshes agents and members in place; the first connect
       // reuses the reads the selection already started.
-      if (_connectedBefore &&
-          entityDirectory.started &&
-          _due('authors')) {
+      if (_connectedBefore && entityDirectory.started && _due('authors')) {
         entityDirectory.revalidateAuthors();
       }
       _connectedBefore = true;
@@ -6862,11 +5972,13 @@ class WorkspaceController extends ChangeNotifier {
         event.payload is Map) {
       final row = Map<String, dynamic>.from(event.payload);
       if (_revokedChannels.contains(row['channelId'])) return;
+      composer.sends.confirm(row);
       final duplicate =
           row['channelId'] is String &&
           row['id'] is String &&
           ledger.contains(row['channelId'], row['id']);
       if (event.name == 'message:updated') {
+        MessageHistoryEvents.store(this, row, updateOnly: true);
         if (!ledger.ingestUpdate(row, expectedGeneration: ledger.generation)) {
           return;
         }
@@ -6876,51 +5988,34 @@ class WorkspaceController extends ChangeNotifier {
             ? messageSync.consumeNew(row)
             : row;
         if (projection == null) return;
+        if (!duplicate) MessageHistoryEvents.store(this, projection);
         ledger.ingest([projection], expectedGeneration: ledger.generation);
       }
       final id = row['channelId'];
-      if (id == channel?.id && !hasNewer || id == threadChannelId) {
+      if (id == channel?.id && !hasNewer ||
+          id == threadChannelId && !messageWindows.contextHasNewer(id)) {
         if (event.name == 'message:new' && id == channel?.id) {
-          _fillWindowGap(id, row['id']);
+          if (messageWindows.fillWindowGap(id, row['id'])) {
+            unawaited(_revalidateTail(id));
+          }
         }
-        visibleIds.putIfAbsent(id, () => {}).add(row['id']);
+        messageWindows.reveal(liveWindowWrite, id, [row['id']]);
         _saveWindow(id, thread: id == threadChannelId);
       } else if (event.name == 'message:new' &&
           id is String &&
           row['id'] is String &&
-          _retainsLiveTail(id)) {
-        visibleIds[id]!.add(row['id']);
+          messageWindows.retainsLiveTail(id)) {
+        messageWindows.reveal(liveWindowWrite, id, [row['id']]);
       }
       // Source messageStore: counts move per event; only a first delivery
       // counts, and an edit never does.
       if (event.name == 'message:new' && !duplicate) _receiveUnread(row);
     }
     if (event.name == 'sync:resume:response' && event.payload is Map) {
-      final p = event.payload as Map;
-      final rows = (p['messages'] as List? ?? [])
-          .map((e) => Map<String, dynamic>.from(e))
-          .where((row) => !_revokedChannels.contains(row['channelId']))
-          .toList();
-      ledger.ingest(rows, expectedGeneration: ledger.generation);
-      for (final row in rows) {
-        final id = row['channelId'];
-        if (id == channel?.id && !hasNewer || id == threadChannelId) {
-          visibleIds.putIfAbsent(id, () => {}).add(row['id']);
-        } else if (id is String && row['id'] is String && _retainsLiveTail(id)) {
-          visibleIds[id]!.add(row['id']);
-        }
-      }
-      if (channel != null && !hasNewer) markRead(channel!.id);
-      if (threadChannelId != null) markRead(threadChannelId!);
-      if (p['hasMore'] == true) {
-        final cursor = BigInt.tryParse('${p['currentSeq']}');
-        if (cursor != null && cursor > BigInt.zero) client.resume(cursor);
-      }
-      // Every resume answer used to re-read the counts; a flapping socket
-      // resumes often. Counts read in the last 5 s are current.
-      if (_due('unread', freshness: const Duration(seconds: 5))) {
-        refreshUnread();
-      }
+      unawaited(MessageHistoryEvents.resumeResponse(this, event.payload as Map,
+        refreshUnread: () {
+          if (_due('unread', freshness: const Duration(seconds: 5))) refreshUnread();
+        }));
     }
     if (event.name == 'channel:removed') {
       final p = event.payload;
@@ -6968,6 +6063,9 @@ class WorkspaceController extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    MessageHistoryPages.detach(this);
+    if (presentationSource == null) messageWindows.dispose();
+    composer.sends.detach(this);
     composer.disposeOwnedBy(this);
     if (_ownsEntityDirectory) {
       removeListener(_entityAuthorityChanged);
@@ -6992,12 +6090,6 @@ class WorkspaceController extends ChangeNotifier {
     _attachmentUrls.dispose();
     _playerSessions.dispose();
     _channelFilesStores.clear();
-    for (final drafts in _uploads.values) {
-      for (final draft in drafts) {
-        draft.cancel.cancel();
-      }
-    }
-    _uploads.clear();
     subscription.cancel();
     _activityUnread?.dispose();
     _activityUnread = null;
@@ -7017,21 +6109,3 @@ List<Map<String, dynamic>> normalizePendingMentionActions(dynamic value) => [
           row['availableActions'] is List)
         Map<String, dynamic>.from(row),
 ];
-
-class _ThreadWindow {
-  _ThreadWindow({
-    required this.parentChannelId,
-    required this.threadChannelId,
-    required this.token,
-    required this.authority,
-    required this.generation,
-    required this.hasMore,
-    required this.historyLimited,
-    this.parent,
-  });
-  final String parentChannelId, threadChannelId, token;
-  final String? authority;
-  final int generation;
-  final bool hasMore, historyLimited;
-  RaftMessage? parent;
-}

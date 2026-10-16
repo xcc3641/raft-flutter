@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_flutter/features/chat_view.dart';
+import 'package:raft_flutter/features/mobile_settings_owner.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -14,13 +15,16 @@ import 'message_presentation_test.dart' show fixture;
 /// Scrolling up into history: when an older page arrives, the rows on screen
 /// keep their exact position on every frame; history grows above them.
 void main() {
+  for (final direct in [false, true]) {
   for (final tall in [false, true]) {
     for (final thread in [false, true]) {
       for (final family in [RaftFamily.brutal, RaftFamily.elegant]) {
         testWidgets(
-          '${thread ? 'thread' : 'channel'} $family tall=$tall: older page keeps the reading position',
+          '${thread ? 'thread' : 'channel'} $family tall=$tall direct=$direct: older page keeps the reading position',
           (tester) async {
             SharedPreferences.setMockInitialValues({});
+            MobileSettingsPreference.instance.setEnabled(direct);
+            addTearDown(MobileSettingsPreference.instance.resetForTest);
             tester.view.physicalSize = const Size(1280, 800);
             tester.view.devicePixelRatio = 1;
             addTearDown(tester.view.reset);
@@ -84,14 +88,35 @@ void main() {
                 await w.selectChannel(w.channel!, navigate: false);
               }
             });
+            final chat = RaftChatView(controller: w, thread: thread);
             await tester.pumpWidget(
               MaterialApp(
                 theme: raftTheme(family),
                 home: Scaffold(
-                  body: RaftChatView(controller: w, thread: thread),
+                  body: direct
+                      ? MobileChatDirectRead(
+                          channel: !thread,
+                          thread: thread,
+                          child: chat,
+                        )
+                      : chat,
                 ),
               ),
             );
+            expect(
+              find.byType(MobileChatDirectRead),
+              direct ? findsOneWidget : findsNothing,
+            );
+            if (direct) {
+              final scope = tester.widget<MobileChatDirectRead>(
+                find.byType(MobileChatDirectRead),
+              );
+              expect(scope.channel, !thread);
+              expect(scope.thread, thread);
+              final window = thread ? w.threadWindow : w.messageWindow;
+              expect(window, isNotNull);
+              expect(window!.retired, isFalse);
+            }
             for (var i = 0; i < 30; i++) {
               await tester.pump(const Duration(milliseconds: 16));
             }
@@ -170,5 +195,6 @@ void main() {
         );
       }
     }
+  }
   }
 }

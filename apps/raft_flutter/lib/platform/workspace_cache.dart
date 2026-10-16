@@ -2,19 +2,56 @@ import 'dart:io';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../data/workspace_cache.dart';
+import '../data/message_history.dart';
+import 'message_history.dart';
 import '../data/workspace_cache_codec.dart';
 
 /// On-device workspace cache (see [WorkspaceCache] for the validity rule).
-class DriftWorkspaceCache extends GeneratedDatabase implements WorkspaceCache {
+class DriftWorkspaceCache extends GeneratedDatabase
+    implements WorkspaceCache, MessageHistoryProvider {
   DriftWorkspaceCache(
     super.executor, {
     this.windowRetention = 120,
     this.translationRetention = 2000,
+    this.historyClock,
+    this.historyBudget,
+    this.historyAvailableSpace,
+    this.automaticHistoryMaintenance = true,
+    this.messageHistoryEnabled = const bool.fromEnvironment(
+      'RAFT_LOCAL_MESSAGE_HISTORY',
+      defaultValue: true,
+    ),
   });
+
+  final DateTime Function()? historyClock;
+  /// An explicit budget also permits small, real-file capacity fixtures.
+  final int? historyBudget;
+  final Future<int?> Function(String)? historyAvailableSpace;
+  @visibleForTesting
+  final bool automaticHistoryMaintenance;
+  @override
+  final bool messageHistoryEnabled;
+
+  @override
+  late final SqliteMessageHistory messageHistory = SqliteMessageHistory(
+    this,
+    _ordered,
+    readLegacy: _read,
+    writeLegacy: _write,
+    now: historyClock,
+    historyBudget: historyBudget ??
+        (switch (defaultTargetPlatform) {
+          TargetPlatform.android || TargetPlatform.iOS => 1 << 30,
+          _ => 2 << 30,
+        }),
+    automaticMaintenance: automaticHistoryMaintenance,
+    historyAvailableSpace: historyAvailableSpace,
+  );
 
   /// Message/thread windows kept per account and server. Every write moves a
   /// row to the newest rowid, so the oldest-written (least recently
@@ -65,6 +102,7 @@ class DriftWorkspaceCache extends GeneratedDatabase implements WorkspaceCache {
   Future<void> close() => _closing ??= _closeAfterOperations();
 
   Future<void> _closeAfterOperations() async {
+    messageHistory.stop();
     await _operations;
     await super.close();
   }
@@ -91,7 +129,9 @@ class DriftWorkspaceCache extends GeneratedDatabase implements WorkspaceCache {
     String server,
     String kind,
     String id,
-  ) => _ordered(() => _read(origin, principal, server, kind, id));
+  ) => messageHistoryEnabled && _windowKinds.contains(kind)
+      ? messageHistory.readWindow(origin, principal, server, kind, id)
+      : _ordered(() => _read(origin, principal, server, kind, id));
 
   @override
   Future<void> write(
@@ -101,7 +141,9 @@ class DriftWorkspaceCache extends GeneratedDatabase implements WorkspaceCache {
     String kind,
     String id,
     dynamic value,
-  ) => _ordered(() => _write(origin, principal, server, kind, id, value));
+  ) => messageHistoryEnabled && _windowKinds.contains(kind)
+      ? messageHistory.writeWindow(origin, principal, server, kind, id, value)
+      : _ordered(() => _write(origin, principal, server, kind, id, value));
 
   @override
   Future<void> revokeChannel(
@@ -130,6 +172,7 @@ class DriftWorkspaceCache extends GeneratedDatabase implements WorkspaceCache {
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (_) async {
+      await customStatement('PRAGMA auto_vacuum=INCREMENTAL');
       await customStatement('''CREATE TABLE workspace_cache (
       origin TEXT NOT NULL, principal TEXT NOT NULL, server TEXT NOT NULL,
       kind TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL,
@@ -252,12 +295,18 @@ class DriftWorkspaceCache extends GeneratedDatabase implements WorkspaceCache {
       );
     } else {
       final payload = await encodeWorkspaceCache(value);
-      // REPLACE (not an in-place update) gives the row a new rowid: rowid
-      // order is last-write order for eviction.
-      await customStatement(
-        'INSERT OR REPLACE INTO workspace_cache (origin,principal,server,kind,id,payload) VALUES (?,?,?,?,?,?)',
-        [origin, principal, server, kind, id, payload],
-      );
+      // Explicit deletion preserves the LRU rowid behavior and invokes the
+      // retention counters on SQLite connections with recursive triggers off.
+      await transaction(() async {
+        await customStatement(
+          'DELETE FROM workspace_cache WHERE origin=? AND principal=? AND server=? AND kind=? AND id=?',
+          [origin, principal, server, kind, id],
+        );
+        await customStatement(
+          'INSERT INTO workspace_cache (origin,principal,server,kind,id,payload) VALUES (?,?,?,?,?,?)',
+          [origin, principal, server, kind, id, payload],
+        );
+      });
       if (_windowKinds.contains(kind)) {
         await customStatement(
           'DELETE FROM workspace_cache WHERE origin=? AND principal=? AND server=? AND kind IN (\'window\',\'thread-window\') AND rowid NOT IN (SELECT rowid FROM workspace_cache WHERE origin=? AND principal=? AND server=? AND kind IN (\'window\',\'thread-window\') ORDER BY rowid DESC LIMIT ?)',
@@ -276,6 +325,19 @@ class DriftWorkspaceCache extends GeneratedDatabase implements WorkspaceCache {
   }
 
   Future<void> _revokeChannel(
+    String origin,
+    String principal,
+    String server,
+    String channel,
+  ) => messageHistory.revokeChannelNow(
+    origin,
+    principal,
+    server,
+    channel,
+    () => _purgeLegacyChannel(origin, principal, server, channel),
+  );
+
+  Future<void> _purgeLegacyChannel(
     String origin,
     String principal,
     String server,
@@ -301,6 +363,7 @@ class DriftWorkspaceCache extends GeneratedDatabase implements WorkspaceCache {
   }
 
   Future<void> _clearAccount(String origin, String principal) async {
+    messageHistory.cancelAccount(origin, principal);
     await customStatement(
       'DELETE FROM workspace_cache WHERE origin=? AND principal=?',
       [origin, principal],

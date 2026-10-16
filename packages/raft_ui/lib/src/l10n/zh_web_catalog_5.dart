@@ -55,14 +55,15 @@ const Map<String, String> zhCatalogWeb5 = <String, String>{
   "Migration canceled": "迁移已取消",
   "Migration failed": "迁移失败",
   "Migration in progress": "迁移进行中",
-  "Migration mode: stop before export": "迁移模式：导出前停止",
-  "Migration reference copied": "迁移编号已复制",
-  "Migration resets the current session: workspace files, including MEMORY.md and notes when present, moved to the target Computer; the conversation context reset, and the Agent resumes from MEMORY.":
-      "迁移会重置当前会话：工作区文件（包括存在的 MEMORY.md 和 notes）已迁移至目标 Computer；对话上下文已重置，Agent 将从 MEMORY 恢复。",
+  "Your agent will stop while it migrates, then start again on the new computer.":
+      "迁移期间 Agent 会暂停，迁移完成后会在新计算机上重新启动。",
+  "Migration ID copied": "迁移编号已复制",
+  "Migrating moves the workspace files, including MEMORY.md and notes if any, to the new computer. The agent then starts a fresh session and picks up from MEMORY.md.":
+      "迁移会把工作区文件（包括 MEMORY.md 和 notes，如有）转移到新计算机。之后 Agent 会开启新会话，并根据 MEMORY.md 继续工作。",
   "Migration status": "迁移状态",
   "Migration status could not be loaded. Refresh and try again.":
       "无法加载迁移状态。请刷新后重试。",
-  "Migration status unavailable": "迁移状态不可用",
+  "Can't load migration status": "无法加载迁移状态",
   "Min 8 characters": "至少 8 个字符",
   "Mobile App": "手机 App",
   "Mobile app": "手机 App",
@@ -78,7 +79,7 @@ const Map<String, String> zhCatalogWeb5 = <String, String>{
   "More professional features coming soon": "更多专业功能即将推出",
   "More selected message actions": "更多已选消息操作",
   "Most Connected Members": "连接最多的成员",
-  "Move agents with Pro": "使用 Pro 迁移 Agent",
+  "Upgrade to Pro to migrate agents": "升级至 Pro 以迁移 Agent",
   "Move to another computer": "迁移到另一台计算机",
   "Move to other pane": "移到另一窗格",
   "Move to section": "移动到分区",
@@ -208,7 +209,7 @@ const Map<String, String> zhCatalogWeb5 = <String, String>{
   "No notifications right now": "暂无通知",
   "No online Computer with the Built-in runtime is connected.":
       "没有在线且具备 Built-in runtime 的计算机。",
-  "No other attached computer": "没有其他已连接的计算机",
+  "No other computers available": "没有其他可用的计算机",
   "No owners or admins yet.": "尚无所有者或管理员。",
   "No panels open": "没有打开的面板",
   "No pending invites.": "暂无待处理邀请。",
@@ -334,7 +335,7 @@ const Map<String, String> zhCatalogWeb5 = <String, String>{
       "只有该连接的创建者或服务器管理员可以分配它",
   "Open": "打开",
   "Open Channel": "打开频道",
-  "Open Computers": "打开 Computer 列表",
+  "Open Computers": "打开计算机列表",
   "Open Mermaid diagram fullscreen": "全屏打开 Mermaid 图表",
   "Open PowerShell and run the Install and Setup commands above.":
       "打开 PowerShell，运行上面的安装和设置命令。",
@@ -530,10 +531,10 @@ const Map<String, String> zhCatalogWeb5 = <String, String>{
   "Raft Server owns authentication, refresh, and remote MCP requests.":
       "Raft Server 负责身份验证、刷新和远程 MCP 请求。",
   "Raft channel": "Raft 频道",
-  "Raft could not confirm cleanup after the computer switch. Keep both computers online and use the migration reference when asking for support.":
-      "Raft 无法确认 Computer 切换后的清理结果。请保持两台 Computer 在线，并在请求支持时提供迁移编号。",
-  "Raft could not confirm cleanup on the source computer. Keep both computers online and use the migration reference when asking for support.":
-      "Raft 无法确认源 Computer 上的清理结果。请保持两台 Computer 在线，并在请求支持时提供迁移编号。",
+  "Raft couldn't finish cleaning up after the agent switched computers. Keep both computers online. If you contact support, include the migration ID.":
+      "Agent 切换计算机后，Raft 无法完成清理。请保持两台计算机在线；如需联系支持，请提供迁移编号。",
+  "Raft couldn't finish cleaning up the original computer. Keep both computers online. If you contact support, include the migration ID.":
+      "Raft 无法完成原计算机上的清理。请保持两台计算机在线；如需联系支持，请提供迁移编号。",
   "Raft could not prepare a secure transfer between these computers. Make sure both computers are online and up to date, then try again.":
       "Raft 无法在这两台计算机之间建立安全传输。请确认两台都在线且为最新版本，然后重试。",
   "Raft could not prepare the transfer. Make sure both computers are online, then try again.":

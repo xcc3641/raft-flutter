@@ -23,6 +23,7 @@ import 'package:flutter/material.dart';
 import 'system_inset.dart';
 
 import 'components.dart';
+import 'anchored_popup.dart';
 import 'design_primitives.dart';
 import 'dismiss_scope.dart';
 import 'icons.dart';
@@ -643,7 +644,7 @@ class RaftAgentSelect<T> extends StatefulWidget {
 
 class _RaftAgentSelectState<T> extends State<RaftAgentSelect<T>> {
   final portal = OverlayPortalController();
-  final link = LayerLink();
+  final anchorKey = GlobalKey();
   double width = 0;
 
   void close() {
@@ -721,67 +722,62 @@ class _RaftAgentSelectState<T> extends State<RaftAgentSelect<T>> {
       body = Transform.translate(offset: translate, child: body);
     }
     return Semantics(
+      key: anchorKey,
       button: true,
       label: widget.semanticLabel,
       value: selected?.label,
-      child: CompositedTransformTarget(
-        link: link,
-        child: OverlayPortal(
-          controller: portal,
-          overlayChildBuilder: raftBackDismissed(
-            close,
-            (context) => Positioned.fill(
-              child: TapRegion(
-                onTapOutside: (_) => close(),
-                // Escape closes the menu, not the dialog under it.
-                child: RaftDismissScope(
-                  onDismiss: close,
-                  takeFocus: true,
-                  child: Stack(
-                    children: [
-                      CompositedTransformFollower(
-                        link: link,
-                        targetAnchor: Alignment.bottomLeft,
-                        offset: const Offset(0, _tw),
-                        child: Align(
-                          alignment: Alignment.topLeft,
-                          child: RaftMenuPanel(
-                            width: width,
-                            onDismiss: close,
-                            children: [
-                              for (final o in widget.options)
-                                RaftMenuItem(
-                                  label: o.label,
-                                  selected: o.value == widget.value,
-                                  onPressed: o.enabled
-                                      ? () {
-                                          close();
-                                          widget.onChanged?.call(o.value);
-                                        }
-                                      : null,
-                                ),
-                            ],
-                          ),
-                        ),
+      child: OverlayPortal(
+        controller: portal,
+        overlayChildBuilder: raftBackDismissed(
+          close,
+          (context) => Positioned.fill(
+            child: TapRegion(
+              onTapOutside: (_) => close(),
+              // Escape closes the menu, not the dialog under it.
+              child: RaftDismissScope(
+                onDismiss: close,
+                takeFocus: true,
+                child: Stack(
+                  children: [
+                    RaftAnchoredPopup(
+                      anchorKey: anchorKey,
+                      movement: Scrollable.maybeOf(context)?.position,
+                      gap: _tw,
+                      child: RaftMenuPanel(
+                        width: width,
+                        onDismiss: close,
+                        children: [
+                          for (final o in widget.options)
+                            RaftMenuItem(
+                              label: o.label,
+                              selected: o.value == widget.value,
+                              onPressed: o.enabled
+                                  ? () {
+                                      close();
+                                      widget.onChanged?.call(o.value);
+                                    }
+                                  : null,
+                            ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
-          child: LayoutBuilder(
-            builder: (context, box) {
-              width = box.maxWidth.isFinite ? box.maxWidth : 192;
-              return GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: enabled && widget.options.isNotEmpty
-                    ? () => setState(portal.toggle)
-                    : null,
-                child: body,
-              );
-            },
-          ),
+        ),
+        child: LayoutBuilder(
+          builder: (context, box) {
+            width = box.maxWidth.isFinite ? box.maxWidth : 192;
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: enabled && widget.options.isNotEmpty
+                  ? () => setState(portal.toggle)
+                  : null,
+              child: body,
+            );
+          },
         ),
       ),
     );

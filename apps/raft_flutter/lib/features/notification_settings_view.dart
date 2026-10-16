@@ -8,6 +8,7 @@ import '../data/workspace_controller.dart';
 import '../platform/battery_optimization.dart';
 import '../platform/native_notifications.dart';
 import 'management_support.dart';
+import 'windows_tray_settings.dart';
 
 /// Mounted NotificationsSection. Desktop (macOS / Linux / Windows) mirrors
 /// Web's DesktopNativeNotificationsCard: the system owns the switch, the card
@@ -425,8 +426,7 @@ class _NotificationSettingsState extends State<NotificationSettingsView>
       final card = RaftNotificationSettingsCard(
         key: const ValueKey('notification-settings-card'),
         title: 'Desktop notifications',
-        description:
-            'Raft Desktop shows system notifications for new DMs, direct mentions, and followed thread replies while the window is in the background. Web push is not used on desktop.',
+        description: 'Raft Desktop shows system notifications for new DMs, direct mentions, and followed thread replies while the window is in the background. Web push is not used on desktop.',
         status: unavailable ? 'Unavailable' : 'Managed by the system',
         hint: unavailable
             ? 'This desktop build cannot show system notifications.'
@@ -466,6 +466,7 @@ class _NotificationSettingsState extends State<NotificationSettingsView>
                   : () => nativeAction(service.openSettings),
             ),
           ),
+          const WindowsTraySettings(),
         ],
       );
     }

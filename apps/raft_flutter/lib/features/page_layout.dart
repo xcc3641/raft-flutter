@@ -4,6 +4,10 @@ import 'package:raft_ui/recipes.dart' as recipes;
 
 import '../platform/system_bars.dart';
 
+/// Vertical padding floor once a shell header grows. The narrow Web panel
+/// header uses this same 8px floor.
+const _scaledHeaderPadding = RaftMetrics.fieldVerticalPadding;
+
 /// The product panel header shared by the source's individual page columns.
 /// Platform safe-area insets are supplied by the host, outside this rectangle.
 double raftPageHeaderHeight(BuildContext context) =>
@@ -143,12 +147,28 @@ class RaftPageHeader extends StatelessWidget implements PreferredSizeWidget {
     final gap = canonical && !t.brutal
         ? RaftResourceMetrics.elegantHeaderGap
         : RaftLayoutMetrics.panelGap;
+    // Above the default text size the header height is a minimum and the
+    // title / subtitle wrap, the same way the narrow Web panel header grows.
+    final grows = RaftScaled.grows(context);
+    final lines = grows ? null : 1;
+    final clip = grows ? TextOverflow.clip : TextOverflow.ellipsis;
+    final restingPadding = canonical && !t.brutal && mobile
+        ? RaftResourceMetrics.elegantMobileHeaderInset
+        : EdgeInsets.symmetric(horizontal: RaftLayoutMetrics.panelInset);
     final header = Container(
       key: const Key('page-header-surface'),
-      height: height,
-      padding: canonical && !t.brutal && mobile
-          ? RaftResourceMetrics.elegantMobileHeaderInset
-          : EdgeInsets.symmetric(horizontal: RaftLayoutMetrics.panelInset),
+      height: grows ? null : height,
+      constraints: grows ? BoxConstraints(minHeight: height) : null,
+      padding: grows
+          ? restingPadding.copyWith(
+              top: restingPadding.top < _scaledHeaderPadding
+                  ? _scaledHeaderPadding
+                  : restingPadding.top,
+              bottom: restingPadding.bottom < _scaledHeaderPadding
+                  ? _scaledHeaderPadding
+                  : restingPadding.bottom,
+            )
+          : restingPadding,
       decoration: BoxDecoration(
         color: recipe.background,
         border: Border(
@@ -184,15 +204,15 @@ class RaftPageHeader extends StatelessWidget implements PreferredSizeWidget {
                 if (!canonical)
                   Text(
                     title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    maxLines: lines,
+                    overflow: clip,
                     style: titleStyle,
                   ),
                 if (canonical)
                   RaftCssText(
                     title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    maxLines: lines,
+                    overflow: clip,
                     style: titleStyle,
                   ),
                 if (canonical &&
@@ -206,14 +226,14 @@ class RaftPageHeader extends StatelessWidget implements PreferredSizeWidget {
                   canonical
                       ? RaftCssText(
                           subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          maxLines: lines,
+                          overflow: clip,
                           style: subtitleStyle,
                         )
                       : Text(
                           subtitle!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          maxLines: lines,
+                          overflow: clip,
                           style: subtitleStyle,
                         ),
               ],

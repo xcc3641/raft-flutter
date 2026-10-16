@@ -15,6 +15,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show Size;
 
+import 'package:flutter/widgets.dart' show Scrollable;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_ui/raft_ui.dart';
 
@@ -23,6 +24,21 @@ import 'text_scale_audit_surfaces.dart';
 
 /// Interactions that open a surface's interesting state.
 final _actions = <String, Future<void> Function(WidgetTester)>{
+  'dropdownViewportPreview': (t) async {
+    await t.tap(find.byType(RaftAgentSelect<String>));
+    await t.pumpAndSettle();
+    final list = find.ancestor(
+      of: find.byType(RaftMenuPanel),
+      matching: find.byType(Scrollable),
+    );
+    await t.scrollUntilVisible(
+      find.text('Choice 39'),
+      180,
+      scrollable: list,
+      maxScrolls: 40,
+    );
+    expect(find.text('Choice 39').hitTestable(), findsOneWidget);
+  },
   'selectionCopyToastPreview': (t) async {
     final en = find.text('Copy MD');
     await t.tap(en.evaluate().isNotEmpty ? en : find.text('复制 Markdown'));

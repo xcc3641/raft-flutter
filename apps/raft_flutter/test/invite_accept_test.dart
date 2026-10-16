@@ -39,6 +39,11 @@ Map<String, dynamic> _info({
 };
 
 void main() {
+  // Every host uses the same synthetic token. Keep the process-wide invite
+  // cache within one test; warm-cache behavior is exercised explicitly below.
+  setUp(InviteInfoMemory.clear);
+  tearDown(InviteInfoMemory.clear);
+
   group('InviteLink', () {
     test('reads Web invite links, deep links and bare codes', () {
       expect(
@@ -125,6 +130,43 @@ void main() {
       await t.pump();
       expect(find.text("You're invited"), findsOneWidget);
       expect(find.text('Loading invite…'), findsNothing);
+    });
+
+    testWidgets('a cached invite paints while its revalidation is pending', (
+      t,
+    ) async {
+      await host(t, loadInfo: () async => _info());
+      expect(find.text("You're invited"), findsOneWidget);
+      await t.pumpWidget(const SizedBox.shrink());
+
+      final pending = Completer<Map<String, dynamic>>();
+      var loads = 0;
+      await host(
+        t,
+        loadInfo: () {
+          loads++;
+          return pending.future;
+        },
+      );
+      expect(loads, 1);
+      expect(find.text("You're invited"), findsOneWidget);
+      expect(find.text('Loading invite…'), findsNothing);
+      expect(
+        find.textContaining('Raft Design', findRichText: true),
+        findsWidgets,
+      );
+
+      pending.complete({..._info(), 'serverName': 'Updated workspace'});
+      await t.pump();
+      await t.pump();
+      expect(
+        find.textContaining('Updated workspace', findRichText: true),
+        findsWidgets,
+      );
+      expect(
+        find.textContaining('Raft Design', findRichText: true),
+        findsNothing,
+      );
     });
 
     testWidgets(

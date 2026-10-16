@@ -116,6 +116,7 @@ class MediaBrowserState extends State<MediaBrowser>
   final _thumbLeases = <int, WorkspaceAttachmentImageLease>{};
   final _thumbs = <int, ImageProvider>{};
   final _preloads = <int, WorkspaceAttachmentImageLease>{};
+  bool _preloadSuppressed = false;
   bool zoomed = false;
   bool _disposed = false;
 
@@ -244,6 +245,20 @@ class MediaBrowserState extends State<MediaBrowser>
     if (state == AppLifecycleState.resumed) return;
     final p = stages[index]?.player;
     if (p != null) unawaited(p.pause().catchError((Object _) {}));
+    _releasePreloads();
+  }
+
+  @override
+  void didHaveMemoryPressure() {
+    _preloadSuppressed = true;
+    _releasePreloads();
+  }
+
+  void _releasePreloads() {
+    for (final lease in _preloads.values) {
+      lease.release(discard: true);
+    }
+    _preloads.clear();
   }
 
   /// One zoom / pan state per page; every one is disposed with the viewer.
@@ -338,7 +353,7 @@ class MediaBrowserState extends State<MediaBrowser>
   /// Once the current page shows its original, fetch each neighbour once at
   /// display size; release what is no longer adjacent.
   void _preloadNeighbours() {
-    if (!mounted || _disposed || !widget.authorized()) return;
+    if (!mounted || _disposed || _preloadSuppressed || !widget.authorized()) return;
     final wanted = {
       for (final n in [index - 1, index + 1])
         if (n >= 0 && n < items.length && !items[n].isVideo) n,
@@ -797,7 +812,11 @@ class MediaBrowserState extends State<MediaBrowser>
           key: key,
           imageKey: ValueKey('attachment-image-${pageMeta['id']}'),
           zoom: zoomFor(i),
-          acquire: () => w.acquireAttachmentImage(
+          acquire: () {
+            // Speculative neighbours must yield to a page explicitly opened
+            // by the user, including the outgoing page during a swipe.
+            _releasePreloads();
+            return w.acquireAttachmentImage(
             original,
             authorized: widget.authorized,
             load: attachmentImageLoader(
@@ -806,8 +825,9 @@ class MediaBrowserState extends State<MediaBrowser>
               metadata: pageMeta,
               key: original,
             ),
-            foreground: true,
-          ),
+              foreground: true,
+            );
+          },
           placeholder: _placeholder(i),
           previewFailed: i == widget.initialIndex && widget.openerPreviewFailed,
           title: pageItem.filename,

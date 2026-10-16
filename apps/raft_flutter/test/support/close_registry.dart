@@ -15,6 +15,12 @@ List<CloseSurface> get allCloseSurfaces => [
 /// Files that contain a surface API call but are not a surface themselves.
 /// Each entry says why; a new entry needs a reviewer's agreement.
 const closeScanExempt = <String, String>{
+  'lib/platform/app_window.dart':
+      'dispatches close commands to existing routes and the native window; '
+      'opens no surface of its own',
+  '../../packages/raft_ui/lib/src/preview_route.dart':
+      'defines preview route types; the attachment and media browser callers '
+      'that open previews are listed surfaces',
   'lib/features/private_route_guard.dart':
       'removes routes when access is revoked; opens no surface of its own',
   'lib/features/page_layout.dart':

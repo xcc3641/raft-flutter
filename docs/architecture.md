@@ -188,12 +188,12 @@ Windows 使用同一 DesktopInboxNotifications 权威与生命周期。WindowsNo
 
 ## 内存预算（2026-10-14）
 
-所有可重建的内存层集中在 `apps/raft_flutter/lib/platform/memory_budgets.dart` 的 `RaftMemoryBudgets`（一张表，按设备类别取值；Android / iOS 为 phone，其余为 desktop）。各层只是“用得多大”的上限，里面没有唯一副本：被释放的位图、静帧、验证结果都会在需要时重新解码或读取。`RaftMemoryRelease` 在应用隐藏 30 秒和系统内存压力时清空它们；`RaftMemoryRelease.install()` 同时把框架 `ImageCache` 设为本设备类别的上限（此前保持默认的 1000 张 / 100 MiB，没有人设置过）。`RaftMemoryRelease.snapshot()` 一行列出 `ImageCache` 和每一层的当前用量（非 release 构建的 trim 日志和 `resource_release_main.dart` 探针使用）。
+所有可重建的内存层集中在 `apps/raft_flutter/lib/platform/memory_budgets.dart` 的 `RaftMemoryBudgets`（Android / iOS 为 phone，其余为 desktop）。附件图片另按设备总内存分档，区分闲置缓存目标与查看图片时的临时额度；其他层保持按设备类别取值。里面没有唯一副本：被释放的位图、静帧、验证结果都会在需要时重新解码或读取。`RaftMemoryRelease` 在应用隐藏 30 秒和系统内存压力时回收无人使用的缓存；`RaftMemoryRelease.install()` 同时设置框架 `ImageCache` 的上限。`RaftMemoryRelease.snapshot()` 列出各层当前用量。
 
 | 层 | 持有者 | phone | desktop |
 |---|---|---|---|
 | 框架 `ImageCache`（已解码的 `Image` provider：尺寸化图片、头像重新挂载、封面、表情） | `PaintingBinding` | 200 张 / 64 MiB | 500 张 / 128 MiB |
-| 附件图片，已解码 | `AttachmentImageRepository` | 64 张 / 64 MiB | 64 张 / 96 MiB |
+| 附件图片，已解码（低档闲置目标 / 临时总额度） | `AttachmentImageRepository` | 64 张 / 64 / 192 MiB | 64 张 / 96 / 384 MiB |
 | 附件图片，已编码（解码来源） | `AttachmentImageRepository` | 32 MiB | 64 MiB |
 | 头像位图，已解码 | `RaftHotImages` | 384 个 / 24 MiB | 同 phone |
 | 头像编码字节 | `RaftImageBytes` | 8 MiB | 同 phone |
@@ -202,7 +202,19 @@ Windows 使用同一 DesktopInboxNotifications 权威与生命周期。WindowsNo
 | HDR 判定、已准备集合、续播位置 | `PlayerSessions` | 各 256 条 LRU | 同 phone |
 | 签名附件 URL | `AttachmentUrlCache` | 256 条、4 分钟 | 同 phone |
 
-- 附件图片的位图与 `ImageCache` 条目是同一块内存（provider 从仓库取同一个 `ui.Image`），所以仓库的已解码上限不超过同类别的 `ImageCache` 上限；否则仓库会固定住缓存已经忘掉的图片。
+- 附件图片的位图与 `ImageCache` 条目共享同一个 `ui.Image`；附件仓库单独拥有其生命周期，不要求与框架 LRU 使用相同上限。用户查看原图时可以临时超过闲置目标，优先清理闲置图片和邻图预加载；只有临时总额度的剩余空间不够时才降采样。解码与入账串行，网络传输保持并发；空闲位图在新位图分配前释放，已释放的大图不会留在超额缓存中。
+- 启动时读取设备总内存：Android `ActivityManager.MemoryInfo`（低内存设备标记强制低档），Apple `ProcessInfo.physicalMemory`，Windows `GlobalMemoryStatusEx`，Linux `/proc/meminfo`。这不是可用内存保证；读取失败或超过 500 ms 使用低档。
+
+| 类别与总内存 | 闲置目标 | 临时总额度 |
+|---|---:|---:|
+| phone ≤3 GiB 或未知 | 64 MiB | 192 MiB |
+| phone >3–6 GiB | 128 MiB | 384 MiB |
+| phone >6 GiB | 256 MiB | 768 MiB |
+| desktop ≤8 GiB 或未知 | 96 MiB | 384 MiB |
+| desktop >8–16 GiB | 192 MiB | 768 MiB |
+| desktop >16 GiB | 256 MiB | 1024 MiB |
+
+关闭预览会释放其大位图。系统内存告警保留当前图片、清理闲置项并停止该查看器的邻图预加载；后续 30 秒新解码最多使用本档的闲置目标，仍须扣除其他在用图片。没有后台轮询或自动重新下载。原始下载字节不因预览降采样而改变。
 - `PlayerSessions` 注册了内存 trimmer：隐藏 30 秒或内存压力时释放没有在播放、没有全屏播放页持有的静帧（卡片自己持有一份拷贝，不受影响；正在播放或被查看器持有的会话不动，播放器本身不动）。静帧按数量（24）和估算字节（16 MiB）双重限制，最旧的先释放。`hdrVerdicts` / `prepared` / `resumeAt` 是有界 LRU（`BoundedLruMap` / `BoundedLruSet`）；被挤出的附件下次建卡片时重新判定 / 重新准备。
 - 守卫：`test/image_cache_ban_guard_test.dart` 禁止应用代码使用 `cross_cache` 和 flutter_chat_ui 自带的头像 / 图片构建（它们走一份没有上限、设置页看不到也清不掉的磁盘目录和绕过预算的位图）。图片只走 `RaftSizedImage`、`RaftAvatarContent` 和 `AttachmentImageRepository`。
 

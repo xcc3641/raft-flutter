@@ -1,0 +1,187 @@
+import 'package:raft_client/raft_client.dart';
+
+import 'message_history.dart';
+import 'history_read_policy.dart';
+import 'message_history_pages.dart';
+import 'message_history_verification.dart';
+import 'message_window_snapshot.dart';
+import 'reading_positions.dart';
+import 'workspace_controller.dart';
+import 'workspace_message_windows.dart';
+
+/// Device positions are presentation metadata under the live receiver's scope.
+class MessageHistoryPositions {
+  static void save(
+    WorkspaceController receiver,
+    String id,
+    ReadingAnchor? anchor,
+  ) {
+    var w = receiver;
+    while (w.presentationSource != null) {
+      w = w.presentationSource!;
+    }
+    if (!w.cacheWritable) return;
+    if (id == w.channel?.id && w.channelLoading ||
+        id == w.threadChannelId && w.threadLoading) {
+      return;
+    }
+    final storage = MessageHistoryPages.storage(w.cache),
+        scope = MessageHistoryPages.scope(
+          w,
+          id,
+          parent: id == w.threadChannelId ? w.threadParentChannelId : id,
+          parentMessage: id == w.threadChannelId
+              ? w.threadParentMessageId
+              : null,
+        );
+    if (storage == null || scope == null) return;
+    // A null viewport anchor reports the latest end, including a manual drag.
+    // A previous older-page hint must not retain the opposite end afterward.
+    if (anchor == null) storage.memory.direction(w, id, older: false);
+    SavedReadingPosition? position;
+    if (anchor != null) {
+      final row = w.messageWindows
+          .rows(id)
+          .where((row) => w.messageKey(row) == anchor.messageKey)
+          .firstOrNull;
+      if (row == null || WorkspaceController.isPendingSend(row)) return;
+      position = SavedReadingPosition(row.id, row.seq, anchor.top);
+    }
+    storage.savePosition(scope, position).ignore();
+  }
+
+  static Future<void> clear(
+    WorkspaceController w,
+    String id, {
+    required bool thread,
+    MessageHistoryScope? boundScope,
+    bool Function()? current,
+  }) async {
+    final storage = MessageHistoryPages.storage(w.cache),
+        scope =
+            boundScope ??
+            MessageHistoryPages.scope(
+              w,
+              id,
+              parent: thread ? w.threadParentChannelId : id,
+              parentMessage: thread ? w.threadParentMessageId : null,
+            );
+    if (storage != null && scope != null) {
+      await storage.savePosition(scope, null);
+    }
+    if (current?.call() ?? true) w.messageWindows.clearReadingAnchor(id);
+  }
+
+  static Future<MessageHistoryPage?> restore(
+    WorkspaceController w,
+    MessageWindowRequest request,
+    String id, {
+    bool thread = false,
+  }) async {
+    final storage = MessageHistoryPages.storage(w.cache),
+        scope = MessageHistoryPages.scope(
+          w,
+          id,
+          parent: thread ? w.threadParentChannelId : id,
+          parentMessage: thread ? w.threadParentMessageId : null,
+        );
+    if (storage == null ||
+        scope == null ||
+        !request.current ||
+        !w.cacheWritable) {
+      return null;
+    }
+    try {
+      final position = await storage.readPosition(scope);
+      if (position == null || !request.current) return null;
+      final initial = {
+        for (final row in w.ledger.messages(id)) row['id'] as String: row,
+      };
+      final local = await storage.readContext(scope, position.messageId);
+      if (local == null || !request.current || !w.cacheWritable) return null;
+      final target = (local['messages'] as List)
+          .whereType<Map>()
+          .where((row) => row['id'] == position.messageId)
+          .firstOrNull;
+      if (target == null) return null;
+      final key = w.messageKey(RaftMessage(Map<String, dynamic>.from(target)));
+      w.messageWindows.saveReadingAnchor(id, ReadingAnchor(key, position.top));
+      storage.reads.count(HistoryReadReason.local);
+      MessageHistoryVerification.tail(w, request, scope);
+      return MessageHistoryPages.savedContext(w, scope, local, initial);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<bool> restoreMain(
+    WorkspaceController w,
+    MessageWindowRequest request,
+    String id,
+  ) async {
+    final page = await restore(w, request, id);
+    if (page == null || !request.current) return false;
+    final rows = acceptedWindowRows(page['messages'], id);
+    w.hasMore = page['hasOlder'] == true;
+    w.hasNewer = page['hasNewer'] == true;
+    w.historyLimited = page['historyLimited'] == true;
+    w.messageWindows.rememberWindow(
+      request,
+      id,
+      page.scope.authority,
+      w.hasMore,
+      w.messageHistoryTicket(id) as String,
+      historyLimited: w.historyLimited,
+      rows: rows,
+      replace: true,
+    );
+    w.messageWindows.setContextMode(request, id, w.hasNewer);
+    w.messageWindows.setDiskOnly(request, id, true);
+    w.client.joinChannel(id);
+    w.channelLoading = false;
+    w.notifyListeners();
+    await MessageHistoryPages.record(w, request, page);
+    return true;
+  }
+
+  static Future<MessageHistoryPage?> restoreThread(
+    WorkspaceController w,
+    MessageWindowRequest request,
+    String id,
+    Map legacy,
+  ) async {
+    final page = await restore(w, request, id, thread: true);
+    if (page == null || !request.current) return null;
+    w.threadChannelId = id;
+    final parent = legacy['parent'];
+    if (w.threadParent == null &&
+        parent is Map &&
+        parent['id'] == w.threadParentMessageId &&
+        parent['channelId'] == w.threadParentChannelId) {
+      w.threadParent = RaftMessage(Map<String, dynamic>.from(parent));
+    }
+    final boundary = w.messageWindows.acceptThreadPage(
+      request,
+      id,
+      page,
+      focused: true,
+      retainOlder: false,
+      retainedHasMore: false,
+    );
+    w.threadHasMore = boundary.more;
+    w.threadHistoryLimited = boundary.limited;
+    w.threadLoading = false;
+    w.messageWindows.rememberWindow(
+      request,
+      id,
+      page.scope.authority,
+      boundary.more,
+      w.messageHistoryTicket(page.scope.parentChannel) as String,
+      historyLimited: boundary.limited,
+    );
+    w.messageWindows.setContextMode(request, id, page['hasNewer'] == true);
+    w.messageWindows.setDiskOnly(request, id, true);
+    w.notifyListeners();
+    return page;
+  }
+}

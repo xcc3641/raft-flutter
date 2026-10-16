@@ -14,6 +14,7 @@ void main() {
   setUp(() {
     calls.clear();
     opened.clear();
+    AppUpdater.requiredExitHook = null;
     native = (call) => switch (call.method) {
       'configure' => <String, Object?>{'available': true},
       'checkForUpdates' => true,
@@ -27,6 +28,7 @@ void main() {
   });
 
   tearDown(() {
+    AppUpdater.requiredExitHook = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(_channel, null);
   });
@@ -155,5 +157,52 @@ void main() {
   test('reports failure only when the browser fallback also fails', () async {
     final subject = updater(TargetPlatform.linux, opens: false);
     expect(await subject.checkAndInstall(), AppUpdateOutcome.failed);
+  });
+
+  void recordRequiredExit(AppUpdater subject, List<String> order) {
+    subject.performRequiredExit = () async {
+      order.add('exit');
+    };
+  }
+
+  test('beforeQuit finishes before the required exit', () async {
+    final subject = updater(TargetPlatform.linux);
+    final order = <String>[];
+    subject.beforeQuit = () async {
+      order.add('close');
+    };
+    recordRequiredExit(subject, order);
+    await subject.quitAfterHook();
+    expect(order, ['close', 'exit']);
+  });
+
+  test('a missing beforeQuit still requests the required exit', () async {
+    final subject = updater(TargetPlatform.linux);
+    final order = <String>[];
+    expect(subject.beforeQuit, isNull);
+    recordRequiredExit(subject, order);
+    await subject.quitAfterHook();
+    expect(order, ['exit']);
+  });
+
+  test('a throwing beforeQuit still requests the required exit', () async {
+    final subject = updater(TargetPlatform.linux);
+    final order = <String>[];
+    subject.beforeQuit = () async => throw StateError('close failed');
+    recordRequiredExit(subject, order);
+    await subject.quitAfterHook();
+    expect(order, ['exit']);
+  });
+
+  test('requiredExitHook runs when beforeQuit is unset', () async {
+    final subject = updater(TargetPlatform.linux);
+    final order = <String>[];
+    AppUpdater.requiredExitHook = () async {
+      order.add('close');
+    };
+    recordRequiredExit(subject, order);
+    await subject.quitAfterHook();
+    expect(subject.beforeQuit, isNull);
+    expect(order, ['close', 'exit']);
   });
 }

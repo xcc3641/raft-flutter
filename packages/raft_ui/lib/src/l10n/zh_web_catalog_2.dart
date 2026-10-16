@@ -223,13 +223,13 @@ const Map<String, String> zhCatalogWeb2 = <String, String>{
   "Canceling": "正在取消",
   "Canceling migration": "正在取消迁移",
   "Canceling…": "取消中…",
-  "Cancellation could not be requested. Status was refreshed; keep both computers online and try again.":
-      "无法提交取消请求。状态已刷新；请保持两台 Computer 在线后重试。",
-  "Cancellation is complete only after Raft confirms the terminal disposition. Keep both computers online until then.":
-      "只有 Raft 确认终态处置后，取消操作才算完成。在此之前请保持两台 Computer 在线。",
-  "Cancellation needs attention": "取消操作需要处理",
-  "Cancellation was requested before the computer switch. The agent remains on the source computer while cleanup is confirmed.":
-      "已在 Computer 切换前请求取消。确认清理完成前，Agent 仍保留在源 Computer 上。",
+  "Couldn't cancel the migration. The status has been refreshed. Keep both computers online and try again.":
+      "无法取消迁移。状态已刷新，请保持两台计算机在线后重试。",
+  "Canceling finishes only after both computers confirm. Keep both computers online until then.":
+      "两台计算机都确认后，取消才算完成。在此之前，请保持两台计算机在线。",
+  "Cancellation couldn't finish": "取消未能完成",
+  "The agent hasn't switched computers yet, so it stays on the original computer. Raft is cleaning up.":
+      "Agent 尚未切换到新计算机，会继续留在原计算机上。Raft 正在完成清理。",
   "Cannot Delete Computer": "无法删除计算机",
   "Cannot send chat as you, speak as the agent, read messages, or take actions.":
       "不能以你的身份发消息、以该 Agent 的身份发言、读取消息，或代你执行操作。",

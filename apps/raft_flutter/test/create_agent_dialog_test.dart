@@ -8,6 +8,7 @@ import 'package:raft_flutter/features/managed_agent_launcher.dart';
 import 'package:raft_ui/raft_ui.dart';
 
 import 'parity/cases/members_settings/runtime_forms.dart';
+import 'fixtures/long_model_form.dart';
 
 class _Client extends RaftClient {
   _Client()
@@ -23,6 +24,7 @@ class _Workspace extends WorkspaceController {
   List<String> runtimes = [];
   Map<String, dynamic>? billing;
   Object? claudeModels;
+  bool longOpenCodeModels = false;
   final posts = <Map<String, dynamic>>[];
   @override
   Future<dynamic> query(String path, {Map<String, dynamic>? query}) async {
@@ -30,6 +32,12 @@ class _Workspace extends WorkspaceController {
     if (path == '/billing/subscription' && billing != null) return billing;
     if (path.endsWith('/runtime-models/claude') && claudeModels != null) {
       return claudeModels;
+    }
+    if (longOpenCodeModels) {
+      if (path.endsWith('/runtime-forms/v2/opencode')) return longModelForm;
+      if (path.endsWith('/runtime-forms/v2/opencode/option-sources/model')) {
+        return longModelSource;
+      }
     }
     if (path.endsWith('/runtime-options') && runtimes.isNotEmpty) {
       return {
@@ -121,37 +129,38 @@ void main() {
     expect(find.text('COMPUTER'), findsNothing);
   });
 
-  testWidgets('capacity banner, invalid prefilled name and pre-admission model', (
-    t,
-  ) async {
-    w
-      ..machines = [_machine]
-      ..billing = {
-        'displayName': 'Free',
-        'capacity': {'maxAgents': 2, 'maxUniversalSeats': -1},
-        'usage': {'agents': 2, 'universalSeats': 0},
-      };
-    await open(t, name: 'bad name!!', description: 'Watches screens');
-    expect(
-      find.textContaining('Agent limit reached (2/2 on Free plan).'),
-      findsOneWidget,
-    );
-    expect(
-      find.text('Start with a letter, then letters, numbers, - or _'),
-      findsOneWidget,
-    );
-    expect(find.text('15/3000'), findsOneWidget);
-    // No runtime catalog: runtime unselected, declared Claude picker shown.
-    expect(find.text('Select…'), findsOneWidget);
-    expect(find.text('Claude Opus'), findsOneWidget);
-    expect(
-      find.textContaining('Could not load models from this Computer.'),
-      findsOneWidget,
-    );
-    await t.tap(find.text('Create Agent'));
-    await t.pump();
-    expect(w.posts, isEmpty);
-  });
+  testWidgets(
+    'capacity banner, invalid prefilled name and pre-admission model',
+    (t) async {
+      w
+        ..machines = [_machine]
+        ..billing = {
+          'displayName': 'Free',
+          'capacity': {'maxAgents': 2, 'maxUniversalSeats': -1},
+          'usage': {'agents': 2, 'universalSeats': 0},
+        };
+      await open(t, name: 'bad name!!', description: 'Watches screens');
+      expect(
+        find.textContaining('Agent limit reached (2/2 on Free plan).'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Start with a letter, then letters, numbers, - or _'),
+        findsOneWidget,
+      );
+      expect(find.text('15/3000'), findsOneWidget);
+      // No runtime catalog: runtime unselected, declared Claude picker shown.
+      expect(find.text('Select…'), findsOneWidget);
+      expect(find.text('Claude Opus'), findsOneWidget);
+      expect(
+        find.textContaining('Could not load models from this Computer.'),
+        findsOneWidget,
+      );
+      await t.tap(find.text('Create Agent'));
+      await t.pump();
+      expect(w.posts, isEmpty);
+    },
+  );
 
   testWidgets('a live model row without an id does not break the dialog', (
     t,
@@ -195,5 +204,48 @@ void main() {
     expect((data['formValues'] as Map)['model'], 'gpt-5');
     expect(await result, {'id': 'agent-new', 'name': 'Product-QA-Bot'});
     expect(find.text('CREATE AGENT'), findsNothing);
+  });
+
+  testWidgets('OpenCode creation scrolls to and submits the last live model', (
+    t,
+  ) async {
+    w
+      ..machines = [
+        {
+          ..._machine,
+          'runtimes': ['opencode'],
+        },
+      ]
+      ..runtimes = ['opencode'];
+    w.longOpenCodeModels = true;
+    final result = await open(t, name: 'Model-Scroll-Check');
+    await t.binding.setSurfaceSize(const Size(390, 720));
+    addTearDown(() => t.binding.setSurfaceSize(null));
+    await t.pumpAndSettle();
+    final trigger = find.byKey(const ValueKey('runtime-model'));
+    await t.ensureVisible(trigger);
+    await t.pumpAndSettle();
+    await t.tap(trigger);
+    await t.pumpAndSettle();
+    final popup = find.byType(RaftMenuPanel);
+    final list = find.ancestor(of: popup, matching: find.byType(Scrollable));
+    final last = find.descendant(
+      of: popup,
+      matching: find.text('Fixture Model 39'),
+    );
+    await t.scrollUntilVisible(
+      last,
+      200,
+      scrollable: list.first,
+      maxScrolls: 40,
+    );
+    await t.tap(last);
+    await t.pumpAndSettle();
+    expect(find.text('Fixture Model 39'), findsOneWidget);
+    await t.ensureVisible(find.text('Create Agent'));
+    await t.tap(find.text('Create Agent'));
+    await t.pumpAndSettle();
+    expect(w.posts.single['data']['formValues']['model'], 'fixture-model-39');
+    expect(await result, {'id': 'agent-new', 'name': 'Model-Scroll-Check'});
   });
 }

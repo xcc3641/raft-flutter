@@ -469,7 +469,7 @@ void main() {
     test('revalidation is rate limited per key and process', () async {
       final a = server.url('/api/external-avatars/a.webp');
       final b = server.url('/api/external-avatars/b.webp');
-      await process().load(a);
+      await seed(a);
       await seed(b);
       server.requests.clear();
 
@@ -531,7 +531,7 @@ void main() {
 
     test('requests carry no credentials and go through the proxy-aware '
         'client', () async {
-      await process().load(server.url('/api/external-avatars/a.webp'));
+      await seed(server.url('/api/external-avatars/a.webp'));
       expect(server.requests.single.credentials, isFalse);
 
       final proxied = <String>[];

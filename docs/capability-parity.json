@@ -136,11 +136,11 @@
    "status": "partial",
    "webEntry": "MessageItem handleOpenPermalink / handleOpenMessageRef / handleOpenForwardedSource / QuotedMessagePermalinkPreview onOpen | MainLayout loadContext | ThreadPanel jump | useRefNavigation",
    "gate": "read access to the target channel",
-   "flutterEntry": "workspace_controller.dart jumpToMessage / thread context loads; quoted_message_preview.dart; content_coordinator.dart permalink open",
+   "flutterEntry": "workspace_controller.dart jumpToMessage / thread context loads via message_history_pages.dart; quoted_message_preview.dart; content_coordinator.dart permalink open",
    "flutterRefs": [
     {
-     "file": "apps/raft_flutter/lib/data/workspace_controller.dart",
-     "needle": "'/messages/context/$messageId'"
+     "file": "apps/raft_flutter/lib/data/message_history_pages.dart",
+     "needle": "'/messages/context/$target'"
     },
     {
      "file": "apps/raft_flutter/lib/features/quoted_message_preview.dart",
@@ -5253,18 +5253,26 @@
    "status": "covered",
    "webEntry": "Profile > Actions > AgentMigrationSection button label ('Move to another computer' / 'Migration in progress' / 'Try migration again') + MigrationProgressPanel",
    "gate": "agent_migration_v0 flag",
-   "flutterEntry": "agent_migration_view.dart (reads on open, realtime listener)",
+   "flutterEntry": "agent_migration_view.dart (reads on open, realtime listener, polling) + agent_migration_panel.dart MigrationProgressPanel / MigrationInlineStatus on the agent detail",
    "flutterRefs": [
     {
      "file": "apps/raft_flutter/lib/features/agent_migration_view.dart",
      "needle": "$base/migration'"
     },
     {
-     "file": "apps/raft_flutter/lib/features/agent_migration_view.dart",
+     "file": "apps/raft_flutter/lib/features/agent_migration_panel.dart",
+     "needle": "class MigrationProgressPanel"
+    },
+    {
+     "file": "apps/raft_flutter/lib/features/agent_migration_panel.dart",
+     "needle": "class MigrationInlineStatus"
+    },
+    {
+     "file": "apps/raft_flutter/lib/features/agent_migration_presentation.dart",
      "needle": "Migration status"
     }
    ],
-   "justification": "Flutter shows migration status only inside the dedicated view, not as a status-aware label on the profile Actions button.",
+   "justification": "Flutter shows the progress panel (steps, cancel, failure details) in the dedicated view and the state header and notice inline on the agent detail (tap opens the view); the profile Actions button is disabled while a migration runs but is not a status-aware label.",
    "impact": "",
    "size": ""
   },

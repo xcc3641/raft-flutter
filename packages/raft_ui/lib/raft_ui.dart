@@ -42,6 +42,7 @@ export 'src/document_preview.dart';
 export 'src/preview_unavailable.dart';
 export 'src/markdown_blocks.dart' show raftSplitMarkdownBlocks;
 export 'src/html_preview.dart';
+export 'src/raft_selection_area.dart' show RaftSelectionArea;
 export 'src/thread_replies.dart';
 export 'src/add_members_dialog_view.dart';
 export 'src/context_menu_content.dart';
@@ -86,6 +87,7 @@ export 'src/tokens/tokens.dart';
 export 'src/attachment_gallery.dart';
 export 'src/attachment_lightbox.dart';
 export 'src/media_browser.dart';
+export 'src/preview_route.dart';
 export 'src/attachment_preview_shell.dart';
 export 'src/attachment_transfer.dart';
 

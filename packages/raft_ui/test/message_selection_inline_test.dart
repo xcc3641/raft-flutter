@@ -81,9 +81,8 @@ String? _selectedIn(WidgetTester tester, String snippet) {
   for (final p in _paragraphs(tester)) {
     final text = p.text.toPlainText();
     if (!text.contains(snippet)) continue;
-    return [
-      for (final s in p.selections) text.substring(s.start, s.end),
-    ].join('|');
+    return [for (final s in p.selections) text.substring(s.start, s.end)]
+        .join('|');
   }
   return null;
 }
@@ -206,6 +205,10 @@ void _testOn(
 ) => testWidgets(name, (tester) async {
   debugDefaultTargetPlatformOverride = platform;
   try {
+    // Each scenario must work when selected alone or shuffled before the
+    // mixed-message scenario. Ahem's metrics otherwise change link wrapping
+    // and the coordinates of the blank-space selection gesture.
+    await _loadFonts(tester);
     await body(tester);
   } finally {
     debugDefaultTargetPlatformOverride = null;
@@ -221,7 +224,6 @@ void main() {
       tester.view.physicalSize = const Size(800, 700);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
-      await _loadFonts(tester);
       await tester.pumpWidget(_host(_body(_mixed)));
       final (img, before) = await _frame(tester);
       final box = tester.getRect(find.byType(RaftMessageBody));

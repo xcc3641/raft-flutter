@@ -8,11 +8,43 @@
 // file system access (macOS sandbox safe).
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 
+import 'package:ffi/ffi.dart';
 import 'package:flutter_driver/flutter_driver.dart' show FlutterDriver;
 import 'package:integration_test/common.dart';
 import 'package:vm_service/vm_service.dart' hide Response;
+
+final class _Timespec extends Struct {
+  @Int64()
+  external int tvSec;
+
+  @Int64()
+  external int tvNsec;
+}
+
+final _clockGettime = DynamicLibrary.open('libc.so.6')
+    .lookupFunction<
+      Int32 Function(Int32 clockId, Pointer<_Timespec> tp),
+      int Function(int clockId, Pointer<_Timespec> tp)
+    >('clock_gettime');
+
+/// Linux CLOCK_MONOTONIC. The same timeline in every process on this host.
+int hostMonotonicNs() {
+  if (!Platform.isLinux) {
+    throw UnsupportedError('Host counter timing requires Linux.');
+  }
+  final tp = calloc<_Timespec>();
+  try {
+    if (_clockGettime(1, tp) != 0) {
+      throw StateError('clock_gettime(CLOCK_MONOTONIC) failed');
+    }
+    return tp.ref.tvSec * 1000000000 + tp.ref.tvNsec;
+  } finally {
+    calloc.free(tp);
+  }
+}
 
 const _encoder = JsonEncoder.withIndent(' ');
 
@@ -35,18 +67,21 @@ Future<void> main() async {
     if (gcActive && e.isolate?.id == isolateId) gcCount++;
   });
 
-  Future<void> ack(String token) => service.callServiceExtension('ext.raft.lab.ack', isolateId: isolateId, args: {'token': token});
+  bool? cpuProfiling;
+  Future<void> ack(String token) => service.callServiceExtension('ext.raft.lab.ack', isolateId: isolateId,
+    args: {'token': token, if (cpuProfiling != null) 'cpuProfiling': '$cpuProfiling'});
 
   Map<int, ({String comm, int ns})>? procAtStart;
   int? procPid;
   String? procStartError;
   _ProcRead? procAtEnd;
+  _ProcRead? procOpened;
   DateTime? procStartWall;
   DateTime? procEndWall;
   // One process launch is one batch. Rounds in that process share a cache,
   // so the independent sample is the batch, not the round. The host sets
   // the pair and order when it alternates an old launch with a new launch.
-  final launchBatch = Platform.environment['RAFT_LAB_BATCH'] ?? DateTime.now().toUtc().toIso8601String();
+  final launchBatch = Platform.environment['RAFT_LAB_BATCH'] ?? '${DateTime.now().toUtc().toIso8601String()}-$pid';
   final launchPair = Platform.environment['RAFT_LAB_PAIR'];
   final launchOrder = Platform.environment['RAFT_LAB_ORDER'];
   var launchRound = 0;
@@ -54,6 +89,45 @@ Future<void> main() async {
   var openWarmup = false;
   String? loadAtStart;
   String? loadAtEnd;
+  int? syncStartNs;
+  int? syncEndNs;
+  var samplerFailed = false;
+
+  /// Both launches report ready, then this returns so the ack can release
+  /// them together. No sync directory means a single launch, and it does not wait.
+  Future<void> waitForPeer(int round) async {
+    final dir = Platform.environment['RAFT_LAB_SYNC_DIR'];
+    if (dir == null || dir.isEmpty) return;
+    if (!Platform.isLinux || _androidDevice() || launchPair == null || !const {'old', 'new'}.contains(launchOrder)) {
+      throw StateError('Concurrent sampling requires Linux, a pair ID and an old/new side.');
+    }
+    final root = Directory('$dir/$launchPair/round-$round')..createSync(recursive: true);
+    final own = File('${root.path}/ready-$launchOrder');
+    if (own.existsSync()) throw StateError('Round $round already has this side; use a new pair directory.');
+    final pending = File('${own.path}.pending-$pid');
+    pending.writeAsStringSync(jsonEncode({'batch': launchBatch, 'round': round, 'pair': launchPair, 'order': launchOrder}), flush: true);
+    pending.renameSync(own.path);
+    // The app stops waiting for this ack after 60 seconds and would start alone.
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    while (true) {
+      final ready = root.listSync().whereType<File>().map((file) => file.uri.pathSegments.last).toSet();
+      if (ready.contains('ready-old') && ready.contains('ready-new')) {
+        final peer = jsonDecode(File('${root.path}/ready-${launchOrder == 'old' ? 'new' : 'old'}').readAsStringSync()) as Map;
+        if (peer['round'] != round || peer['pair'] != launchPair || peer['batch'] == launchBatch ||
+            peer['order'] != (launchOrder == 'old' ? 'new' : 'old')) {
+          throw StateError('Peer identity does not match this independent launch pair.');
+        }
+        File('${out.path}/barrier-rounds.jsonl').writeAsStringSync('${jsonEncode({
+          'batch': launchBatch, 'peerBatch': peer['batch'], 'round': round,
+        })}\n', mode: FileMode.append);
+        return;
+      }
+      if (DateTime.now().isAfter(deadline)) {
+        throw StateError('Sync barrier timed out for pair $launchPair round $round.');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+  }
 
   Future<void> handle(Map<String, dynamic> data) async {
     final kind = data['kind'] as String;
@@ -66,10 +140,17 @@ Future<void> main() async {
         // Microtask streams would overflow the ring buffer within seconds.
         final recorded = trace ? ['Embedder', 'GC'] : <String>[];
         await service.setVMTimelineFlags(recorded);
+        if (Platform.environment['RAFT_LAB_DETECT'] == 'true') {
+          await service.setFlag('profiler', '$trace');
+          final observed = (await service.getFlagList()).flags!.firstWhere((flag) => flag.name == 'profiler').valueAsString;
+          if (observed != '$trace') throw StateError('CPU profiler state could not be verified.');
+          cpuProfiling = observed == 'true';
+        }
         File('${out.path}/lab-hello.json').writeAsStringSync(_encoder.convert({
           ...data,
           'timelineStreamsBefore': streams,
           'timelineStreams': recorded,
+          'cpuProfiling': cpuProfiling,
           'vmFlags': {
             for (final f in flags)
               if (const {'profile_period', 'max_profile_depth', 'profiler', 'timeline_recorder', 'timeline_streams'}.contains(f.name)) f.name: f.valueAsString,
@@ -81,25 +162,37 @@ Future<void> main() async {
         openWarmup = data['warmup'] == true;
         loadAtStart = _loadAvg();
         loadAtEnd = null;
-        await service.clearCpuSamples(isolateId);
+        if (cpuProfiling != false) await service.clearCpuSamples(isolateId);
         if (trace) await service.clearVMTimeline();
         gcCount = 0;
         gcActive = true;
-        final opened = await _readProcThreads(service);
+        procAtEnd = null;
+        procEndWall = null;
+        syncEndNs = null;
+        // Resolve the pid before the barrier so the wait stays outside the
+        // counter window and the snapshot itself is only file reads.
+        final localLinux = Platform.isLinux && !_androidDevice();
+        final linuxPid = localLinux ? (await service.getVM()).pid : null;
+        await waitForPeer(openRound!);
+        final opened = localLinux ? _readLocalSchedstat(linuxPid) : await _readProcThreads(service);
+        procOpened = opened;
+        syncStartNs = opened.sampleNs;
+        procStartWall = DateTime.now();
         procPid = opened.pid;
         procAtStart = opened.threads;
         procStartError = opened.error;
-        procAtEnd = null;
-        procEndWall = null;
-        procStartWall = DateTime.now();
       case 'cpu':
         // Scene clock has stopped and timeline collection has not started.
-        procAtEnd = await _readProcThreads(service);
+        // The end stamp is the counter sample, not an earlier event time.
+        final endSample = Platform.isLinux && !_androidDevice() ? _readLocalSchedstat(procPid) : await _readProcThreads(service);
+        syncEndNs = endSample.sampleNs;
+        procAtEnd = endSample;
         procEndWall = DateTime.now();
         loadAtEnd = _loadAvg();
       case 'end':
         gcActive = false;
-        final attribution = await attribute(service, isolateId, data, root: root, trace: trace);
+        final attribution = await attribute(service, isolateId, data, root: root, trace: trace,
+          tracePath: Platform.environment['RAFT_LAB_DETECT'] == 'true' && trace ? '${out.path}/$label.trace.json' : null);
         attribution['gcCount'] = gcCount;
         final endRead = procAtEnd ?? await _readProcThreads(service);
         attribution['procThreadCpu'] = _procSceneCpu(
@@ -107,6 +200,7 @@ Future<void> main() async {
           startPid: procPid,
           startError: procStartError,
           end: endRead,
+          opened: procOpened,
           window: procAtEnd == null ? 'scenario-start-to-sampler-end' : 'scenario-clock',
           windowMs: procStartWall == null || procEndWall == null ? null : procEndWall!.difference(procStartWall!).inMilliseconds,
         );
@@ -119,15 +213,31 @@ Future<void> main() async {
           proc['round'] = openRound;
           proc['warmup'] = openWarmup;
           proc['fixtureReset'] = false;
+          proc['theme'] = data['theme'];
+          proc['scenario'] = data['scenario'];
           if (launchPair != null) proc['pair'] = launchPair;
           if (launchOrder != null) proc['order'] = launchOrder;
           if (loadAtStart != null) proc['load'] = loadAtStart;
           if (loadAtEnd != null) proc['loadEnd'] = loadAtEnd;
+          if (syncStartNs != null) proc['syncStartNs'] = syncStartNs;
+          if (syncEndNs != null) proc['syncEndNs'] = syncEndNs;
+          if (syncStartNs != null && syncEndNs != null) proc['syncTimedBy'] = 'counter-sample';
           File('${out.path}/proc-rounds.jsonl').writeAsStringSync('${jsonEncode(proc)}\n', mode: FileMode.append);
         }
       case 'result':
         final record = jsonDecode(data['record'] as String) as Map<String, dynamic>;
         File('${out.path}/${record['theme']}-${record['scenario']}.json').writeAsStringSync(jsonEncode(record));
+        if (record['detection'] != null && record['frameworkBlocks'] is List) {
+          File('${out.path}/${record['theme']}-${record['scenario']}.framework-trace.json').writeAsStringSync(jsonEncode({
+            'traceEvents': [for (final raw in record['frameworkBlocks'] as List) {...raw as Map, 'pid': 1, 'tid': 1}],
+            'displayTimeUnit': 'ms', 'instrumented': true,
+          }));
+        }
+        // Keep every round's Flutter frames. The legacy per-scenario file is
+        // still written for summarize/compare, which keep their old meaning.
+        File('${out.path}/frame-rounds.jsonl').writeAsStringSync('${jsonEncode({
+          'batch': launchBatch, 'round': openRound, 'warmup': openWarmup, 'record': record,
+        })}\n', mode: FileMode.append);
         _appendKeyboardCounts(out, record, batch: launchBatch, round: openRound, warmup: openWarmup);
       case 'note':
         final notes = File('${out.path}/lab-notes.jsonl');
@@ -143,6 +253,7 @@ Future<void> main() async {
     if (e.extensionKind != 'raft.lab') return;
     final data = Map<String, dynamic>.from(e.extensionData!.data);
     queue = queue.then((_) => handle(data)).catchError((Object error, StackTrace stack) {
+      samplerFailed = true;
       stderr.writeln('perf lab sampler error on ${data['kind']}: $error\n$stack');
       File('${out.path}/lab-sampler-errors.txt').writeAsStringSync('${data['kind']}: $error\n$stack\n', mode: FileMode.append);
       return ack(data['token'] as String);
@@ -154,7 +265,7 @@ Future<void> main() async {
   File('${out.path}/driver-result.json').writeAsStringSync(raw);
   final response = Response.fromJson(raw);
   await driver.close();
-  if (response.allTestsPassed) {
+  if (response.allTestsPassed && !(samplerFailed && Platform.environment['RAFT_LAB_SYNC_DIR'] != null)) {
     stdout.writeln('All tests passed.');
     exit(0);
   }
@@ -167,14 +278,20 @@ List<Map<String, Object>> _top(Map<String, num> m, int n) => (m.entries.toList()
     .map((e) => {'name': e.key, 'value': e.value is double ? (e.value as double).round() : e.value})
     .toList();
 
-Future<Map<String, Object?>> attribute(VmService service, String isolateId, Map<String, dynamic> data, {required String root, required bool trace}) async {
+Future<Map<String, Object?>> attribute(VmService service, String isolateId, Map<String, dynamic> data, {required String root, required bool trace, String? tracePath}) async {
   final start = data['startUs'] as int, end = data['endUs'] as int;
   final uiWindows = [for (final w in data['uiWindows'] as List) [(w as List)[0] as int, w[1] as int]];
   final rasterWindows = [for (final w in data['rasterWindows'] as List) [(w as List)[0] as int, w[1] as int]];
   final result = <String, Object?>{'theme': data['theme'], 'scenario': data['scenario'], 'startUs': start, 'endUs': end};
+  if (!trace && Platform.environment['RAFT_LAB_DETECT'] == 'true') {
+    return {...result, 'cpuSamplesCollected': false, 'timelineCollected': false};
+  }
 
   // UI thread: Dart CPU samples of the main isolate.
   final cpu = await service.getCpuSamples(isolateId, start, end - start);
+  if (tracePath != null) {
+    File(tracePath.replaceFirst('.trace.json', '.cpu-samples.json')).writeAsStringSync(jsonEncode(cpu.toJson()));
+  }
   final functions = cpu.functions ?? const <ProfileFunction>[];
   final names = List<String?>.filled(functions.length, null);
   String name(int i) => names[i] ??= () {
@@ -285,6 +402,9 @@ Future<Map<String, Object?>> attribute(VmService service, String isolateId, Map<
   // Raster thread and GC: VM timeline (engine Embedder + GC streams).
   final timeline = await service.getVMTimeline(timeOriginMicros: start, timeExtentMicros: end - start);
   final events = [for (final e in timeline.traceEvents ?? const <TimelineEvent>[]) e.json!];
+  if (tracePath != null) {
+    File(tracePath).writeAsStringSync(jsonEncode({'traceEvents': events, 'displayTimeUnit': 'ms', 'instrumented': true}));
+  }
   final threads = <Object, String>{};
   for (final e in events) {
     if (e['ph'] == 'M' && e['name'] == 'thread_name') threads[e['tid']] = '${(e['args'] as Map?)?['name']}';
@@ -406,10 +526,104 @@ const _desktopDevices = {'linux', 'macos', 'windows', 'chrome', 'edge', 'web-ser
 
 /// utime+stime for one thread, from `/proc/<pid>/task/<tid>/stat`.
 class _ProcRead {
-  const _ProcRead({this.pid, this.threads = const {}, this.error});
+  const _ProcRead({
+    this.pid,
+    this.threads = const {},
+    this.error,
+    this.sampleNs,
+    this.reads = const {},
+    this.processStartTicks,
+    this.executable,
+    this.mappedAot = const [],
+  });
   final int? pid;
   final Map<int, ({String comm, int ns})> threads;
   final String? error;
+  final int? sampleNs;
+  final Map<int, Map<String, Object?>> reads;
+  final int? processStartTicks;
+  final String? executable;
+  final List<String> mappedAot;
+}
+
+int _startTicks(String path) {
+  final stat = File('$path/stat').readAsStringSync();
+  return int.parse(
+    stat.substring(stat.lastIndexOf(')') + 2).split(RegExp(r'\s+'))[19],
+  );
+}
+
+List<int> _allowedCpus(String path) {
+  final text = File('$path/status').readAsStringSync();
+  final value = RegExp(
+    r'^Cpus_allowed_list:\s*(.+)$',
+    multiLine: true,
+  ).firstMatch(text)!.group(1)!;
+  final cpus = <int>{};
+  for (final part in value.trim().split(',')) {
+    final limits = part.split('-').map(int.parse).toList();
+    for (var i = limits.first; i <= limits.last; i++) {
+      cpus.add(i);
+    }
+  }
+  return cpus.toList()..sort();
+}
+
+/// Bracket each actual counter read, and read the same TID's affinity and
+/// start time. A process-level affinity snapshot cannot prove either role.
+_ProcRead _readLocalSchedstat(int? pid) {
+  if (pid == null) return const _ProcRead(error: 'vm pid missing');
+  try {
+    final root = Directory('/proc/$pid/task');
+    if (!root.existsSync()) {
+      return _ProcRead(pid: pid, error: '/proc/$pid/task missing');
+    }
+    final entries = root.listSync();
+    // After the directory listing, so this stamp sits on the schedstat reads.
+    final sampleNs = hostMonotonicNs();
+    final threads = <int, ({String comm, int ns})>{};
+    final reads = <int, Map<String, Object?>>{};
+    for (final entry in entries) {
+      final tid = int.tryParse(
+        entry.uri.pathSegments.where((s) => s.isNotEmpty).last,
+      );
+      if (tid == null) continue;
+      final schedFile = File('${entry.path}/schedstat');
+      final commFile = File('${entry.path}/comm');
+      if (!schedFile.existsSync() || !commFile.existsSync()) continue;
+      final comm = commFile.readAsStringSync().trim();
+      final cpus = _allowedCpus(entry.path);
+      final startTicks = _startTicks(entry.path);
+      final before = hostMonotonicNs();
+      final raw = schedFile.readAsStringSync();
+      final after = hostMonotonicNs();
+      final ns = int.tryParse(raw.trim().split(RegExp(r'\s+')).first);
+      if (ns == null) continue;
+      threads[tid] = (comm: comm, ns: ns);
+      reads[tid] = {
+        'beforeNs': before,
+        'afterNs': after,
+        'cpus': cpus,
+        'startTicks': startTicks,
+      };
+    }
+    return _ProcRead(
+      pid: pid,
+      threads: threads,
+      sampleNs: sampleNs,
+      reads: reads,
+      processStartTicks: _startTicks('/proc/$pid'),
+      executable: File('/proc/$pid/exe').resolveSymbolicLinksSync(),
+      mappedAot: File('/proc/$pid/maps')
+          .readAsLinesSync()
+          .where((line) => line.contains('/lib/libapp.so'))
+          .map((line) => line.substring(line.indexOf('/')))
+          .toSet()
+          .toList(),
+    );
+  } catch (error) {
+    return _ProcRead(pid: pid, error: '$error');
+  }
 }
 
 bool _androidDevice() {
@@ -429,28 +643,69 @@ Map<String, Object?> _procSceneCpu({
   required int? startPid,
   required String? startError,
   required _ProcRead end,
+  _ProcRead? opened,
   required String window,
   required int? windowMs,
 }) {
   if (startError != null || startThreads == null || startPid == null) {
-    return {'source': 'proc-schedstat', 'collected': false, 'error': startError ?? 'no start snapshot'};
+    return {
+      'source': 'proc-schedstat',
+      'collected': false,
+      'error': startError ?? 'no start snapshot',
+    };
   }
   if (end.error != null || end.threads.isEmpty || end.pid == null) {
-    return {'source': 'proc-schedstat', 'collected': false, 'error': end.error ?? 'no end snapshot'};
+    return {
+      'source': 'proc-schedstat',
+      'collected': false,
+      'error': end.error ?? 'no end snapshot',
+    };
   }
-  Map<String, Object?> role(bool Function(String comm) match, {required bool mainThreadFallback}) {
-    final named = [for (final entry in end.threads.entries) if (match(entry.value.comm) && startThreads.containsKey(entry.key)) entry.key];
-    if (named.isEmpty && mainThreadFallback && startThreads.containsKey(end.pid) && end.threads.containsKey(end.pid)) {
-      return _procDelta(startThreads, end.threads, [end.pid!], 'main-thread');
+  if (opened?.processStartTicks != null &&
+      (opened!.pid != end.pid ||
+          opened.processStartTicks != end.processStartTicks ||
+          opened.executable != end.executable)) {
+    return {
+      'source': 'proc-schedstat',
+      'collected': false,
+      'error': 'process identity changed',
+    };
+  }
+  Map<String, Object?> role(
+    bool Function(String comm) match, {
+    required bool mainThreadFallback,
+  }) {
+    var named = [
+      for (final entry in end.threads.entries)
+        if (match(entry.value.comm) && startThreads.containsKey(entry.key))
+          entry.key,
+    ];
+    var matchedBy = 'name';
+    if (named.isEmpty &&
+        mainThreadFallback &&
+        startThreads.containsKey(end.pid) &&
+        end.threads.containsKey(end.pid)) {
+      named = [end.pid!];
+      matchedBy = 'main-thread';
     }
     if (named.isEmpty) return {'missing': true};
-    return _procDelta(startThreads, end.threads, named, 'name');
+    return {
+      ..._procDelta(startThreads, end.threads, named, matchedBy),
+      if (named.length == 1 && opened?.reads[named.single] != null)
+        'start': opened!.reads[named.single],
+      if (named.length == 1 && end.reads[named.single] != null)
+        'end': end.reads[named.single],
+    };
   }
 
   return {
     'source': 'proc-schedstat',
     'collected': true,
     'pid': end.pid,
+    if (end.processStartTicks != null)
+      'processStartTicks': end.processStartTicks,
+    if (end.executable != null) 'executable': end.executable,
+    if (end.mappedAot.isNotEmpty) 'mappedAot': end.mappedAot,
     'window': window,
     'windowMs': ?windowMs,
     'ui': role(_commIsUi, mainThreadFallback: true),

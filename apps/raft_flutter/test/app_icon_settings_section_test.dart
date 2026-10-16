@@ -7,6 +7,8 @@ import 'package:raft_flutter/platform/app_icon.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:raft_ui/test_themes.dart';
 
+import 'package:raft_flutter/features/mobile_settings_owner.dart';
+
 import 'workspace_shell_contract_test.dart' show mountShell, retire;
 import 'workspace_source_location_contract_test.dart' show pageFixture, frames;
 
@@ -33,6 +35,10 @@ Future<void> settleUntil(
 
 void main() {
   const channel = MethodChannel('flutter_dynamic_icon_plus');
+  for (final direct in [false, true]) {
+    group(direct ? 'direct settings' : 'current settings', () {
+      setUp(() => MobileSettingsPreference.instance.setEnabled(direct));
+      tearDown(MobileSettingsPreference.instance.resetForTest);
   for (final (family, dark) in raftThemeMatrix([
     (RaftFamily.brutal, false),
     (RaftFamily.elegant, false),
@@ -119,5 +125,7 @@ void main() {
         TargetPlatform.iOS,
       }),
     );
+  }
+    });
   }
 }

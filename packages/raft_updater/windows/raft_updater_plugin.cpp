@@ -4,6 +4,7 @@
 // against the public key supplied by Dart, asks the app to shut down through
 // the callback below and then runs the installer. See docs/auto-update.md.
 #include "include/raft_updater/raft_updater_plugin.h"
+#include "include/raft_updater/window_lifetime.h"
 
 #include <windows.h>
 
@@ -53,10 +54,10 @@ EncodableValue Result(bool available, const std::string& reason = "") {
 int __cdecl CanShutdown() { return 1; }
 
 void __cdecl ShutdownRequested() {
-  // Close the app like the user would; the installer then replaces the files.
+  // Explicit exit, distinct from a user's close-to-tray preference.
   HWND window = g_main_window.load();
   if (window != nullptr) {
-    PostMessage(GetAncestor(window, GA_ROOT), WM_CLOSE, 0, 0);
+    RequestRaftQuit(GetAncestor(window, GA_ROOT));
   }
 }
 

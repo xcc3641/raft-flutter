@@ -65,35 +65,12 @@ void main() {
     test('cancel copy depends on staleness and appends a safe code', () {
       expect(
         migrationCancelErrorText(_api(409, code: 'MIGRATION_REVISION_STALE')),
-        startsWith('The migration changed before cancellation was submitted.'),
+        startsWith('The migration moved on before your request went through.'),
       );
       expect(
         migrationCancelErrorText(_api(500, code: 'MIGRATION_CANCEL_FAILED')),
         endsWith('(MIGRATION_CANCEL_FAILED)'),
       );
-    });
-
-    test('failed and aborted migrations use code and reason copy', () {
-      expect(
-        migrationFailureText({
-          'state': 'failed',
-          'transportErrorCode': 'MIGRATION_TARGET_IMPORT_ARRIVED_FAILED:503',
-          'failureReason': 'MIGRATION_TRANSPORT_LOST',
-        }),
-        startsWith('The connection between the two computers dropped'),
-      );
-      expect(
-        migrationFailureText({'state': 'failed', 'failureReason': 'weird'}),
-        'Something went wrong during the transfer. Try again.',
-      );
-      expect(
-        migrationFailureText({
-          'state': 'aborted',
-          'abortReason': 'prep-deadline',
-        }),
-        startsWith('Preparing the workspace on the source computer'),
-      );
-      expect(migrationFailureText({'state': 'in_transit'}), isNull);
     });
   });
 

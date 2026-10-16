@@ -8,8 +8,9 @@ import '../data/activity_attention.dart';
 import '../data/source_activity_unread_store.dart';
 import '../data/source_server_unread.dart';
 import '../data/workspace_controller.dart';
+import 'windows_tray.dart';
 
-/// The app icon badge: the macOS Dock tile and the iOS home screen icon. One
+/// The app icon badge: macOS Dock, iOS home screen and Windows tray. One
 /// app-wide Activity count ([activityBadgeTotal]): the selected server's shared
 /// inbox replaces its summary count; channel/thread counters are never added a
 /// second time. It is the number the in-app Activity badge shows (summed over
@@ -27,8 +28,13 @@ class MacOSDockUnread {
            const {
              TargetPlatform.macOS,
              TargetPlatform.iOS,
+             TargetPlatform.windows,
            }.contains(platform ?? defaultTargetPlatform),
-       _write = write ?? _writeNative;
+       _write =
+           write ??
+           ((platform ?? defaultTargetPlatform) == TargetPlatform.windows
+               ? WindowsTray.writeUnread
+               : _writeNative);
 
   static Future<void> _writeNative(int count) =>
       AppBadgePlus.updateBadge(count);
@@ -78,9 +84,8 @@ class MacOSDockUnread {
           onResponse: (response, handler) {
             final request = response.requestOptions;
             if (request.method == 'POST' &&
-                (RegExp(
-                      r'^/channels/[^/]+/read(?:-all)?$',
-                    ).hasMatch(request.path) ||
+                (RegExp(r'^/channels/[^/]+/read(?:-all)?$')
+                        .hasMatch(request.path) ||
                     request.path == '/channels/inbox/read-all')) {
               _scheduleRefresh();
             }

@@ -21,7 +21,9 @@ class MessageLedger {
   final Map<String, Map<String, Map<String, dynamic>>> _channels = {};
   final Map<String, List<Map<String, dynamic>>> _sorted = {};
   final Map<String, DateTime?> _latestCreatedAt = {};
+  final _releasedLatest = <String, (String, DateTime)>{};
   String? get serverId => _serverId;
+  Iterable<String> get channelIds => List.unmodifiable(_channels.keys);
   void switchServer(String? id) {
     if (_serverId == id) return;
     _serverId = id;
@@ -31,6 +33,7 @@ class MessageLedger {
     _channels.clear();
     _sorted.clear();
     _latestCreatedAt.clear();
+    _releasedLatest.clear();
   }
 
   List<Map<String, dynamic>> messages(String channelId) {
@@ -57,12 +60,12 @@ class MessageLedger {
   /// (including null) are reused until this channel changes, so responsive
   /// rebuilds do not repeatedly copy, sort and parse the held history.
   DateTime? latestCreatedAt(String channelId) {
-    final messages = _channels[channelId];
-    if (messages == null) return null;
     if (_latestCreatedAt.containsKey(channelId)) {
       return _latestCreatedAt[channelId];
     }
-    DateTime? latest;
+    final messages = _channels[channelId];
+    if (messages == null) return null;
+    DateTime? latest = _releasedLatest[channelId]?.$2;
     for (final message in messages.values) {
       final stamp = DateTime.tryParse('${message['createdAt'] ?? ''}');
       if (stamp != null && (latest == null || stamp.isAfter(latest))) {
@@ -128,11 +131,35 @@ class MessageLedger {
 
   void remove(String channelId, String messageId) {
     _channels[channelId]?.remove(messageId);
+    if (_releasedLatest[channelId]?.$1 == messageId) {
+      _releasedLatest.remove(channelId);
+    }
     _changed(channelId);
+  }
+
+  /// Drops reconstructable bodies without moving the receiver's generation,
+  /// sequence watermark or last known channel timestamp.
+  void releaseBodies(String channelId, Set<String> ids) {
+    final rows = _channels[channelId];
+    if (rows == null || !ids.any(rows.containsKey)) return;
+    for (final id in ids) {
+      final stamp = DateTime.tryParse('${rows[id]?['createdAt'] ?? ''}');
+      if (stamp != null &&
+          (_releasedLatest[channelId] == null ||
+              stamp.isAfter(_releasedLatest[channelId]!.$2))) {
+        _releasedLatest[channelId] = (id, stamp);
+      }
+    }
+    latestCreatedAt(channelId);
+    rows.removeWhere((id, _) => ids.contains(id));
+    if (rows.isEmpty) _channels.remove(channelId);
+    _sorted.remove(channelId);
+    revision++;
   }
 
   void revokeChannel(String id) {
     _channels.remove(id);
+    _releasedLatest.remove(id);
     _changed(id);
   }
 }

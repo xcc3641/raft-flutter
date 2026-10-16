@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_client/raft_client.dart';
 import 'package:raft_flutter/data/workspace_controller.dart';
 import 'package:raft_flutter/features/chat_view.dart';
+import 'package:raft_flutter/features/message_timeline.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -251,6 +252,118 @@ void main() {
     );
   }
 
+  for (final socketFirst in [false, true]) {
+    testWidgets('out-of-order confirmations paint server sequence '
+        '(${socketFirst ? 'socket before HTTP' : 'HTTP before socket'})', (
+      t,
+    ) async {
+      final (w, api, client) = (await t.runAsync(_fixture))!;
+      addTearDown(w.dispose);
+      final requests = <RequestOptions>[];
+      final replies = <Completer<(int, dynamic)>>[];
+      api.routes['POST /v2/messages'] = (request) {
+        requests.add(request);
+        final reply = Completer<(int, dynamic)>();
+        replies.add(reply);
+        return reply.future;
+      };
+      await _mount(t, w);
+      try {
+        for (final text in ['Slow A', 'Failed B', 'Fast C']) {
+          await t.enterText(_editor(), text);
+          await t.pump();
+          await _tapSend(t);
+          await t.pump();
+        }
+        await _frames(t, () => requests.length == 3);
+        expect(requests.map((r) => r.data['content']), [
+          'Slow A',
+          'Failed B',
+          'Fast C',
+        ]);
+        final pending = {
+          for (final row in w.timeline())
+            if (WorkspaceController.isPendingSend(row)) row.content: row,
+        };
+        final aKey = w.messageKey(pending['Slow A']!);
+        final cKey = w.messageKey(pending['Fast C']!);
+        final aElement = t.element(find.byKey(ValueKey('message-$aKey')));
+        final cElement = t.element(find.byKey(ValueKey('message-$cKey')));
+        await t.enterText(_editor(), 'Later draft');
+        replies[1].complete((503, {'error': 'Fixture offline'}));
+        await _frames(
+          t,
+          () => w.timeline().every((row) => row.content != 'Failed B'),
+        );
+
+        Future<void> accept(int index, String id, int seq) async {
+          final row = {..._accepted(requests[index], id), 'seq': '$seq'};
+          // The fixture client lives in runAsync. Deliver both transport
+          // callbacks there before the fake-time UI frames consume them.
+          Future<void> deliver(VoidCallback callback) async {
+            await t.runAsync(() async {
+              callback();
+              await Future<void>.delayed(Duration.zero);
+            });
+          }
+
+          if (socketFirst) {
+            await deliver(() => client.event('message:new', row));
+            await _frames(t, () => w.messages.any((m) => m.id == id));
+          }
+          await deliver(() => replies[index].complete((200, {'message': row})));
+          await _frames(t, () => w.messages.any((m) => m.id == id));
+          if (!socketFirst) {
+            await deliver(() => client.event('message:new', row));
+            await _frames(t, () => true);
+          }
+        }
+
+        await accept(2, 'accepted-c', 4);
+        await accept(0, 'accepted-a', 5);
+        await _frames(
+          t,
+          () => t
+              .widget<RaftMessageTimeline>(find.byType(RaftMessageTimeline))
+              .messages
+              .any((m) => m.metadata?['id'] == 'accepted-a'),
+        );
+        expect(w.timeline().map((row) => row.content), [
+          'Earlier 1',
+          'Earlier 2',
+          'Earlier 3',
+          'Fast C',
+          'Slow A',
+        ]);
+        final aRect = paintedMessage(t, aKey);
+        final cRect = paintedMessage(t, cKey);
+        expect(aRect, isNotNull);
+        expect(cRect, isNotNull);
+        expect(
+          cRect!.top,
+          lessThan(aRect!.top),
+          reason: 'Confirmed rows must paint in server sequence order.',
+        );
+        expect(
+          t.element(find.byKey(ValueKey('message-$aKey'))),
+          same(aElement),
+        );
+        expect(
+          t.element(find.byKey(ValueKey('message-$cKey'))),
+          same(cElement),
+        );
+        expect(
+          t.widget<TextField>(_editor()).controller!.text,
+          'Failed B\nLater draft',
+        );
+        expect(t.takeException(), isNull);
+      } finally {
+        await t.pumpWidget(const SizedBox());
+        await t.pump(const Duration(seconds: 1));
+      }
+    });
+  }
+
   testWidgets(
     'a failed send removes its row and restores the draft; retry reuses the identity',
     (t) async {
@@ -291,6 +404,43 @@ void main() {
       expect(w.timeline().map((m) => m.id), ['m1', 'm2', 'm3', 'sent-2']);
       expect(paintedMessage(t, w.messageKey(pending)), isNotNull);
       expect(t.widget<TextField>(_editor()).controller!.text, isEmpty);
+      expect(t.takeException(), isNull);
+      await t.pumpWidget(const SizedBox());
+      await t.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets(
+    'failure preserves the newer IME composition and restores the failed text once',
+    (t) async {
+      final (w, api, _) = (await t.runAsync(_fixture))!;
+      addTearDown(w.dispose);
+      final ack = Completer<(int, dynamic)>();
+      api.routes['POST /v2/messages'] = (_) => ack.future;
+      await _mount(t, w);
+      await t.enterText(_editor(), 'Failed draft');
+      await t.pump();
+      await _tapSend(t);
+      await t.pump();
+      await t.tap(_editor());
+      const composing = TextEditingValue(
+        text: 'ni',
+        selection: TextSelection.collapsed(offset: 2),
+        composing: TextRange(start: 0, end: 2),
+      );
+      t.testTextInput.updateEditingValue(composing);
+      await t.pump();
+      ack.complete((503, {'error': 'Fixture offline'}));
+      await _frames(t, () => w.error != null);
+      final controller = t.widget<TextField>(_editor()).controller!;
+      expect(controller.value, composing);
+      t.testTextInput.updateEditingValue(const TextEditingValue(
+        text: '你', selection: TextSelection.collapsed(offset: 1),
+      ));
+      await t.pump();
+      await t.pump();
+      expect(controller.text, 'Failed draft\n你');
+      expect(w.drafts['c1'], 'Failed draft\n你');
       expect(t.takeException(), isNull);
       await t.pumpWidget(const SizedBox());
       await t.pump(const Duration(seconds: 1));
@@ -456,7 +606,13 @@ void main() {
       }
 
       await _frames(t, () => request != null, unchanged);
-      ack.complete((200, {'message': _accepted(request!, 'sent-4')}));
+      ack.complete((
+        200,
+        {
+          // This case confirms at the latest end, after history through 69.
+          'message': {..._accepted(request!, 'sent-4'), 'seq': '70'},
+        },
+      ));
       await _frames(
         t,
         () => w.messages.any((m) => m.id == 'sent-4'),

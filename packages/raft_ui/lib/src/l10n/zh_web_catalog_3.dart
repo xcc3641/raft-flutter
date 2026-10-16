@@ -53,7 +53,7 @@ const Map<String, String> zhCatalogWeb3 = <String, String>{
   "Copy install command": "复制安装命令",
   "Copy invite link": "复制邀请链接",
   "Copy link": "复制链接",
-  "Copy migration reference": "复制迁移编号",
+  "Copy migration ID": "复制迁移编号",
   "Copy path": "复制路径",
   "Copy report reference": "复制报告引用",
   "Copy restart after fresh install command": "复制全新安装后的重启命令",

@@ -14,6 +14,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_flutter/features/chat_view.dart';
+import 'package:raft_flutter/features/message_timeline.dart';
 
 /// Framework phases emitted by the pipeline in profile mode.
 const phaseNames = {
@@ -106,6 +107,7 @@ class LabSampler {
       return;
     }
     developer.registerExtension('ext.raft.lab.ack', (method, args) async {
+      if (args['cpuProfiling'] case final value?) cpuSamplingEnabled = value == 'true';
       _pending.remove(args['token'])?.complete(args['note'] ?? '');
       return developer.ServiceExtensionResponse.result('{}');
     });
@@ -113,6 +115,7 @@ class LabSampler {
   final _pending = <String, Completer<String>>{};
   var _token = 0;
   var attached = false;
+  bool? cpuSamplingEnabled;
 
   /// `RAFT_LAB_STANDALONE_OUT=<dir>`: results are written here by the app
   /// itself and the process exits when the lab finishes.
@@ -251,10 +254,13 @@ class Measurement {
 }
 
 class LabRecorder {
-  LabRecorder(this.binding, this.sampler, {required this.phases, required this.semantics});
+  LabRecorder(this.binding, this.sampler, {required this.phases, required this.semantics, this.detection = false,
+    this.bindingAutoFramesSuppressed = false});
   final WidgetsBinding binding;
   final LabSampler sampler;
   final bool phases, semantics;
+  final bool detection;
+  final bool bindingAutoFramesSuppressed;
   late final probe = FrameProbe(binding);
   final results = <Map<String, Object?>>[];
   int? ticksPerSecond;
@@ -272,6 +278,7 @@ class LabRecorder {
     Future<Map<String, Object?>?> Function() action, {
     String kind = 'continuous',
     bool warmup = false,
+    Map<String, Object?> Function(Map<String, Object?> extras)? evidence,
   }) async {
     await settle(t);
     probe.reset();
@@ -283,6 +290,7 @@ class LabRecorder {
     final rssBefore = ProcessInfo.currentRss;
     final ticks0 = cpuTicks();
     final threadCpu0 = threadCpuSeconds();
+    final rowBuildsBefore = RaftMessageTimeline.debugRowBuilds;
     probe.recording = true;
     final start = developer.Timeline.now;
     final clock = Stopwatch()..start();
@@ -297,9 +305,13 @@ class LabRecorder {
     clock.stop();
     final ticks1 = cpuTicks();
     final threadCpu1 = threadCpuSeconds();
+    final rowBuilds = RaftMessageTimeline.debugRowBuilds - rowBuildsBefore;
     // The host reads /proc here, before timeline collection. Collection walks
     // every build, layout and paint on the UI thread and is not part of the scene.
     await sampler.send('cpu', {'theme': theme, 'scenario': scenario});
+    // Read UI witnesses after the measured clock stopped. Walking the tree
+    // must not become part of a slow frame or the action's CPU sample.
+    final proof = evidence?.call(extras ?? const {}) ?? const <String, Object?>{};
     final blocks = phases ? FlutterTimeline.debugCollect().timedBlocks : const <TimedBlock>[];
     if (phases) FlutterTimeline.debugCollectionEnabled = false;
     // Engine timings are delivered in batches; wait for the tail.
@@ -411,6 +423,31 @@ class LabRecorder {
       'blockTotalsUs': {for (final e in inclusive.entries) e.key: e.value.round()},
       'blockCounts': counts,
       'frames': frameRows,
+      if (detection) 'detection': {
+        'framePolicy': binding is LiveTestWidgetsFlutterBinding
+            ? (binding as LiveTestWidgetsFlutterBinding).framePolicy.name : 'production',
+        'testerPumpsDuringAction': kind == 'idle' ? 0 : null,
+        'bindingAutoFramesSuppressed': bindingAutoFramesSuppressed,
+        'cpuSamplingEnabled': sampler.cpuSamplingEnabled,
+        'phaseProfilingEnabled': phases || extras?['phaseProfiling'] == true,
+        'renderSurfaceWidth': binding.renderViews.first.size.width,
+        'renderSurfaceHeight': binding.renderViews.first.size.height,
+        'nativeWindowWidth': ui.PlatformDispatcher.instance.views.first.physicalSize.width,
+        'nativeWindowHeight': ui.PlatformDispatcher.instance.views.first.physicalSize.height,
+        'allowedActivity': extras?['allowedActivity'] ?? const <String>[],
+        'rebuilds': {
+          'instancesCollected': false,
+          'reason': 'The existing debugOnRebuildDirtyWidget hook is assertion-only in Flutter. Use the existing debug rebuild tests for instance attribution; this profile counter is aggregate only.',
+          'timelineRowBuilds': rowBuilds,
+        },
+        'actions': detectionActions(scenario, start, end, extras ?? const {}),
+        ...proof,
+      },
+      if (detection && phases) 'frameworkBlocks': [
+        for (final block in blocks) {
+          'name': block.name, 'ts': block.start.round(), 'dur': block.duration.round(), 'ph': 'X', 'cat': 'Flutter',
+        },
+      ],
       'failure': ?failure,
       ...?extras,
     };
@@ -418,6 +455,32 @@ class LabRecorder {
     await sampler.send('result', {'record': jsonEncode(record)});
     return record;
   }
+}
+
+/// Reuse the scene's actual action markers; no estimated frame/action joins.
+List<Map<String, Object?>> detectionActions(
+  String scene,
+  int start,
+  int end,
+  Map<String, Object?> extras,
+) {
+  final entries = extras['opens'] ?? extras['keyboard'];
+  if (entries is List && entries.isNotEmpty) {
+    return [
+      for (final (index, raw) in entries.indexed)
+        if (raw is Map && raw['t0'] is num && raw['t1'] is num)
+          {
+            'name': '${raw['channel'] ?? raw['direction'] ?? scene}-$index',
+            'startUs': raw['t0'],
+            'endUs': raw['t1'],
+            if (raw['shownUs'] != null) 'targetShownUs': raw['shownUs'],
+            if (raw['visibleMs'] != null) 'visibleMs': raw['visibleMs'],
+          },
+    ];
+  }
+  return [
+    {'name': scene, 'startUs': start, 'endUs': end},
+  ];
 }
 
 const _pipelineWork = {
@@ -460,8 +523,9 @@ Map<String, int> _workCounts(List<TimedBlock> blocks, double start, double end) 
   return counts;
 }
 
-/// Waits real time. The fully-live binding schedules frames exactly as the
-/// app does, so idle time produces no artificial frames.
+/// Waits real time without requesting a tester frame. Natural idle collection
+/// also requires the lab binding's automatic-frame suppression; merely
+/// selecting benchmarkLive still makes this pinned SDK schedule extra frames.
 Future<void> idle(Duration d) => Future<void>.delayed(d);
 
 /// Completes after the next frame (scheduling one only if none is pending).

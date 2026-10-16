@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:raft_ui/raft_ui.dart';
 
+import 'device_memory.dart';
+
 /// The kind of device whose memory the budgets are sized for.
 enum RaftMemoryClass {
   /// Android and iOS: a few GB shared with every other app, killed rather than
@@ -13,6 +15,8 @@ enum RaftMemoryClass {
   desktop,
 }
 
+enum RaftMemoryTier { low, medium, high }
+
 /// Every rebuildable in-memory tier of the app and its limit, in one place
 /// (the table in docs/architecture.md, "Cache", mirrors [describe]). Disk
 /// tiers are not here: `AttachmentDiskCache` owns the 1 GiB budget.
@@ -20,13 +24,13 @@ enum RaftMemoryClass {
 /// Nothing in these tiers is the only copy of anything: a bitmap, a still or a
 /// remembered verdict that is let go of is decoded or measured again on demand.
 /// `RaftMemoryRelease` empties them while the app is hidden and under memory
-/// pressure; this table only bounds how large they grow while the app is in
-/// use.
+/// pressure. Attachment images have an idle retention target and a separate
+/// temporary active allowance, selected from total device RAM at startup.
 ///
 /// | tier | owner | phone | desktop |
 /// |---|---|---|---|
 /// | framework `ImageCache` (decoded `Image` providers: sized images, avatars on remount, markdown / link previews, emoji) | `PaintingBinding` | 200 images / 64 MiB | 500 images / 128 MiB |
-/// | attachment images, decoded | `AttachmentImageRepository` | 64 images / 64 MiB | 64 images / 96 MiB |
+/// | attachment images, decoded (idle / active, low tier) | `AttachmentImageRepository` | 64 images / 64 / 192 MiB | 64 images / 96 / 384 MiB |
 /// | attachment images, encoded (decode source) | `AttachmentImageRepository` | 32 MiB | 64 MiB |
 /// | avatar bitmaps, decoded | `RaftHotImages` | 384 / 24 MiB | 384 / 24 MiB |
 /// | avatar bytes, encoded | `RaftImageBytes` | 8 MiB | 8 MiB |
@@ -43,9 +47,12 @@ class RaftMemoryBudgets {
     required this.attachmentImageEntries,
     required this.attachmentImageDecodedBytes,
     required this.attachmentImageEncodedBytes,
+    required this.attachmentImageActiveDecodedBytes,
+    this.memoryTier = RaftMemoryTier.low,
   });
 
   final RaftMemoryClass memoryClass;
+  final RaftMemoryTier memoryTier;
 
   /// The framework `ImageCache` (`PaintingBinding.instance.imageCache`):
   /// `maximumSize` and `maximumSizeBytes`.
@@ -56,6 +63,10 @@ class RaftMemoryBudgets {
       attachmentImageDecodedBytes,
       attachmentImageEncodedBytes;
 
+  /// Temporary total while images are actively viewed; idle retention uses
+  /// [attachmentImageDecodedBytes]. This is not a reservation of OS memory.
+  final int attachmentImageActiveDecodedBytes;
+
   static const _mib = 1024 * 1024;
 
   static const phone = RaftMemoryBudgets._(
@@ -65,6 +76,7 @@ class RaftMemoryBudgets {
     attachmentImageEntries: 64,
     attachmentImageDecodedBytes: 64 * _mib,
     attachmentImageEncodedBytes: 32 * _mib,
+    attachmentImageActiveDecodedBytes: 192 * _mib,
   );
 
   static const desktop = RaftMemoryBudgets._(
@@ -74,6 +86,7 @@ class RaftMemoryBudgets {
     attachmentImageEntries: 64,
     attachmentImageDecodedBytes: 96 * _mib,
     attachmentImageEncodedBytes: 64 * _mib,
+    attachmentImageActiveDecodedBytes: 384 * _mib,
   );
 
   // Tiers that do not differ by device class.
@@ -95,13 +108,46 @@ class RaftMemoryBudgets {
   static const playerLive = 2;
 
   /// The budgets of the platform the app runs on.
-  static RaftMemoryBudgets get current => forPlatform(defaultTargetPlatform);
+  static RaftMemoryBudgets get current =>
+      forPlatform(defaultTargetPlatform, memory: _deviceMemory);
 
-  static RaftMemoryBudgets forPlatform(TargetPlatform platform) =>
-      switch (platform) {
+  static DeviceMemoryInfo? _deviceMemory;
+
+  /// Complete before creating workspaces or installing the app's caches.
+  static Future<void> initialize({Future<DeviceMemoryInfo?> Function()? probe}) async {
+    try {
+      _deviceMemory = await (probe ?? readDeviceMemory)().timeout(const Duration(milliseconds: 500));
+    } catch (_) {
+      _deviceMemory = null;
+    }
+  }
+
+  @visibleForTesting
+  static void resetDetection() => _deviceMemory = null;
+
+  static RaftMemoryBudgets forPlatform(TargetPlatform platform, {DeviceMemoryInfo? memory}) {
+    final base = switch (platform) {
         TargetPlatform.android || TargetPlatform.iOS => phone,
         _ => desktop,
       };
+    final bytes = memory?.totalBytes ?? 0;
+    if (bytes <= 0 || memory!.lowRam) return base;
+    final mobile = base.memoryClass == RaftMemoryClass.phone;
+    final low = (mobile ? 3 : 8) * 1024 * _mib;
+    final mid = (mobile ? 6 : 16) * 1024 * _mib;
+    if (bytes <= low) return base;
+    final high = bytes > mid;
+    return RaftMemoryBudgets._(
+      memoryClass: base.memoryClass,
+      memoryTier: high ? RaftMemoryTier.high : RaftMemoryTier.medium,
+      imageCacheEntries: base.imageCacheEntries,
+      imageCacheBytes: base.imageCacheBytes,
+      attachmentImageEntries: base.attachmentImageEntries,
+      attachmentImageEncodedBytes: base.attachmentImageEncodedBytes,
+      attachmentImageDecodedBytes: (mobile ? (high ? 256 : 128) : (high ? 256 : 192)) * _mib,
+      attachmentImageActiveDecodedBytes: (mobile ? (high ? 768 : 384) : (high ? 1024 : 768)) * _mib,
+    );
+  }
 
   /// Sets the framework image cache limits. Returns a callback that restores
   /// the limits the cache had (shrinking evicts the oldest entries at once).
@@ -121,7 +167,8 @@ class RaftMemoryBudgets {
     'imageCache $imageCacheEntries images / ${imageCacheBytes ~/ _mib} MiB',
     'attachmentImages $attachmentImageEntries images / '
         '${attachmentImageDecodedBytes ~/ _mib} MiB decoded / '
-        '${attachmentImageEncodedBytes ~/ _mib} MiB encoded',
+        '${attachmentImageEncodedBytes ~/ _mib} MiB encoded / '
+        '${attachmentImageActiveDecodedBytes ~/ _mib} MiB active (${memoryTier.name})',
     'avatarHot $avatarHotEntries / ${avatarHotBytes ~/ _mib} MiB',
     'avatarBytes ${avatarEncodedBytes ~/ _mib} MiB',
     'playerStills $playerStillEntries / ${playerStillBytes ~/ _mib} MiB',

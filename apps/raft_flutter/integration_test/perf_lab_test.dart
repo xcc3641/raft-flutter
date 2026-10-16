@@ -23,6 +23,9 @@ import 'package:raft_flutter/data/mobile_tabbar_preferences.dart';
 import 'package:raft_flutter/features/chat_view.dart';
 import 'package:raft_flutter/features/conversation_panel.dart';
 import 'package:raft_flutter/features/source_channel_files_view.dart';
+import 'package:raft_flutter/features/workspace_view.dart';
+import 'package:raft_flutter/features/mobile_workspace_pages.dart';
+import 'package:raft_flutter/features/layout_hold.dart';
 import 'package:raft_flutter/main.dart' as app;
 import 'package:raft_flutter/platform/native_sharing.dart';
 import 'package:raft_flutter/platform/system_fonts.dart';
@@ -45,6 +48,7 @@ const _defines = {
   'RAFT_LAB_PHASES': String.fromEnvironment('RAFT_LAB_PHASES'),
   'RAFT_LAB_IDLE_SECONDS': String.fromEnvironment('RAFT_LAB_IDLE_SECONDS'),
   'RAFT_LAB_ROUNDS': String.fromEnvironment('RAFT_LAB_ROUNDS'),
+  'RAFT_LAB_DETECT': String.fromEnvironment('RAFT_LAB_DETECT'),
 };
 String _cfg(String key) {
   final define = _defines[key] ?? '';
@@ -66,13 +70,18 @@ final semanticsMode = switch (_cfg('RAFT_LAB_SEMANTICS')) {
 };
 final semantics = semanticsMode == 'on';
 final phases = _cfg('RAFT_LAB_PHASES') != 'false';
+final detection = _cfg('RAFT_LAB_DETECT') == 'true';
+
+/// The Activity-entry scene uses bottom navigation, not the compact rail.
+const detectionPhoneSize = Size(390, 700);
 
 bool wants(String scenario) => only.isEmpty || only.contains(scenario) || only.any((o) => o.endsWith('*') && scenario.startsWith(o.substring(0, o.length - 1)));
 
 /// Desktop split host: channel timeline plus a thread pane when one is open.
 class _Host extends StatefulWidget {
-  const _Host({required this.w});
+  const _Host({required this.w, this.onScroll});
   final WorkspaceController w;
+  final ValueChanged<ScrollNotification>? onScroll;
   @override
   State<_Host> createState() => _HostState();
 }
@@ -97,44 +106,346 @@ class _HostState extends State<_Host> {
   }
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Expanded(child: RaftChatView(controller: widget.w)),
-      if (thread) SizedBox(width: 440, child: RaftChatView(controller: widget.w, thread: true)),
-    ],
+  Widget build(BuildContext context) => NotificationListener<ScrollNotification>(
+    onNotification: (notification) {
+      widget.onScroll?.call(notification);
+      return false;
+    },
+    child: Row(
+      children: [
+        Expanded(child: RaftChatView(controller: widget.w)),
+        if (thread) SizedBox(width: 440, child: RaftChatView(controller: widget.w, thread: true)),
+      ],
+    ),
   );
 }
 
-class _HintLabBinding extends IntegrationTestWidgetsFlutterBinding with AndroidPerformanceHintBinding {}
+class _HintLabBinding extends IntegrationTestWidgetsFlutterBinding with AndroidPerformanceHintBinding {
+  bool appRequestsOnly = false;
+  bool _drawingNaturally = false;
+
+  void _scheduleAppFrame(VoidCallback schedule) {
+    final previous = framePolicy;
+    // During draw, benchmark suppresses the live binding's unconditional
+    // platformDispatcher.scheduleFrame(). Keep genuine app requests working.
+    if (_drawingNaturally) framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.benchmarkLive;
+    try {
+      schedule();
+    } finally {
+      framePolicy = previous;
+    }
+  }
+
+  @override
+  void scheduleFrame() => _scheduleAppFrame(super.scheduleFrame);
+
+  @override
+  void scheduleForcedFrame() => _scheduleAppFrame(super.scheduleForcedFrame);
+
+  @override
+  void handleDrawFrame() {
+    if (!appRequestsOnly) {
+      super.handleDrawFrame();
+      return;
+    }
+    final previous = framePolicy;
+    _drawingNaturally = true;
+    framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.benchmark;
+    try {
+      super.handleDrawFrame();
+    } finally {
+      framePolicy = previous;
+      _drawingNaturally = false;
+    }
+  }
+}
+
+bool _activityRowShown() => find
+    .byKey(const ValueKey('activity-channel-open-a'))
+    .hitTestable()
+    .evaluate()
+    .isNotEmpty;
+
+/// Boundary observations only. The raw timing window has already ended.
+Map<String, Object?> detectionEvidence(
+  WidgetTester t,
+  String scene,
+  Map<String, Object?> extras,
+) {
+  final visibleKeys = <String>[];
+  for (final element in find.byWidgetPredicate((widget) {
+    final key = widget.key;
+    return key is ValueKey<String> &&
+        (key.value.startsWith('message-') ||
+            key.value.startsWith('activity-') ||
+            key.value == 'detection-control');
+  }).evaluate()) {
+    final box = element.renderObject;
+    if (box is! RenderBox || !box.hasSize || box.size.isEmpty) continue;
+    final rect = box.localToGlobal(Offset.zero) & box.size;
+    var visible = rect.intersect(
+      Offset.zero & t.binding.renderViews.first.size,
+    );
+    final Object? viewport = RenderAbstractViewport.maybeOf(box);
+    if (viewport is RenderBox && viewport.hasSize) {
+      visible = visible.intersect(
+        viewport.localToGlobal(Offset.zero) & viewport.size,
+      );
+    }
+    if (visible.isEmpty) continue;
+    // A tall row's center can be outside the viewport while some text is
+    // visible. Hit-test its clipped portion; an overlapping rect alone is
+    // insufficient because a different page may cover it.
+    final point = visible.center - rect.topLeft;
+    final alignment = Alignment(
+      2 * point.dx / rect.width - 1,
+      2 * point.dy / rect.height - 1,
+    );
+    if (find
+        .byElementPredicate((candidate) => identical(candidate, element))
+        .hitTestable(at: alignment)
+        .evaluate()
+        .isEmpty) {
+      continue;
+    }
+    visibleKeys.add((element.widget.key as ValueKey<String>).value);
+    if (visibleKeys.length == 32) break;
+  }
+  final opens = extras['opens'];
+  final operationFailures = <String>[
+    if (opens is List)
+      for (final entry in opens)
+        if (entry is Map && entry['liveActivity'] is Map)
+          if ((entry['liveActivity'] as Map)['failure']
+              case final Object failure)
+            '${entry['channel']}: $failure',
+  ];
+  final keyboard = extras['keyboard'];
+  var arrived = visibleKeys.isNotEmpty;
+  String requirement = 'A target row is actually visible after the operation.';
+  if (opens is List) {
+    arrived =
+        opens.isNotEmpty &&
+        opens.every(
+          (o) =>
+              o is Map && o['visibleMs'] is num && (o['visibleMs'] as num) >= 0,
+        );
+    requirement =
+        'Every recorded transition waited for its positive target predicate.';
+  } else if (scene == 'older-drag') {
+    arrived =
+        arrived &&
+        (extras['olderPagesServed'] as num? ?? 0) > 0 &&
+        (extras['rowsAfter'] as num? ?? 0) >
+            (extras['rowsBefore'] as num? ?? 0);
+    requirement = 'The drag completed a history request, added rows, and left a visible message target.';
+  } else if (scene == 'keyboard') {
+    arrived =
+        keyboard is List &&
+        keyboard.isNotEmpty &&
+        find.byType(EditableText).hitTestable().evaluate().isNotEmpty;
+    requirement = 'Inset cycles completed with an actual visible editor; simulated insets are not a native keyboard proof.';
+  } else if (scene.endsWith('scroll')) {
+    arrived = arrived && (extras['movedPx'] as num? ?? 0) > 0;
+    requirement = 'The timeline moved and a message row is actually visible.';
+  }
+  return {
+    'operationFailures': operationFailures,
+    'arrival': {
+      'arrived': arrived,
+      'requirement': requirement,
+      'visibleKeys': visibleKeys,
+    },
+    if (scene.startsWith('control-'))
+      'control': switch (scene) {
+        'control-ticker' => 'unexpected-ticker',
+        'control-animation' => 'allowed-animation',
+        _ => 'healthy-idle',
+      },
+  };
+}
+
+/// Deliberate diagnostic fixture; this is never part of the product scene list.
+class _DetectionTicker extends StatefulWidget {
+  const _DetectionTicker();
+  @override
+  State<_DetectionTicker> createState() => _DetectionTickerState();
+}
+
+class _DetectionTickerState extends State<_DetectionTicker>
+    with SingleTickerProviderStateMixin {
+  late final ticker = createTicker((_) => setState(() => ticks++));
+  int ticks = 0;
+  @override
+  void initState() {
+    super.initState();
+    ticker.start();
+  }
+
+  @override
+  void dispose() {
+    ticker.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Transform.translate(
+    offset: Offset(math.sin(ticks / 10) * 24, 0),
+    child: const SizedBox(
+      key: ValueKey('detection-control'),
+      width: 80,
+      height: 80,
+      child: ColoredBox(color: Color(0xff336699)),
+    ),
+  );
+}
+
+void registerRebuildCounterControlTest() {
+  testWidgets(
+    'existing rebuild hook distinguishes a stable instance from repeated rebuilds',
+    (t) async {
+      late StateSetter update;
+      final counts = <int, int>{};
+      final key = const ValueKey('message-rebuild-control');
+      await t.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: StatefulBuilder(
+            key: key,
+            builder: (_, setter) {
+              update = setter;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      final instance = t.element(find.byKey(key));
+      final previous = debugOnRebuildDirtyWidget;
+      debugOnRebuildDirtyWidget = (element, builtBefore) {
+        previous?.call(element, builtBefore);
+        if (element.widget.key == key) {
+          counts.update(
+            identityHashCode(element),
+            (n) => n + 1,
+            ifAbsent: () => 1,
+          );
+        }
+      };
+      try {
+        await t.pump();
+        expect(counts, isEmpty);
+        for (var i = 0; i < 3; i++) {
+          update(() {});
+          await t.pump();
+        }
+        expect(counts, {identityHashCode(instance): 3});
+        expect(t.element(find.byKey(key)), same(instance));
+      } finally {
+        debugOnRebuildDirtyWidget = previous;
+        await t.pumpWidget(const SizedBox());
+      }
+    },
+  );
+}
+
+void registerActivityArrivalTest() {
+  testWidgets('Activity arrival requires a visible target row', (t) async {
+    addTearDown(() async {
+      await t.pumpWidget(const SizedBox());
+      await t.pump();
+    });
+    await t.pumpWidget(const MaterialApp(home: Scaffold(body: Text('Saved'))));
+    expect(_activityRowShown(), false);
+    await t.pumpWidget(const MaterialApp(home: Scaffold(body: SizedBox())));
+    expect(
+      _activityRowShown(),
+      false,
+      reason: 'Home disappearing does not prove Activity arrived.',
+    );
+    await t.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Offstage(
+            child: Text(
+              'Activity item',
+              key: ValueKey('activity-channel-open-a'),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      _activityRowShown(),
+      false,
+      reason: 'An offstage target is not visible.',
+    );
+    await t.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Text('Activity item', key: ValueKey('activity-channel-open-a')),
+        ),
+      ),
+    );
+    expect(_activityRowShown(), true);
+  });
+}
 
 void main() {
   final binding = _HintLabBinding();
-  binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
+  binding.appRequestsOnly = detection;
+  binding.framePolicy = detection
+      ? LiveTestWidgetsFlutterBindingFramePolicy.benchmarkLive
+      : LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
   tearDownAll(() {
     // fullyLive otherwise keeps requesting idle frames after the driver exits.
     // Stop that loop so the UI hint session can expire while the APK remains.
     binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.benchmark;
   });
+  // Run the control in debug/widget tests. Do not prime framework caches
+  // with a separate widget test before a profile workload.
+  if (!kProfileMode) {
+    registerActivityArrivalTest();
+    registerRebuildCounterControlTest();
+    return;
+  }
   final sampler = LabSampler();
   testWidgets('perf lab', (t) async {
     expect(kProfileMode, true, reason: 'Only profile-mode timings are meaningful.');
+    if (detection && phases) {
+      debugProfileBuildsEnabled = true;
+      debugProfileLayoutsEnabled = true;
+      debugProfilePaintsEnabled = true;
+      addTearDown(() {
+        debugProfileBuildsEnabled = false;
+        debugProfileLayoutsEnabled = false;
+        debugProfilePaintsEnabled = false;
+      });
+    }
     final platformSemantics = binding.platformDispatcher.semanticsEnabled;
     if (semanticsMode == 'off') binding.platformDispatcher.semanticsEnabledTestValue = false;
     addTearDown(binding.platformDispatcher.clearSemanticsEnabledTestValue);
-    final lab = LabRecorder(binding, sampler, phases: phases, semantics: semantics);
+    final lab = LabRecorder(binding, sampler, phases: phases, semantics: semantics, detection: detection,
+      bindingAutoFramesSuppressed: binding.appRequestsOnly);
     if (Platform.isLinux) {
       lab.ticksPerSecond = int.tryParse((await Process.run('getconf', ['CLK_TCK'])).stdout.toString().trim());
     }
     final view = binding.platformDispatcher.views.first;
     await sampler.hello({
       'pid': pid,
-      'fixtureVersion': fixtureVersion,
+      'fixtureVersion': '$fixtureVersion-m7',
+      'fixturePagination': 'requested-limit-v1',
+      'linuxApplicationIdSuffix': const String.fromEnvironment('RAFT_LINUX_APPLICATION_ID_SUFFIX'),
       'themes': themes,
       'scenarios': only.toList(),
       'seconds': seconds,
       'semantics': semanticsMode,
       'platformSemanticsEnabled': platformSemantics,
       'phases': phases,
+      'detection': detection,
+      'framePolicy': binding.framePolicy.name,
+      'bindingAutoFramesSuppressed': binding.appRequestsOnly,
+      'runtimeDisplay': Platform.environment['DISPLAY'],
+      'runtimeGdkBackend': Platform.environment['GDK_BACKEND'],
       'os': Platform.operatingSystem,
       'osVersion': Platform.operatingSystemVersion,
       'processors': Platform.numberOfProcessors,
@@ -148,8 +459,55 @@ void main() {
     final images = await LabImages.start();
     addTearDown(() => images.server.close(force: true));
     final failures = <String>[];
+    Future<void> independentGroup(String label, Future<void> Function() action) async {
+      if (!detection) return action();
+      try {
+        await action();
+      } catch (error, stack) {
+        failures.add('$label: $error');
+        await sampler.send('note', {'group': label, 'failure': '$error', 'stack': '$stack'});
+      }
+    }
+    Future<void> phoneViewport() async {
+      if (!detection) return;
+      // Keep the simulated phone surface inside the native 720px buffer.
+      // Width drives the product breakpoint; this is not a physical phone.
+      t.view.physicalSize = detectionPhoneSize * t.view.devicePixelRatio;
+      await binding.setSurfaceSize(detectionPhoneSize);
+      await nextFrame();
+    }
+    if (detection) {
+      addTearDown(() async {
+        t.view.resetPhysicalSize();
+        await binding.setSurfaceSize(null);
+      });
+    }
+
+    Future<void> runControls(String name) async {
+      for (final control in ['control-idle', 'control-ticker', 'control-animation']) {
+        if (!only.contains(control)) continue;
+        await t.pumpWidget(MaterialApp(home: Scaffold(body: Center(
+          child: control == 'control-idle'
+              ? const SizedBox(key: ValueKey('detection-control'), width: 80, height: 80,
+                  child: ColoredBox(color: Color(0xff336699)))
+              : const _DetectionTicker(),
+        ))));
+        await lab.measure(t, name, control, () async {
+          await idle(const Duration(seconds: 10));
+          return {'idleSeconds': 10, 'allowedActivity': control == 'control-animation' ? ['fixture animation'] : <String>[]};
+        }, kind: 'idle', evidence: (extras) => detectionEvidence(t, control, extras));
+      }
+    }
 
     for (final name in themes) {
+      if (detection) {
+        t.view.resetPhysicalSize();
+        await binding.setSurfaceSize(null);
+      }
+      if (detection && only.isNotEmpty && only.every((scene) => scene.startsWith('control-'))) {
+        await runControls(name);
+        continue;
+      }
       final (family, dark) = switch (name) {
         'brutal-light' => (RaftFamily.brutal, false),
         'brutal-dark' => (RaftFamily.brutal, true),
@@ -189,6 +547,7 @@ void main() {
       final thread = LabChannel(threadId, [for (final k in mixKinds(40)) k == 'thread-summary' || k == 'task' ? 'plain' : k], pageDelay: const Duration(milliseconds: 150));
       final channels = [mix, openA, openB, img, hist, tagged, thread, ...mounts.values];
       final (w, api, client) = await labWorkspace(channels, images);
+      ValueChanged<ScrollNotification>? observeScroll;
       final sectionFiles = [
         for (var i = 0; i < 240; i++) {
           'id': 'section-image-$i', 'messageId': tagged.rows[i]['id'],
@@ -210,11 +569,21 @@ void main() {
       await t.pumpWidget(MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: raftTheme(family, dark: dark),
-        home: Scaffold(body: _Host(w: w)),
+        home: Scaffold(body: _Host(w: w, onScroll: (notification) => observeScroll?.call(notification))),
       ));
       String newest(LabChannel c) => c.rows.last['id'] as String;
       final shown = await waitUntil(() => visibleText(newest(mix)).evaluate().isNotEmpty, limit: const Duration(seconds: 20));
-      if (shown < 0) failures.add('$name: mix channel never published its newest row');
+      if (shown < 0) {
+        failures.add('$name: mix channel never published its newest row');
+        if (detection) {
+          await sampler.send('note', {'theme': name, 'initialArrivalFailure': {
+            'channel': w.channel?.id, 'expectedMessage': newest(mix), 'acceptedRows': w.messages.length,
+            'loading': w.channelLoading, 'error': w.error?.toString(),
+            'mountedTargetRows': messageRow(newest(mix)).evaluate().length,
+            'fixtureHits': api.hits, 'fixtureMisses': api.misses,
+          }});
+        }
+      }
       // RAFT_LAB_WARM_FONTS=1: let the idle font warm-up finish before any
       // scenario, so first-use system-font fallback stalls (fontconfig) are not
       // mixed into the measured frames; the time it took is recorded.
@@ -340,12 +709,15 @@ void main() {
 
       Future<void> run(String scenario, Future<Map<String, Object?>?> Function() action, {String kind = 'continuous', Future<void> Function()? prepare, bool warmup = false}) async {
         if (!wants(scenario)) return;
+        await independentGroup('$name/$scenario', () async {
         await prepare?.call();
-        final record = await lab.measure(t, name, scenario, action, kind: kind, warmup: warmup);
+        final record = await lab.measure(t, name, scenario, action, kind: kind, warmup: warmup,
+          evidence: detection ? (extras) => detectionEvidence(t, scenario, extras) : null);
         await fontKeyReport?.call();
         if (record['failure'] != null) failures.add('$name/$scenario: ${record['failure']}');
         final exception = t.takeException();
         if (exception != null) failures.add('$name/$scenario: $exception');
+        });
       }
 
       // Continuous reading: 1200 px/s toward older history from the latest row.
@@ -394,6 +766,21 @@ void main() {
       await run('older-drag', prepare: () => show(hist, latest: true), () async {
         final p = position(), from = p.pixels, rowsBefore = w.messages.length;
         final servedBefore = hist.olderPagesServed;
+        var notifications = 0, dragNotifications = 0, overscrollCount = 0;
+        var overscrollMin = 0.0, overscrollMax = 0.0;
+        if (detection) {
+          observeScroll = (notification) {
+            if (notification.metrics.axis != Axis.vertical || notification.depth != 0) return;
+            notifications++;
+            if (notification is ScrollUpdateNotification && notification.dragDetails != null) dragNotifications++;
+            if (notification is OverscrollNotification) {
+              overscrollCount++;
+              overscrollMin = math.min(overscrollMin, notification.overscroll);
+              overscrollMax = math.max(overscrollMax, notification.overscroll);
+            }
+          };
+        }
+        try {
         // Grab the avatar gutter, not row content: with semantics enabled a
         // drag starting on row content did not scroll (see
         // docs/performance-lab.md); images and code may claim drags too.
@@ -411,7 +798,13 @@ void main() {
         }
         await gesture.up(timeStamp: Duration(microseconds: clock.elapsedMicroseconds));
         await idle(const Duration(milliseconds: 300));
-        return {...moved(p, from), 'pxPerSecond': 1800, 'olderPagesServed': hist.olderPagesServed - servedBefore, 'rowsBefore': rowsBefore, 'rowsAfter': w.messages.length};
+        return {...moved(p, from), 'pxPerSecond': 1800, 'olderPagesServed': hist.olderPagesServed - servedBefore, 'rowsBefore': rowsBefore, 'rowsAfter': w.messages.length,
+          if (detection) 'scrollNotifications': {'collected': notifications > 0, 'input': 'simulated touch drag',
+            'notifications': notifications, 'dragUpdates': dragNotifications,
+            'overscrollCount': overscrollCount, 'overscrollMin': overscrollMin, 'overscrollMax': overscrollMax}};
+        } finally {
+          observeScroll = null;
+        }
       });
 
       // Desktop scrollbar: a mouse holds the timeline's thumb and sweeps it
@@ -576,6 +969,8 @@ void main() {
       // These are opt-in mobile scenarios; the default desktop suite has no
       // horizontal section pager.
       if (only.isNotEmpty && (wants('section-drag') || wants('section-back-drag') || wants('section-cycle'))) {
+        await independentGroup('$name/sections', () async {
+        await phoneViewport();
         await show(tagged, latest: true);
         await t.pumpWidget(MaterialApp(
           debugShowCheckedModeBanner: false,
@@ -611,9 +1006,14 @@ void main() {
         final bounds = t.getRect(pager);
         final visibleTags = find.byType(RaftMountedMessageTaskChip).evaluate()
             .where((e) => t.getRect(find.byWidget(e.widget)).overlaps(bounds)).length;
-        expect(visibleTags, greaterThanOrEqualTo(5));
+        // The five-tag requirement belongs to the held-drag color replay.
+        // Detection's shorter viewport still visits the populated Tasks/Files
+        // pages above; its cycle records and checks each accepted section.
+        if (!detection || wants('section-drag') || wants('section-back-drag')) {
+          expect(visibleTags, greaterThanOrEqualTo(5));
+        }
         expect(t.getSize(pager).width, lessThan(RaftLayoutMetrics.desktopBreakpoint));
-        if (wants('section-drag') || wants('section-cycle')) {
+        if (wants('section-drag') || (!detection && wants('section-cycle'))) {
         // Native screenshots are read by a host-side capture watcher during
         // these holds, outside the measured intervals. Keep task IDs and exact
         // on-screen geometry so colors can be compared after translation.
@@ -769,6 +1169,7 @@ void main() {
           return {'sectionVisits': steps, 'taskRows': tagged.tasks.length,
             'fileRows': w.channelFilesStore(tagged.id).files.length, 'taggedChatRows': tagged.rows.length};
         }, kind: 'transitions');
+        });
       }
 
       // Per row kind: jump 0.9 viewport per step so every step mounts fresh
@@ -809,6 +1210,8 @@ void main() {
       // so the summary reports the worst UI/raster frame inside it.
       var navMisses = <String, int>{};
       if (only.any((o) => o.startsWith('nav-'))) {
+        await independentGroup('$name/navigation', () async {
+        await phoneViewport();
         final (seed, napi, nclient) = await labWorkspace(channels, images, mobile: true, ownsClient: false);
         seed.dispose();
         navMisses = napi.misses;
@@ -915,19 +1318,76 @@ void main() {
         });
         final content = LabNavigationContent();
         await NativeSystemFonts.instance.initialize();
-        await t.pumpWidget(app.RaftApp(
+        final navigationApp = app.RaftApp(
           services: const AppServices.updatesDisabledForTestOrPreview(),
           sessionStore: nclient.sessionStore,
           createClient: (_, _, _) => nclient,
           initialLocation: Uri(path: '/s/lab'),
           nativeContent: content, nativeSharing: NativeSharing(supported: false),
           openWorkspaceCache: () async => navCache,
-        ));
+        );
+        await t.pumpWidget(detection
+            ? MediaQuery.fromView(view: t.view, child: navigationApp) : navigationApp);
         await lab.settle(t, time: const Duration(seconds: 2));
         if (await waitUntil(() => content.workspace?.server != null, limit: const Duration(seconds: 10)) < 0) {
           throw StateError('Production app root did not restore the lab workspace; requests=${napi.hits}; misses=${napi.misses}');
         }
         final nw = content.workspace!;
+        if (detection) {
+          final appView = View.of(t.element(find.byType(app.RaftApp)));
+          final media = MediaQuery.sizeOf(t.element(find.byType(Scaffold).first));
+          await sampler.send('note', {'theme': name, 'navigationView': {
+            'appWidth': appView.physicalSize.width, 'appHeight': appView.physicalSize.height,
+            'testWidth': t.view.physicalSize.width, 'testHeight': t.view.physicalSize.height,
+            'mobileNavigation': nw.mobileNavigation, 'rootTab': nw.navigation.mobileRootTab,
+            'mediaWidth': media.width, 'mediaHeight': media.height,
+            'layoutHeld': LayoutHold.held,
+            'mobilePages': find.byType(MobileWorkspacePages).evaluate().length,
+            'mobileBars': find.byKey(const Key('workspace-mobile-navigation')).evaluate().length,
+            'adaptiveLayouts': [
+              for (final element in find.byType(RaftAdaptiveWorkspace).evaluate())
+                {
+                  'navigation': (element.widget as RaftAdaptiveWorkspace).mobileNavigation?.runtimeType.toString(),
+                  'rail': (element.widget as RaftAdaptiveWorkspace).mobileRail?.runtimeType.toString(),
+                  'constraints': [
+                    (element.renderObject as RenderBox?)?.constraints.minWidth,
+                    (element.renderObject as RenderBox?)?.constraints.maxWidth,
+                    (element.renderObject as RenderBox?)?.constraints.minHeight,
+                    (element.renderObject as RenderBox?)?.constraints.maxHeight,
+                  ],
+                  'renderWidth': (element.renderObject as RenderBox?)?.size.width,
+                },
+            ],
+            'workspaces': [
+              for (final element in find.byWidgetPredicate((widget) => widget is WorkspaceView).evaluate())
+                {
+                  'widget': element.widget.runtimeType.toString(),
+                  'routePage': (element.widget as WorkspaceView).mobileRoutePage,
+                  'server': (element.widget as WorkspaceView).controller.server?.id,
+                  'location': (element.widget as WorkspaceView).controller.location.uri.toString(),
+                  'rootTab': (element.widget as WorkspaceView).controller.navigation.mobileRootTab,
+                  'phoneRail': RaftAdaptiveWorkspace.phoneRailOf(element),
+                  'constraints': [
+                    (element.renderObject as RenderBox?)?.constraints.minWidth,
+                    (element.renderObject as RenderBox?)?.constraints.maxWidth,
+                    (element.renderObject as RenderBox?)?.constraints.minHeight,
+                    (element.renderObject as RenderBox?)?.constraints.maxHeight,
+                  ],
+                  'mediaWidth': MediaQuery.sizeOf(element).width,
+                  'mediaHeight': MediaQuery.sizeOf(element).height,
+                  'compact': RaftAdaptiveWorkspace.compactOf(element),
+                  'renderWidth': (element.renderObject as RenderBox?)?.size.width,
+                  'renderHeight': (element.renderObject as RenderBox?)?.size.height,
+                },
+            ],
+          }});
+          expect(media.width, lessThan(RaftLayoutMetrics.desktopBreakpoint),
+              reason: 'Phone navigation must actually receive the compact MediaQuery.');
+          expect(RaftAdaptiveWorkspace.phoneRailOf(t.element(find.byType(Scaffold).first)), isFalse,
+              reason: 'Activity-entry actions require bottom navigation; choose a taller phone viewport.');
+          expect(find.byKey(const Key('mobile-tab-home')), findsOneWidget,
+              reason: 'The phone Home entry must mount before navigation is measured.');
+        }
         final navActivity = LabNavigationActivity(
           workspace: nw, client: nclient,
           channels: [openA, openB, mix, thread], agents: navAgents, machines: navMachines,
@@ -1004,7 +1464,9 @@ void main() {
         Future<void> tabTo(String id) async {
           final tab = find.byKey(Key('mobile-tab-${id == 'chat' ? 'home' : id}'));
           if (await waitUntil(() => tab.evaluate().isNotEmpty, limit: const Duration(seconds: 10)) < 0) {
-            failures.add('$name: tab $id never mounted');
+            final rootView = View.of(t.element(find.byType(app.RaftApp)));
+            failures.add('$name: tab $id never mounted; appView=${rootView.physicalSize}; '
+                'testView=${t.view.physicalSize}; screen=${screenText()}');
             return;
           }
           await t.tap(tab);
@@ -1119,7 +1581,7 @@ void main() {
         }, () async {
           final opens = <Map<String, Object?>>[];
           for (var i = 0; i < 3; i++) {
-            await step(opens, 'open-activity-$i', () => t.tap(find.text('Activity', findRichText: true).first), () => !homeListShown());
+            await step(opens, 'open-activity-$i', () => t.tap(find.text('Activity', findRichText: true).first), _activityRowShown);
             await step(opens, 'back-activity-$i', back, homeListShown);
           }
           return {'opens': opens};
@@ -1145,13 +1607,13 @@ void main() {
         await run('nav-activity-item', prepare: () async {
           await goRoot('home');
           await t.tap(find.text('Activity', findRichText: true).first);
-          if (await waitUntil(() => activityEntry().evaluate().isNotEmpty, limit: const Duration(seconds: 10)) < 0) failures.add('$name: activity entries never listed');
+          if (await waitUntil(_activityRowShown, limit: const Duration(seconds: 10)) < 0) failures.add('$name: activity entries never listed');
           await lab.settle(t, time: const Duration(seconds: 1));
         }, () async {
           final opens = <Map<String, Object?>>[];
           for (var i = 0; i < 3; i++) {
             await step(opens, 'open-activity-item-$i', () => t.tap(activityEntry()), () => channelShown(openA));
-            await step(opens, 'back-activity-item-$i', back, () => activityEntry().evaluate().isNotEmpty);
+            await step(opens, 'back-activity-item-$i', back, _activityRowShown);
           }
           return {'opens': opens};
         }, kind: 'transitions');
@@ -1172,6 +1634,7 @@ void main() {
           }
           return {'opens': opens};
         }, kind: 'transitions');
+        });
       }
 
       // RAFT_LAB_SCENARIOS=...,idle-final: after the last theme's scenarios the
@@ -1182,28 +1645,38 @@ void main() {
       // an idle proof; tool/idle-cpu/run.sh measures idle with a plain binding.
       if (name == themes.last && only.contains('idle-final')) {
         final idleSeconds = int.tryParse(_cfg('RAFT_LAB_IDLE_SECONDS')) ?? 30;
+        if (detection) {
+          FocusManager.instance.primaryFocus?.unfocus();
+          await idle(const Duration(seconds: 1));
+        }
         await run('idle-final', () async {
           await idle(Duration(seconds: idleSeconds));
           return {'idleSeconds': idleSeconds};
         }, kind: 'idle');
       }
 
+      await runControls(name);
+
       // Soft keyboard. An unfiltered Android run includes it. Any other host
       // includes it only when it is named: it replaces this theme's tree with
       // the production phone app. Measured windows are the inset slides.
       if (wants('keyboard') && (only.isNotEmpty || Platform.isAndroid)) {
-        final closeKeyboard = await mountKeyboardChat(t, images: images, family: family, dark: dark);
+        await independentGroup('$name/keyboard', () async {
+        await phoneViewport();
+        final closeKeyboard = await mountKeyboardChat(t, images: images, family: family, dark: dark,
+            useTestViewport: detection);
         final keyboardRounds = int.tryParse(_cfg('RAFT_LAB_ROUNDS')) ?? 1;
         try {
           // One recorded warmup. Later rounds share this process cache, so
           // they are one batch, not independent samples.
-          await run('keyboard', () => keyboardOpenClose(t), kind: 'keyboard', warmup: true);
+          await run('keyboard', () => keyboardOpenClose(t, profilePhases: !detection || phases), kind: 'keyboard', warmup: true);
           for (var i = 0; i < keyboardRounds; i++) {
-            await run('keyboard', () => keyboardOpenClose(t), kind: 'keyboard');
+            await run('keyboard', () => keyboardOpenClose(t, profilePhases: !detection || phases), kind: 'keyboard');
           }
         } finally {
           await closeKeyboard();
         }
+        });
       }
 
       if (only.any((o) => o.startsWith('nav-'))) {

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:raft_client/raft_client.dart';
 
 import '../features/agent_metadata_catalog.dart';
+import 'migration_error.dart' show migrationPhase;
 
 enum WorkspaceEntityKind { agents, computers, members }
 
@@ -789,6 +790,15 @@ class WorkspaceEntityDirectory extends ChangeNotifier {
         _scheduleReload(const {WorkspaceEntityKind.agents});
       case 'agent:updated' when agents:
         _scheduleReload(const {WorkspaceEntityKind.agents});
+      // A finished migration changes the agent's computer but broadcasts no
+      // agent:updated; Web re-reads agents (loadAgents) when its migration
+      // section watches the run end. Done here for every terminal state so
+      // memory and the device record follow it whether or not the page is open.
+      case 'agent:migration-updated' when agents:
+        final phase = migrationPhase(payload['state'] as String?);
+        if (phase == 'completed' || phase == 'failed' || phase == 'canceled') {
+          _scheduleReload(const {WorkspaceEntityKind.agents});
+        }
       // Source machineEvents applyStatus: statusVersion-gated patch. A stale or
       // duplicate frame is a no-op; an accepted transition (or an unknown
       // machine coming online) asks for the machines-and-agents recovery read.
@@ -900,6 +910,12 @@ class WorkspaceEntityDirectory extends ChangeNotifier {
     }
     return a == b;
   }
+
+  /// Re-reads the agent list through the same coalesced path as
+  /// `agent:updated` (memory and device record both follow). For changes the
+  /// server makes without broadcasting an agent update, such as a migration
+  /// moving an agent to another computer.
+  void reloadAgents() => _scheduleReload(const {WorkspaceEntityKind.agents});
 
   /// Coalesces a burst of catalog events into one read per affected kind.
   /// Nothing is read before the directory has been started by a surface.

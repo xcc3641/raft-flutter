@@ -1,3 +1,4 @@
+#include <filesystem>
 #include "flutter_window.h"
 
 #include <dwmapi.h>
@@ -5,6 +6,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include <optional>
+#include <raft_updater/window_lifetime.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -54,8 +56,52 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  memory_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "app.raft/device-memory",
+          &flutter::StandardMethodCodec::GetInstance());
+  memory_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() == "availableStorageBytes") {
+          const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+          const auto entry = args ? args->find(flutter::EncodableValue("path"))
+                                  : flutter::EncodableMap::const_iterator{};
+          const auto* path = args && entry != args->end()
+              ? std::get_if<std::string>(&entry->second) : nullptr;
+          ULARGE_INTEGER available = {};
+          if (!path || path->empty() || !GetDiskFreeSpaceExW(
+                  std::filesystem::u8path(*path).c_str(), &available, nullptr, nullptr)) {
+            result->Error("storage_unavailable", "Available storage could not be read.");
+          } else {
+            result->Success(flutter::EncodableValue(static_cast<int64_t>(available.QuadPart)));
+          }
+          return;
+        }
+        if (call.method_name() != "snapshot") {
+          result->NotImplemented();
+          return;
+        }
+        MEMORYSTATUSEX memory = {};
+        memory.dwLength = sizeof(memory);
+        if (!GlobalMemoryStatusEx(&memory)) {
+          result->Error("memory_unavailable", "Device memory could not be read.");
+          return;
+        }
+        flutter::EncodableMap values;
+        values[flutter::EncodableValue("totalBytes")] =
+            flutter::EncodableValue(static_cast<int64_t>(memory.ullTotalPhys));
+        result->Success(flutter::EncodableValue(values));
+      });
   notifications_channel_ = CreateWindowsNotificationsChannel(
       flutter_controller_->engine()->messenger(), GetHandle());
+  tray_ = std::make_unique<WindowsTray>(
+      flutter_controller_->engine()->messenger(), GetHandle());
+  exit_ = std::make_unique<WindowsExit>(GetHandle(),
+      RegisterWindowMessageW(kRaftExplicitQuitMessage),
+      [this](int64_t id, const char* reason, WindowsExit::Reply reply) {
+        tray_->PrepareExit(id, reason, std::move(reply));
+      });
   // The app tells the runner the nav rail's colours; the caption takes them
   // (Windows 11) and its title text is drawn in the caption colour so the bar
   // is empty. The caption's height, dragging and double-click stay the
@@ -116,8 +162,11 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  exit_ = nullptr;
+  tray_ = nullptr;
   notifications_channel_ = nullptr;
   titlebar_channel_ = nullptr;
+  memory_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -129,6 +178,18 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (exit_) {
+    const auto result = exit_->HandleMessage(message, wparam, lparam);
+    if (exit_ && exit_->quitting() && tray_) tray_->MarkQuitting();
+    if (result) return *result;
+    if (message == WM_CLOSE && exit_ && exit_->ready_to_close()) {
+      return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+    }
+  }
+  if (tray_) {
+    const auto result = tray_->HandleMessage(message, wparam, lparam);
+    if (result) return *result;
+  }
   if (HandleWindowsNotificationActivation(message, lparam,
       notifications_channel_.get(), hwnd)) return TRUE;
   // Give Flutter, including plugins, an opportunity to handle window messages.

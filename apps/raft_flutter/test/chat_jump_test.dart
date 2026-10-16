@@ -143,7 +143,7 @@ void main() {
       // has rebuilt or disposed. This is the lifecycle race, not a disposed-state test.
       await tester.runAsync(() async {
         w.channel = RaftChannel({'id': 'c2', 'name': 'new', 'joined': true});
-        w.channelGeneration++;
+        w.messageWindows.channelGeneration++;
         w.saveDraft('New scope draft');
         w.setError(null);
         response.complete({

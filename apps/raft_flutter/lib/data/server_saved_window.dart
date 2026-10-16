@@ -1,9 +1,8 @@
-import 'dart:async';
-
 import 'package:raft_client/raft_client.dart';
 
 import 'resource_row_reconcile.dart';
 import 'resource_snapshot_cache.dart';
+import 'server_page_window.dart';
 
 /// A private-like channel, including facts this snapshot does not have.
 bool savedPrivateLike(Map<String, dynamic>? facts) =>
@@ -100,28 +99,45 @@ List<Map<String, dynamic>>? _withoutMessage(
   return [for (final row in rows) if (row['messageId'] != id) row];
 }
 
-Map<String, ResourceViewWindow> _windowsWithoutMessage(
+Map<String, ResourceViewWindow> _editWindows(
   Map<String, ResourceViewWindow> windows,
-  String id,
+  ({List<Map<String, dynamic>> rows, int? totalCount})? Function(
+    ResourceViewWindow window,
+  )
+  edit,
 ) {
   var changed = false;
   final next = <String, ResourceViewWindow>{};
   for (final entry in windows.entries) {
-    final rows = _withoutMessage(entry.value.rows, id);
-    if (rows == null) {
+    final edited = edit(entry.value);
+    if (edited == null) {
       next[entry.key] = entry.value;
       continue;
     }
     changed = true;
-    final total = entry.value.totalCount;
     next[entry.key] = ResourceViewWindow(
-      rows: rows,
+      rows: edited.rows,
       hasMore: entry.value.hasMore,
-      totalCount: total == null ? null : savedBoundedCount(total - 1),
+      totalCount: edited.totalCount,
       totalUnreadCount: entry.value.totalUnreadCount,
     );
   }
   return changed ? next : windows;
+}
+
+Map<String, ResourceViewWindow> _windowsWithoutMessage(
+  Map<String, ResourceViewWindow> windows,
+  String id,
+) {
+  return _editWindows(windows, (window) {
+    final rows = _withoutMessage(window.rows, id);
+    if (rows == null) return null;
+    final total = window.totalCount;
+    return (
+      rows: rows,
+      totalCount: total == null ? null : savedBoundedCount(total - 1),
+    );
+  });
 }
 
 /// Drop the saved row [payload] names from [rows] and from [windows].
@@ -152,23 +168,11 @@ Map<String, ResourceViewWindow> _patchWindows(
   Map<String, ResourceViewWindow> windows,
   Object? payload,
 ) {
-  var changed = false;
-  final next = <String, ResourceViewWindow>{};
-  for (final entry in windows.entries) {
-    final rows = mergeSavedRow(entry.value.rows, payload, byMessageId: true);
-    if (rows == null) {
-      next[entry.key] = entry.value;
-      continue;
-    }
-    changed = true;
-    next[entry.key] = ResourceViewWindow(
-      rows: rows,
-      hasMore: entry.value.hasMore,
-      totalCount: entry.value.totalCount,
-      totalUnreadCount: entry.value.totalUnreadCount,
-    );
-  }
-  return changed ? next : windows;
+  return _editWindows(windows, (window) {
+    final rows = mergeSavedRow(window.rows, payload, byMessageId: true);
+    if (rows == null) return null;
+    return (rows: rows, totalCount: window.totalCount);
+  });
 }
 
 bool _keepChannel(Map row, Set<String> lost) =>
@@ -178,104 +182,49 @@ Map<String, ResourceViewWindow> _windowsWithoutChannels(
   Map<String, ResourceViewWindow> windows,
   Set<String> lost,
 ) {
-  var changed = false;
-  final next = <String, ResourceViewWindow>{};
-  for (final entry in windows.entries) {
-    if (entry.value.rows.every((row) => _keepChannel(row, lost))) {
-      next[entry.key] = entry.value;
-      continue;
-    }
-    changed = true;
+  return _editWindows(windows, (window) {
+    if (window.rows.every((row) => _keepChannel(row, lost))) return null;
     final rows = [
-      for (final row in entry.value.rows)
+      for (final row in window.rows)
         if (_keepChannel(row, lost)) row,
     ];
-    final removed = entry.value.rows.length - rows.length;
-    final total = entry.value.totalCount;
-    next[entry.key] = ResourceViewWindow(
+    final removed = window.rows.length - rows.length;
+    final total = window.totalCount;
+    return (
       rows: rows,
-      hasMore: entry.value.hasMore,
       totalCount: total == null ? null : savedBoundedCount(total - removed),
-      totalUnreadCount: entry.value.totalUnreadCount,
     );
-  }
-  return changed ? next : windows;
+  });
 }
 
 /// The one accepted workspace Saved window.
 ///
 /// While a page is attached it only stores the list. While none is, it
 /// patches or drops rows and never fetches.
-class ServerSavedWindow implements ServerSavedSlot {
+class ServerSavedWindow extends ServerPageWindow {
   ServerSavedWindow({
-    required this.client,
-    required this.events,
-    required this.snapshot,
-    required this.serverId,
-    required this.identity,
+    required super.client,
+    required super.events,
+    required super.snapshot,
+    required super.serverId,
+    required super.identity,
     required this.lostChannels,
   });
 
-  final Object client;
-  final Stream<RaftEvent> events;
-  @override
-  ResourceSnapshot snapshot;
-  String? Function() serverId;
-  String Function() identity;
   Set<String> Function(Map<String, Map<String, dynamic>> previous) lostChannels;
-  @override
-  bool needsRevalidate = false;
-  @override
-  int attached = 0;
-  StreamSubscription<RaftEvent>? _events;
-  var _disposed = false;
-
-  bool get disposed => _disposed;
-  bool get sameIdentity => identity() == snapshot.identity;
-
-  void adopt({
-    required ResourceSnapshot snapshot,
-    required String? Function() serverId,
-    required String Function() identity,
-    required Set<String> Function(Map<String, Map<String, dynamic>> previous)
-    lostChannels,
-  }) {
-    this.snapshot = snapshot;
-    this.serverId = serverId;
-    this.identity = identity;
-    this.lostChannels = lostChannels;
-    needsRevalidate = false;
-  }
 
   @override
-  void attach() {
-    attached++;
-    _events?.cancel();
-    _events = null;
-  }
+  ResourceSnapshot get snapshot => super.snapshot as ResourceSnapshot;
 
   @override
-  void detach() {
-    if (attached == 0) return;
-    attached--;
-    if (attached == 0) ensureListening();
-  }
-
-  void ensureListening() {
-    if (_disposed || attached != 0 || _events != null) return;
-    _events = events.listen(_onEvent);
-  }
-
-  void dispose() {
-    _disposed = true;
-    _events?.cancel();
-    _events = null;
-    attached = 0;
+  void adoptWindow(ServerPageWindow fresh) {
+    super.adoptWindow(fresh);
+    lostChannels = (fresh as ServerSavedWindow).lostChannels;
   }
 
   /// An id that left the saved set. No row is invented, and nothing is fetched.
   void removeMessage(String id) {
-    if (_disposed) return;
+    if (disposed) return;
     final next = omitSavedMessage(
       rows: snapshot.rows,
       windows: snapshot.viewWindows,
@@ -292,7 +241,7 @@ class ServerSavedWindow implements ServerSavedSlot {
 
   /// An id that entered the saved set. There is no row to insert.
   void noteSaved(String id) {
-    if (_disposed) return;
+    if (disposed) return;
     final known =
         snapshot.rows.any((row) => row['messageId'] == id) ||
         snapshot.viewWindows.values.any(
@@ -301,8 +250,8 @@ class ServerSavedWindow implements ServerSavedSlot {
     if (!known) needsRevalidate = true;
   }
 
-  void _onEvent(RaftEvent event) {
-    if (_disposed || attached != 0 || !sameIdentity) return;
+  @override
+  void onSessionEvent(RaftEvent event) {
     final name = event.name;
     if (name == 'connected') {
       needsRevalidate = true;
@@ -316,7 +265,7 @@ class ServerSavedWindow implements ServerSavedSlot {
       'channel:members-updated',
       'channel:updated',
     };
-    if (!handled.contains(name) || _otherServer(event.payload)) return;
+    if (!handled.contains(name) || otherServer(event.payload)) return;
     switch (name) {
       case 'message:updated':
         _patch(event.payload);
@@ -329,12 +278,6 @@ class ServerSavedWindow implements ServerSavedSlot {
       default:
         _onChannel(event.payload, authority: true);
     }
-  }
-
-  bool _otherServer(Object? payload) {
-    if (payload is! Map) return false;
-    final id = payload['serverId'];
-    return id is String && id != serverId();
   }
 
   void _patch(Object? payload) {
@@ -397,7 +340,7 @@ class ServerSavedWindow implements ServerSavedSlot {
   }
 
   void _drop(Set<String> ids) {
-    if (_disposed || ids.isEmpty) return;
+    if (disposed || ids.isEmpty) return;
     final kept = [
       for (final row in snapshot.rows)
         if (_keepChannel(row, ids)) row,

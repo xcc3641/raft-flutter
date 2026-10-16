@@ -24,9 +24,9 @@ const Map<String, String> zhCatalogWeb7 = <String, String>{
   "Start": "启动",
   "Start Agent": "启动 Agent",
   "Start Claude Code with the Raft channel": "启动带 Raft 频道的 Claude Code",
-  "Start Migration": "开始迁移",
+  "Migrate": "迁移",
   "Start building with agents.": "开始与 Agent 一起构建。",
-  "Start on new computer": "在新机器上启动",
+  "Start on new computer": "在新计算机上启动",
   "Start one of your computers": "启动其中任意一台计算机",
   "Start over": "重新开始",
   "Start over?": "重新开始？",
@@ -47,7 +47,7 @@ const Map<String, String> zhCatalogWeb7 = <String, String>{
   "Stop Agent": "停止 Agent",
   "Stop Agents": "停止 Agent",
   "Stop All Agents": "停止所有 Agent",
-  "Stop agent": "停下 Agent",
+  "Stop agent": "停止 Agent",
   "Stop all agents in this channel": "停止此频道中的所有 Agent",
   "Stop and restart the agent process. Keeps the runtime session and workspace files.":
       "停止并重新启动 agent 进程，保留运行时会话和工作区文件。",
@@ -58,7 +58,7 @@ const Map<String, String> zhCatalogWeb7 = <String, String>{
   "Stop selected online agents": "停止选中的在线 Agent",
   "Stopped": "已停止",
   "Stopped — won't receive messages until restarted": "已停止——重启前不会接收消息",
-  "Stopping migrated agent": "正在停止已迁移的 Agent",
+  "Stopping the agent on the new computer": "正在停止新计算机上的 Agent",
   "Stopping…": "停止中…",
   "Store a provider credential once, then reuse the connection when creating or editing Agents. Credentials are encrypted and never shown again.":
       "只需保存一次 Provider 凭据，创建或编辑 Agent 时即可复用连接。凭据会被加密，保存后不再回显。",
@@ -177,8 +177,8 @@ const Map<String, String> zhCatalogWeb7 = <String, String>{
       "频道名称或描述有未保存的修改，关闭前要保存吗？",
   "The channel was saved, but its Slack bridge was not enabled. Retry to finish the bridge setup.":
       "频道已保存，但 Slack 桥接尚未启用。请重试以完成桥接设置。",
-  "The computer switch already happened. Raft is stopping the migrated agent and confirming cleanup on both computers.":
-      "Computer 切换已经完成。Raft 正在停止已迁移的 Agent，并确认两台 Computer 上的清理结果。",
+  "The agent had already switched to the new computer. Raft is stopping it there and cleaning up both computers.":
+      "Agent 已经切换到新计算机。Raft 正在新计算机上停止 Agent，并在两台计算机上完成清理。",
   "The connection between the two computers dropped during the transfer.":
       "两台计算机之间的连接在传输过程中断开了。",
   "The connection between the two computers dropped during the transfer. Make sure both computers are online, then try again.":
@@ -200,8 +200,8 @@ const Map<String, String> zhCatalogWeb7 = <String, String>{
       "开头的 @ 已自动去掉——那是显示写法，不是名字的一部分。",
   "The machine summary sent with every report (versions, failure counts, trace fields) is structured data with no free text.":
       "随每份报告一起发送的机器摘要（版本、失败次数、trace 字段）是结构化数据，不含自由文本。",
-  "The migration changed before cancellation was submitted. Status was refreshed; review the current status and try again.":
-      "提交取消请求前迁移状态已改变。状态已刷新；请检查当前状态后重试。",
+  "The migration moved on before your request went through. Check the latest status and try again.":
+      "提交取消请求前，迁移已有新进展。请查看最新状态后重试。",
   "The migration changed before this action completed. Refresh and try again.":
       "执行此操作前迁移状态已发生变化。请刷新后重试。",
   "The migration changed concurrently. Refresh and try again.":
@@ -214,10 +214,10 @@ const Map<String, String> zhCatalogWeb7 = <String, String>{
       "迁移状态不完整。请刷新后再尝试取消。",
   "The migration stopped before it completed. Review the technical reason, then try again.":
       "迁移在完成前停止。请查看技术原因后重试。",
-  "The migration was canceled after the computer switch. The migrated agent was stopped and cleanup was confirmed.":
-      "迁移已在 Computer 切换后取消。已迁移的 Agent 已停止，并已确认清理完成。",
-  "The migration was canceled before the computer switch. The agent remains on the source computer.":
-      "迁移已在 Computer 切换前取消。Agent 仍保留在源 Computer 上。",
+  "The migration was canceled after the agent switched computers. The agent is stopped on the new computer, and cleanup is done.":
+      "迁移在 Agent 切换计算机后被取消。Agent 已在新计算机上停止，清理已完成。",
+  "The migration was canceled before the agent switched computers. The agent is still on the original computer.":
+      "迁移在 Agent 切换计算机前已取消。Agent 仍在原计算机上。",
   "The model produced tool-call arguments in an invalid format, so Codex rejected the tool call — try a different model.":
       "模型输出的工具参数格式无效，Codex 拒绝了该次工具调用；可更换模型",
   "The new passwords must match.": "两次输入的新密码必须一致。",

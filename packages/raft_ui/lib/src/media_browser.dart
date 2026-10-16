@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import 'design_primitives.dart' show RaftInteractive;
 import 'icons.dart';
+import 'preview_route.dart';
 import 'large_content_viewer.dart';
 import 'localization.dart';
 import 'text_scaling.dart';
@@ -86,7 +87,8 @@ String raftMediaDuration(Duration value) {
 /// A [staged] route (the phone shell) paints nothing itself: the shell reads
 /// [scrim] and [stage] and brings the chrome in after the flight. Otherwise
 /// the whole page fades with [scrim].
-class RaftMediaBrowserRoute<T> extends PageRoute<T> {
+class RaftMediaBrowserRoute<T> extends PageRoute<T>
+    implements RaftPreviewRoute {
   RaftMediaBrowserRoute({
     required this.builder,
     this.reducedMotion = false,

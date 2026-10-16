@@ -6,6 +6,8 @@ import 'package:raft_ui/raft_ui.dart';
 import '../data/attachment_disk_cache.dart';
 import '../data/cache_budget.dart';
 import '../data/cache_clear.dart';
+import '../data/workspace_controller.dart';
+import 'message_history_settings.dart';
 import 'computer_detail_view.dart' show computerFileSize;
 
 /// Settings > Resources > Storage (native only; Web leaves caching to the
@@ -22,7 +24,8 @@ import 'computer_detail_view.dart' show computerFileSize;
 /// workspace database, files the user saved and files received from other apps
 /// are stored elsewhere and are never touched.
 class StorageSettingsPage extends StatefulWidget {
-  const StorageSettingsPage({super.key, this.cache, this.coordinator});
+  const StorageSettingsPage({super.key, this.cache, this.coordinator, this.workspace});
+  final WorkspaceController? workspace;
 
   /// The cache whose size is shown; the app's installed cache by default.
   final AttachmentDiskCache? cache;
@@ -136,6 +139,7 @@ class _StorageSettingsPageState extends State<StorageSettingsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (widget.workspace case final w?) MessageHistorySettings.forWorkspace(w),
         const RaftSettingsSectionHeader(
           label: 'Storage',
           glyph: RaftGlyph.hardDrive,

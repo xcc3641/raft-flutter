@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_flutter/features/auth_view.dart';
+import 'package:raft_flutter/features/chat_view.dart';
 import 'package:raft_flutter/features/global_server_selector.dart';
+import 'package:raft_flutter/features/mobile_settings_owner.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_flutter/platform/background_notifications.dart';
 import 'package:raft_client/raft_client.dart';
@@ -44,6 +46,7 @@ Future<RootFixture> _restart(
   String uri, {
   String principal = 'alice',
   String lastServer = 'alpha',
+  double width = 1280,
   void Function(RootFixture)? before,
 }) async {
   final f = RootFixture(cache: cache);
@@ -54,7 +57,7 @@ Future<RootFixture> _restart(
   await f.mount(
     t,
     'elegant-light',
-    1280,
+    width,
     cachedSession: true,
     principal: principal,
     preferences: {'$_memory.last': lastServer, '$_memory.a': uri},
@@ -71,7 +74,218 @@ Future<void> _release(WidgetTester t, RootFixture f, [String? only]) async {
   await f.flush(t);
 }
 
+RootFixture _twoChannelFixture({RootCache? cache}) {
+  final f = RootFixture(cache: cache);
+  f.overrides['GET /channels'] = (request) => [
+    for (final id
+        in request.headers['X-Server-Id'] == 'a'
+            ? ['alpha', 'beta']
+            : ['c${request.headers['X-Server-Id']}'])
+      {
+        'id': id,
+        'name': 'channel-$id',
+        'type': 'channel',
+        'serverId': request.headers['X-Server-Id'],
+        'joined': true,
+        'latestSeq': '1',
+      },
+  ];
+  for (final id in ['alpha', 'beta']) {
+    f.overrides['GET /messages/channel/$id'] = (_) => {
+      'messages': [
+        {
+          'id': 'message-$id',
+          'channelId': id,
+          'seq': '1',
+          'senderId': 'alice',
+          'senderName': 'Alice',
+          'content': 'Message $id',
+          'createdAt': '2026-10-10T00:00:00Z',
+        },
+      ],
+      'hasMore': false,
+      'hasNewer': false,
+    };
+    f.overrides['POST /channels/$id/read'] = (_) => {};
+    f.overrides['GET /channels/$id/members'] = (_) => [];
+  }
+  return f;
+}
+
+Future<RootCache> _cachedBeta(WidgetTester t) async {
+  final first = _twoChannelFixture();
+  await first.mount(t, 'elegant-light', 1280);
+  await t.tap(find.byKey(const ValueKey('global-server-a')));
+  await first.flush(t);
+  await t.tap(find.text('channel-beta').first);
+  await first.flush(t);
+  expect(find.text('Message beta'), findsOneWidget);
+  await first.workspace(t).flushCache();
+  await first.close(t);
+  expect(
+    await first.cache.read(_origin, 'alice', 'a', 'selection', ''),
+    'beta',
+  );
+  return first.cache;
+}
+
+void _phoneDirect(bool direct) {
+  MobileSettingsPreference.instance.setEnabled(direct);
+  addTearDown(MobileSettingsPreference.instance.resetForTest);
+}
+
 void main() {
+  for (final direct in [false, true]) {
+  for (final width in [390.0, 1280.0]) {
+    for (final (route, server, channel, message) in [
+      ('/s/alpha/channel/beta', 'a', 'beta', 'Message beta'),
+      ('/s/beta/channel/cb', 'b', 'cb', 'Accepted b'),
+    ]) {
+      testWidgets(
+        'late cold-start Alpha cannot replace $route at $width when direct is $direct',
+        (t) async {
+        _phoneDirect(direct);
+        final cache = await _cachedBeta(t);
+        final f = _twoChannelFixture(cache: cache);
+        final alpha = Completer<dynamic>();
+        f.holds['GET /messages/channel/alpha'] = alpha;
+        try {
+          await f.mount(
+            t,
+            'elegant-light',
+            width,
+            cachedSession: true,
+            uri: Uri(path: '/s/alpha/channel/alpha'),
+          );
+          expect(f.workspace(t).channel?.id, 'alpha');
+          await f.pushUri(t, route);
+          expect(f.workspace(t).server?.id, server);
+          expect(f.workspace(t).channel?.id, channel);
+          expect(find.text(message), findsOneWidget);
+          alpha.complete({
+            'messages': [
+              {
+                'id': 'late-alpha',
+                'channelId': 'alpha',
+                'seq': '1',
+                'senderId': 'alice',
+                'senderName': 'Alice',
+                'content': 'Late Alpha must not replace this page',
+                'createdAt': '2026-10-10T00:00:00Z',
+              },
+            ],
+            'hasMore': false,
+            'hasNewer': false,
+          });
+          await f.flush(t);
+          expect(f.router(t).currentConfiguration.toString(), route);
+          expect(f.workspace(t).server?.id, server);
+          expect(f.workspace(t).channel?.id, channel);
+          expect(find.text(message), findsOneWidget);
+          expect(
+            find.text('Late Alpha must not replace this page'),
+            findsNothing,
+          );
+        } finally {
+          if (!alpha.isCompleted) alpha.complete(null);
+          await f.flush(t);
+          await f.close(t);
+        }
+      });
+    }
+    for (final status in [403, 404]) {
+      testWidgets(
+        'cold-start denied Alpha stays unavailable instead of cached Beta $width/$status when direct is $direct',
+        (t) async {
+          _phoneDirect(direct);
+          final cache = await _cachedBeta(t);
+          final f = _twoChannelFixture(cache: cache);
+          f.overrides['GET /messages/channel/alpha'] = (_) => {
+            'error': 'Channel unavailable',
+          };
+          f.adapter.statuses['GET /messages/channel/alpha'] = status;
+          try {
+            await f.mount(
+              t,
+              'elegant-light',
+              width,
+              cachedSession: true,
+              uri: Uri(path: '/s/alpha/channel/alpha'),
+            );
+            expect(
+              f.router(t).currentConfiguration.toString(),
+              '/s/alpha/channel/alpha',
+            );
+            expect(f.workspace(t).missingConversationChannelId, 'alpha');
+            expect(find.text('Message beta'), findsNothing);
+            expect(find.text('SELECT A CHANNEL'), findsOneWidget);
+            expect(find.text('LOADING CHANNEL'), findsNothing);
+            expect(f.client.user?.id, 'alice');
+            expect(
+              await cache.read(_origin, 'alice', 'a', 'window', 'beta'),
+              isNotNull,
+            );
+          } finally {
+            await f.close(t);
+          }
+        },
+      );
+    }
+  }
+  }
+  for (final direct in [false, true]) {
+  for (final width in [390.0, 1280.0]) {
+    for (final cachedSession in [false, true]) {
+      testWidgets(
+        'cold start routes Alpha over cached Beta $width/cached=$cachedSession when direct is $direct',
+        (t) async {
+          _phoneDirect(direct);
+          final first = _twoChannelFixture();
+          await first.mount(t, 'elegant-light', 1280);
+          await t.tap(find.byKey(const ValueKey('global-server-a')));
+          await first.flush(t);
+          await t.tap(find.text('channel-beta').first);
+          await first.flush(t);
+          expect(find.text('Message beta'), findsOneWidget);
+          await first.workspace(t).flushCache();
+          await first.close(t);
+          expect(
+            await first.cache.read(_origin, 'alice', 'a', 'selection', ''),
+            'beta',
+          );
+          final restarted = _twoChannelFixture(cache: first.cache);
+          try {
+            await restarted.mount(
+              t,
+              'elegant-light',
+              width,
+              cachedSession: cachedSession,
+              uri: Uri(path: '/s/alpha/channel/alpha'),
+            );
+            expect(
+              restarted.router(t).currentConfiguration.toString(),
+              '/s/alpha/channel/alpha',
+            );
+            expect(
+              restarted.adapter.calls.where(
+                (request) => request.path == '/messages/channel/alpha',
+              ),
+              isNotEmpty,
+              reason: 'the route must drive selection and the page request',
+            );
+            expect(restarted.workspace(t).channel?.id, 'alpha');
+            expect(find.text('Message alpha'), findsOneWidget);
+            expect(find.text('Message beta'), findsNothing);
+            expect(find.text('LOADING CHANNEL'), findsNothing);
+          } finally {
+            await restarted.close(t);
+          }
+        },
+      );
+    }
+  }
+  }
+
   testWidgets(
     'logout while a guest settles revokes its rotation without erasing a concurrent new login',
     (t) async {
@@ -231,11 +445,17 @@ void main() {
     },
   );
 
+  for (final direct in [false, true]) {
   testWidgets(
-    'restart paints cached sidebar and window at the first frame, then revalidates in place',
+    'restart paints cached sidebar and window at the first frame when direct is $direct, then revalidates in place',
     (t) async {
+      _phoneDirect(direct);
       final (cache, uri) = await _firstProcess(t);
-      final f = await _restart(t, cache, uri);
+      final f = await _restart(t, cache, uri, width: direct ? 390 : 1280);
+      expect(
+        find.byType(MobileChatDirectRead),
+        direct ? findsWidgets : findsNothing,
+      );
       // No startup response has arrived; every painted frame was already the
       // workspace with its cached sidebar row and message window.
       expect(f.surfaces, everyElement('workspace'));
@@ -251,25 +471,26 @@ void main() {
         isEmpty,
       );
       // Revalidation adds a newer row; the cached row never blanks.
-      final ordinary = f.adapter.routes['GET /messages/channel/ca']!;
-      f.adapter.routes['GET /messages/channel/ca'] = (o) async {
-        final page = Map<String, dynamic>.from(await ordinary(o));
-        return {
-          ...page,
-          'messages': [
-            ...page['messages'] as List,
-            {
-              'id': 'ma2',
-              'channelId': 'ca',
-              'seq': '2',
-              'senderId': 'alice',
-              'senderName': 'Alice',
-              'content': 'Fresh a',
-              'createdAt': '2026-10-10T00:01:00Z',
-            },
-          ],
-        };
-      };
+      final cached =
+          await cache.read(_origin, 'alice', 'a', 'window', 'ca') as Map;
+      // The request may already be in flight over the cached first frame.
+      // Complete that held response instead of replacing its handler later.
+      f.holds['GET /messages/channel/ca']!.complete({
+        'messages': [
+          ...cached['messages'] as List,
+          {
+            'id': 'ma2',
+            'channelId': 'ca',
+            'seq': '2',
+            'senderId': 'alice',
+            'senderName': 'Alice',
+            'content': 'Fresh a',
+            'createdAt': '2026-10-10T00:01:00Z',
+          },
+        ],
+        'hasMore': false,
+        'hasNewer': false,
+      });
       var blanked = false;
       f.onFrame = () {
         if (find.text('Accepted a').evaluate().isEmpty) blanked = true;
@@ -292,6 +513,7 @@ void main() {
       await f.close(t);
     },
   );
+  }
 
   testWidgets('another account on the device never sees the cached window', (
     t,

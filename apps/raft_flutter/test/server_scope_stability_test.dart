@@ -392,8 +392,8 @@ void main() {
       final reads = _reads(a, '/product-feedback/tickets');
       for (var i = 0; i < 3; i++) {
         w.channel = w.channels[i.isEven ? 1 : 0];
-        w.channelGeneration++;
-        w.threadGeneration++;
+        w.messageWindows.channelGeneration++;
+        w.messageWindows.threadGeneration++;
         w.notifyListeners();
         await _everyFrame(t, (frame) {
           expect(row, findsWidgets, reason: 'switch $i frame $frame');

@@ -316,7 +316,7 @@ const Map<String, String> zhCatalogWeb1 = <String, String>{
   "your desktop environment's notification settings": "桌面环境的通知设置",
   "Settings → System → Notifications": "设置 → 系统 → 通知",
   "Phone notifications": "手机通知",
-  "Not enabled": "未开启",
+  "Not enabled": "未启用",
   "While Raft is connected, new DMs, direct mentions and replies in followed threads show a system notification. In the background Raft checks for new messages periodically, so some may arrive later.":
       "Raft 连接时，会对新私信、直接提及和已关注消息串的回复弹出系统通知。切到后台后会定期检查新消息，可能会晚一些到达。",
   "Whether notifications appear is decided by the system: on Android, Settings → Apps → Raft → Notifications. With Do Not Disturb or a Focus mode on, the system may delay or silence notifications.":

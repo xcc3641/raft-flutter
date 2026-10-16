@@ -633,7 +633,7 @@ class _AttachmentViewState extends State<AttachmentView> {
   }
 
   ModalRoute<void> _previewRoute(bool page, WidgetBuilder builder) => page
-      ? MaterialPageRoute<void>(
+      ? RaftPreviewPageRoute<void>(
           settings: const RouteSettings(name: '/attachment-preview'),
           builder: (context) {
             final surface = RaftTokens.of(context).panel;

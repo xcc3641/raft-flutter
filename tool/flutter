@@ -9,6 +9,7 @@ import sys
 from android_app import SafetyError, flutter_guard
 import gen_l10n_index
 import parity_case_map
+from flutter_launcher import windows_sdk_command
 
 try:
     flutter_guard(sys.argv[1:])
@@ -33,6 +34,10 @@ executable = next((p for p in candidates if p.is_file()), None)
 if executable is None:
     sys.exit(f'Install Flutter {version} with FVM, or set RAFT_FLUTTER_BIN to its flutter executable.')
 result = subprocess.run([str(executable), '--version', '--machine'], capture_output=True, text=True)
+if result.returncode:
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    sys.exit(result.returncode)
 try:
     actual = json.loads(result.stdout)['frameworkVersion']
 except (ValueError, KeyError):
@@ -40,5 +45,6 @@ except (ValueError, KeyError):
 if actual != version:
     sys.exit(f'This repository requires Flutter {version}; selected SDK is {actual}.')
 if os.name == 'nt':
-    sys.exit(subprocess.call([str(executable), *sys.argv[1:]]))
+    command, environment = windows_sdk_command(executable, sys.argv[1:], os.environ)
+    sys.exit(subprocess.call(command, env=environment))
 os.execv(str(executable), [str(executable), *sys.argv[1:]])

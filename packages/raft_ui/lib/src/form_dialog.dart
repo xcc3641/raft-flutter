@@ -44,8 +44,14 @@ class RaftFormDialog extends StatefulWidget {
     this.destructive = false,
     this.extra,
     this.errorFallback,
+    this.errorContent,
   });
   final String title, submitLabel;
+
+  /// Rich content for a failed submit (a banner with details and a recovery
+  /// action) in place of the plain error banner. Returning null for an error
+  /// keeps the plain banner.
+  final Widget? Function(BuildContext context, Object error)? errorContent;
 
   /// The surface's Web fallback message, shown when a failed submit carries no
   /// server text (`err.response?.data?.error || formatMessage(fallback)`).
@@ -66,6 +72,8 @@ class _RaftFormDialogState extends State<RaftFormDialog> {
   bool busy = false;
   // ignore: raft_lints/avoid_imperative_notice_state -- Cleared when the next submit starts, validation included; the dialog state is dropped when it closes.
   String? error;
+  // ignore: raft_lints/avoid_imperative_notice_state -- Same lifetime as [error]: cleared when the next submit starts.
+  Widget? errorWidget;
 
   /// Keeps one editor / selection per current field: the dialog can be rebuilt
   /// with another field set (e.g. after its inputs load) and submit() and the
@@ -117,7 +125,12 @@ class _RaftFormDialogState extends State<RaftFormDialog> {
     if (busy) return;
     // Web: every submit starts with `setError("")`, validation included, so a
     // rejection of the previous values does not outlive them.
-    if (error != null) setState(() => error = null);
+    if (error != null || errorWidget != null) {
+      setState(() {
+        error = null;
+        errorWidget = null;
+      });
+    }
     if (!form.currentState!.validate()) return;
     setState(() => busy = true);
     try {
@@ -135,13 +148,13 @@ class _RaftFormDialogState extends State<RaftFormDialog> {
         Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
-        setState(
-          () => error = raftErrorMessage(
-            context,
-            e,
-            fallback: widget.errorFallback,
-          ),
-        );
+        final custom = widget.errorContent?.call(context, e);
+        setState(() {
+          errorWidget = custom;
+          error = custom == null
+              ? raftErrorMessage(context, e, fallback: widget.errorFallback)
+              : null;
+        });
       }
     } finally {
       if (mounted) setState(() => busy = false);
@@ -276,6 +289,7 @@ class _RaftFormDialogState extends State<RaftFormDialog> {
                         child: widget.extra!,
                       ),
                     ),
+                  ?errorWidget,
                   if (error != null) RaftErrorBanner(error!),
                 ],
               ),

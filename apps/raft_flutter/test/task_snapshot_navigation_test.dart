@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_client/raft_client.dart';
 import 'package:raft_flutter/data/resource_snapshot_cache.dart';
+import 'package:raft_flutter/data/server_task_window.dart';
 import 'package:raft_flutter/data/task_board_reconcile.dart';
 import 'package:raft_flutter/data/workspace_controller.dart';
 import 'package:raft_flutter/features/resource_view.dart';
@@ -98,7 +99,10 @@ void main() {
   );
   List lane(dynamic state, String status) => state.lanes[status] as List;
   final spinner = find.byType(CircularProgressIndicator);
-  ServerTaskSlot? window() => w.resourceSnapshots.serverTasks;
+  ServerTaskWindow? window() {
+    final slot = w.resourceSnapshots.serverPage(serverTasksPage);
+    return slot is ServerTaskWindow ? slot : null;
+  }
 
   Future<dynamic> mountBoard(WidgetTester tester) async {
     await tester.pumpWidget(page());
@@ -305,7 +309,7 @@ void main() {
     w.server = RaftRecord({'id': 's1', 'role': 'member'});
     client.selectServer('s1');
     expect(w.resourceSnapshots.read('tasks', state.identityAuthority), isNull);
-    expect(w.resourceSnapshots.serverTasks, isNull);
+    expect(w.resourceSnapshots.serverPage(serverTasksPage), isNull);
     await tester.pumpAndSettle();
   });
 
@@ -425,12 +429,12 @@ void main() {
     await tester.pumpAndSettle();
     final requests = w.taskQueries.length;
     w.revokeServer('s1');
-    expect(w.resourceSnapshots.serverTasks, isNull);
+    expect(w.resourceSnapshots.serverPage(serverTasksPage), isNull);
     client.emit('task:updated', {
       'task': {...taskRow(80, 'todo'), 'title': 'After logout'},
     });
     await tester.pump(const Duration(milliseconds: 300));
-    expect(w.resourceSnapshots.serverTasks, isNull);
+    expect(w.resourceSnapshots.serverPage(serverTasksPage), isNull);
     expect(w.taskQueries, hasLength(requests));
     w.server = RaftRecord({'id': 's1', 'role': 'owner'});
     client.selectServer('s1');
@@ -463,7 +467,7 @@ void main() {
     await tester.pumpWidget(page());
     await tester.pump();
     expect(find.text('Task 80'), findsNothing);
-    expect(w.resourceSnapshots.serverTasks, isNull);
+    expect(w.resourceSnapshots.serverPage(serverTasksPage), isNull);
     w.hold!.complete();
     w.hold = null;
     await tester.pumpAndSettle();

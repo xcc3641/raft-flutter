@@ -31,6 +31,7 @@ import 'package:raft_ui/raft_ui.dart';
 
 import 'announcement_host_test.dart' as announcements;
 import 'source_feedback_store_test.dart' as fx;
+import 'support/close_history_settings.dart';
 import 'support/close_registry_dialogs.dart';
 import 'support/close_runner.dart';
 import 'support/close_support.dart';
@@ -344,6 +345,10 @@ void main() {
   // Leak debt (dialog notifier): see docs/development.md, Leak tracking.
   leakDebt(const ['ValueNotifier<RaftTranscriptRequestState?>']);
   final harness = <String, OpenSurface>{
+    'history-lower-limit-confirm': (t, size) =>
+        historySettingsConfirmation(t, size, rebuild: false),
+    'history-full-clean-confirm': (t, size) =>
+        historySettingsConfirmation(t, size, rebuild: true),
     'confirm-dialog': confirmDialog,
     'role-permission-help': (t, size) async {
       await openFromButton(

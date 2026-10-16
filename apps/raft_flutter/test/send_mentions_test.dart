@@ -212,7 +212,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
     }
     w.channel = null;
-    w.channelGeneration++;
+    w.messageWindows.channelGeneration++;
     w.ledger.revokeChannel('c1');
     w.visibleIds.remove('c1');
     t.pending!.complete();
@@ -234,7 +234,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
     }
     w.channel = RaftChannel({'id': 'c2', 'name': 'other', 'joined': true});
-    w.channelGeneration++;
+    w.messageWindows.channelGeneration++;
     t.pagePending!.complete();
     expect(await sending, false);
     expect(t.writes, isEmpty);
@@ -252,7 +252,7 @@ void main() {
         await Future<void>.delayed(Duration.zero);
       }
       w.channel = RaftChannel({'id': 'c2', 'name': 'other', 'joined': true});
-      w.channelGeneration++;
+      w.messageWindows.channelGeneration++;
       t.pending!.complete();
       expect(await sending, false);
       expect(w.error, isNull);

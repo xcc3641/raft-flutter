@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart' as chat;
@@ -33,6 +34,8 @@ class RaftMessageTimeline extends StatefulWidget {
     this.hasOlder = false,
     this.loadingOlder = false,
     this.onLoadOlder,
+    this.hasNewer = false,
+    this.onLoadNewer,
     this.onRecenter,
     this.cacheExtent,
     this.canPrepareNearbyRows,
@@ -55,6 +58,8 @@ class RaftMessageTimeline extends StatefulWidget {
   final Widget? empty;
   final bool hasOlder, loadingOlder;
   final VoidCallback? onLoadOlder;
+  final bool hasNewer;
+  final VoidCallback? onLoadNewer;
 
   /// Re-centers the timeline on row [index] and positions the next layout at
   /// [alignment] (the host owns the center). A scrollbar drag to a distant
@@ -82,6 +87,11 @@ class RaftMessageTimeline extends StatefulWidget {
 class _RaftMessageTimelineState extends State<RaftMessageTimeline>
     implements RaftTimelineThumbDriver {
   double nearbyCache = 250;
+  final _keyboardOlderScroll = _KeyboardOlderScrollAction();
+
+  /// Inside the timeline scrollable, so a key here resolves to this list.
+  /// Traversal skips it; a tap requests it. Inner controls stay descendants.
+  final _timelineFocus = FocusNode(debugLabel: 'timeline', skipTraversal: true);
   RaftMessageTimeline? listsOwner;
   Widget? historyList, forwardList;
   late final nearbyPreparation = MessagePreparation(
@@ -125,6 +135,7 @@ class _RaftMessageTimelineState extends State<RaftMessageTimeline>
 
   @override
   void dispose() {
+    _timelineFocus.dispose();
     nearbyPreparation.dispose();
     super.dispose();
   }
@@ -139,6 +150,7 @@ class _RaftMessageTimelineState extends State<RaftMessageTimeline>
   /// intersection). A page landing, a layout or a metrics change never
   /// requests one by itself.
   bool spent = false;
+  bool newerSpent = false;
 
   @override
   void didUpdateWidget(RaftMessageTimeline oldWidget) {
@@ -152,11 +164,15 @@ class _RaftMessageTimelineState extends State<RaftMessageTimeline>
     }
     if (!identical(oldWidget.controller, widget.controller)) {
       spent = false;
+      newerSpent = false;
       userDirection = ScrollDirection.idle;
       thumb = null;
     }
     // Landed (or failed): the next user move toward older may request again.
-    if (oldWidget.loadingOlder && !widget.loadingOlder) spent = false;
+    if (oldWidget.loadingOlder && !widget.loadingOlder) {
+      spent = false;
+      newerSpent = false;
+    }
   }
 
   ScrollPosition? get singlePosition {
@@ -200,6 +216,23 @@ class _RaftMessageTimelineState extends State<RaftMessageTimeline>
     }
   }
 
+  void userMovedNewer() {
+    final position = singlePosition, load = widget.onLoadNewer;
+    if (position == null) return;
+    final near = position.extentAfter <= math.max(200.0,
+      position.viewportDimension * RaftMessageTimeline.prefetchViewports);
+    if (!near) {
+      newerSpent = false;
+      return;
+    }
+    if (newerSpent || load == null || !widget.hasNewer ||
+        widget.loadingOlder || widget.controller.pending != null) {
+      return;
+    }
+    newerSpent = true;
+    load();
+  }
+
   bool onNotification(Notification notification) {
     // Only the timeline itself, not scrollables inside rows.
     if (notification is ScrollNotification && notification.depth != 0) {
@@ -223,12 +256,20 @@ class _RaftMessageTimelineState extends State<RaftMessageTimeline>
         userMovedOlder();
       } else {
         rearmOutsideTop();
+        if ((notification.scrollDelta ?? 0) > 0 &&
+            userDirection == ScrollDirection.reverse) {
+          userMovedNewer();
+        }
       }
     } else if (notification is OverscrollNotification) {
       // Pulling at the temporary top (e.g. after a failed page).
       if (notification.overscroll < 0 &&
           userDirection == ScrollDirection.forward) {
         userMovedOlder();
+      }
+      if (notification.overscroll > 0 &&
+          userDirection == ScrollDirection.reverse) {
+        userMovedNewer();
       }
     } else if (notification is ScrollMetricsNotification) {
       rearmOutsideTop();
@@ -355,6 +396,16 @@ class _RaftMessageTimelineState extends State<RaftMessageTimeline>
     if (position is RaftTimelinePosition) position.endThumb();
   }
 
+  /// A blank tap joins the gesture arena inside the scroller. A child control
+  /// is registered first and wins that tap. This recognizer leaves on the
+  /// first move, before the scroller sees it, so a drag and its fling stay
+  /// with the list. The page must still be the current route.
+  void _focusTimelineOnBlankTap() {
+    if (!mounted || _timelineFocus.hasFocus) return;
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    _timelineFocus.requestFocus();
+  }
+
   @override
   Widget build(BuildContext context) {
     widget.controller.olderPending = widget.hasOlder;
@@ -426,20 +477,27 @@ class _RaftMessageTimelineState extends State<RaftMessageTimeline>
       TargetPlatform.windows => true,
       _ => false,
     };
-    Widget list = NotificationListener<Notification>(
-      onNotification: onNotification,
-      child: _TimelineScrollView(
-        controller: widget.controller,
-        // The timeline's own scrollbar replaces the platform default.
-        scrollBehavior: scrollbar ? behavior.copyWith(scrollbars: false) : null,
-        center: forwardKey,
-        anchor: widget.controller.anchor,
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        semanticChildCount: messages.length,
-        scrollCacheExtent: ScrollCacheExtent.pixels(
-          widget.cacheExtent ?? nearbyCache,
-        ),
-        slivers: slivers,
+    Widget list = Actions(
+      actions: <Type, Action<Intent>>{
+        ScrollIntent: _keyboardOlderScroll,
+      },
+      child: NotificationListener<Notification>(
+        onNotification: onNotification,
+        child: _TimelineScrollView(
+            controller: widget.controller,
+            // The timeline's own scrollbar replaces the platform default.
+            scrollBehavior: scrollbar
+                ? behavior.copyWith(scrollbars: false)
+                : null,
+            center: forwardKey,
+            anchor: widget.controller.anchor,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            semanticChildCount: messages.length,
+            scrollCacheExtent: ScrollCacheExtent.pixels(
+              widget.cacheExtent ?? nearbyCache,
+            ),
+            slivers: slivers,
+          ),
       ),
     );
     if (scrollbar) {
@@ -457,6 +515,32 @@ class _RaftMessageTimelineState extends State<RaftMessageTimeline>
         Positioned.fill(child: empty),
       ],
     );
+  }
+}
+
+/// Page Up, and Control or Command plus an arrow, on this timeline.
+///
+/// [ScrollAction] animates and leaves the user direction idle. A key that is
+/// already at the top does not move, so the existing gate is asked here too.
+class _KeyboardOlderScrollAction extends ScrollAction {
+  @override
+  void invoke(ScrollIntent intent, [BuildContext? context]) {
+    final current = context;
+    if (current != null) {
+      final scrollable = Scrollable.maybeOf(current);
+      final position = scrollable?.position;
+      final physics = scrollable?.resolvedPhysics;
+      if (scrollable != null &&
+          position is RaftTimelinePosition &&
+          (physics == null || physics.shouldAcceptUserOffset(position)) &&
+          ScrollAction.getDirectionalIncrement(scrollable, intent) < 0) {
+        position.noteKeyboardTowardOlder();
+        current
+            .findAncestorStateOfType<_RaftMessageTimelineState>()
+            ?.userMovedOlder();
+      }
+    }
+    super.invoke(intent, context);
   }
 }
 
@@ -629,6 +713,12 @@ class RaftTimelinePosition extends ScrollPositionWithSingleContext {
   void goBallistic(double velocity) =>
       super.goBallistic(activity is DrivenScrollActivity ? 0 : velocity);
 
+  /// Page Up and modified arrow keys animate without setting a direction.
+  /// The load gate reads this the same way it reads a finger moving older.
+  void noteKeyboardTowardOlder() {
+    updateUserScrollDirection(ScrollDirection.forward);
+  }
+
   /// Moves to [value] for a scrollbar thumb drag, as a user scroll (load
   /// triggers see the user's direction).
   void thumbTo(double value) {
@@ -742,16 +832,99 @@ class _TimelineScrollView extends CustomScrollView {
     ViewportOffset offset,
     AxisDirection axisDirection,
     List<Widget> slivers,
-  ) => _TimelineViewport(
-    axisDirection: axisDirection,
-    offset: offset,
-    slivers: slivers,
-    center: center,
-    anchor: anchor,
-    scrollCacheExtent: scrollCacheExtent,
-    paintOrder: paintOrder,
-    clipBehavior: clipBehavior,
-  );
+  ) {
+    final viewport = _TimelineViewport(
+      axisDirection: axisDirection,
+      offset: offset,
+      slivers: slivers,
+      center: center,
+      anchor: anchor,
+      scrollCacheExtent: scrollCacheExtent,
+      paintOrder: paintOrder,
+      clipBehavior: clipBehavior,
+    );
+    final state = context.findAncestorStateOfType<_RaftMessageTimelineState>();
+    final focus = state?._timelineFocus;
+    if (focus == null || state == null) return viewport;
+    // Inside the scrollable, so a move rejects this tap before the drag
+    // recognizer handles that same event.
+    return RawGestureDetector(
+      gestures: <Type, GestureRecognizerFactory>{
+        _BlankTapRecognizer:
+            GestureRecognizerFactoryWithHandlers<_BlankTapRecognizer>(
+              () => _BlankTapRecognizer(),
+              (_BlankTapRecognizer instance) {
+                instance.onBlankTap = state._focusTimelineOnBlankTap;
+              },
+            ),
+      },
+      child: Focus(
+        key: const ValueKey('timeline-focus'),
+        focusNode: focus,
+        skipTraversal: true,
+        child: viewport,
+      ),
+    );
+  }
+}
+
+/// Tap recognizer that lives inside the timeline scroller.
+///
+/// Child controls are added to the pointer router first, so they win a tap.
+/// A move past the slop rejects this recognizer before the scroller's drag
+/// handles that event, which leaves the drag and the fling on the list.
+class _BlankTapRecognizer extends OneSequenceGestureRecognizer {
+  VoidCallback? onBlankTap;
+  Offset? _down;
+  bool _moved = false;
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    if (event.buttons != kPrimaryButton) return;
+    super.addAllowedPointer(event);
+    _down = event.position;
+    _moved = false;
+  }
+
+  @override
+  void handleEvent(PointerEvent event) {
+    if (event is PointerMoveEvent) {
+      final down = _down;
+      if (!_moved &&
+          down != null &&
+          (event.position - down).distance > kTouchSlop) {
+        _moved = true;
+        resolve(GestureDisposition.rejected);
+      }
+      return;
+    }
+    if (event is PointerUpEvent) {
+      // A child control wins the sweep when it was added first. Accepting
+      // here would take that tap. A drag already rejected this recognizer.
+      return;
+    }
+    if (event is PointerCancelEvent) {
+      resolve(GestureDisposition.rejected);
+      stopTrackingPointer(event.pointer);
+    }
+  }
+
+  @override
+  void acceptGesture(int pointer) {
+    if (!_moved) onBlankTap?.call();
+    stopTrackingPointer(pointer);
+  }
+
+  @override
+  void rejectGesture(int pointer) {
+    stopTrackingPointer(pointer);
+  }
+
+  @override
+  void didStopTrackingLastPointer(int pointer) {}
+
+  @override
+  String get debugDescription => 'timeline blank tap';
 }
 
 class _TimelineViewport extends Viewport {

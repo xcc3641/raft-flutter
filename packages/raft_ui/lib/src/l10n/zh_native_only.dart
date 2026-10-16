@@ -1,6 +1,14 @@
 // Chinese (zh) strings, see the catalog header in ../localization.dart.
 // English source text is the key. Part of `raftChinese` (merged by the generated zh_index.g.dart).
 const Map<String, String> zhCatalogNativeOnly = <String, String>{
+  "Open Raft": "打开 Raft",
+  "Hide window": "隐藏窗口",
+  "Quit Raft": "退出 Raft",
+  "Keep Raft running when the window closes": "关闭窗口后保持 Raft 运行",
+  "Closing the window keeps messages and notifications connected. Open Raft or quit completely from its system tray icon.":
+      "关闭窗口后仍保持消息和通知连接。可通过系统托盘图标打开或完全退出 Raft。",
+  "The system tray preference is unavailable. Close will exit Raft if its tray icon cannot be created.":
+      "无法读取或保存系统托盘设置。若无法创建托盘图标，关闭窗口将退出 Raft。",
   // Native-only copy with no Web counterpart (Web glossary terms).
   // Android notification settings: no periodic background check any more.
   // PROPOSED wording, to be confirmed by the owner.

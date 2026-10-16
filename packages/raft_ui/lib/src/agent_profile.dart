@@ -5,6 +5,7 @@
 // widgets here take plain view data and callbacks. Values cite the Tailwind
 // classes / raft-ui recipes they come from.
 import 'css_pixel_snap.dart';
+import 'anchored_popup.dart';
 import 'dismiss_scope.dart';
 import 'dialog_card.dart' show RaftRecipeButton;
 import 'error_presentation.dart';
@@ -2598,6 +2599,7 @@ class RaftOverflowMenuButton extends StatefulWidget {
 class _RaftOverflowMenuButtonState extends State<RaftOverflowMenuButton> {
   final menu = OverlayPortalController();
   final anchor = LayerLink();
+  final popupAnchor = GlobalKey();
   final triggerFocus = FocusNode();
   bool keyboardOpened = false;
 
@@ -2627,39 +2629,35 @@ class _RaftOverflowMenuButtonState extends State<RaftOverflowMenuButton> {
     controller: menu,
     overlayChildBuilder: raftBackDismissed(
       close,
-      (_) => CompositedTransformFollower(
-        link: anchor,
-        targetAnchor: Alignment.bottomRight,
-        followerAnchor: Alignment.topRight,
-        offset: const Offset(0, 4),
-        child: Align(
-          alignment: Alignment.topRight,
-          child: TapRegion(
-            groupId: anchor,
-            child: FocusScope(
-              autofocus: true,
-              child: CallbackShortcuts(
-                bindings: {
-                  const SingleActivator(LogicalKeyboardKey.escape): close,
-                },
-                child: Focus(
-                  autofocus: !keyboardOpened,
-                  child: RaftMenuPanel(
-                    onDismiss: close,
-                    children: [
-                      for (final (i, e) in widget.entries.indexed)
-                        RaftMenuItem(
-                          autofocus: keyboardOpened && i == 0,
-                          label: e.label ?? '',
-                          glyph: e.glyph,
-                          leading: e.leading,
-                          onPressed: () {
-                            close();
-                            e.onPressed?.call();
-                          },
-                        ),
-                    ],
-                  ),
+      (_) => RaftAnchoredPopup(
+        anchorKey: popupAnchor,
+        alignRight: true,
+        movement: Scrollable.maybeOf(context)?.position,
+        child: TapRegion(
+          groupId: anchor,
+          child: FocusScope(
+            autofocus: true,
+            child: CallbackShortcuts(
+              bindings: {
+                const SingleActivator(LogicalKeyboardKey.escape): close,
+              },
+              child: Focus(
+                autofocus: !keyboardOpened,
+                child: RaftMenuPanel(
+                  onDismiss: close,
+                  children: [
+                    for (final (i, e) in widget.entries.indexed)
+                      RaftMenuItem(
+                        autofocus: keyboardOpened && i == 0,
+                        label: e.label ?? '',
+                        glyph: e.glyph,
+                        leading: e.leading,
+                        onPressed: () {
+                          close();
+                          e.onPressed?.call();
+                        },
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -2672,13 +2670,22 @@ class _RaftOverflowMenuButtonState extends State<RaftOverflowMenuButton> {
       enabled: menu.isShowing,
       consumeOutsideTaps: true,
       onTapOutside: (_) => close(),
-      child: RaftPanelIconButton(
-        anchorLink: anchor,
-        focusNode: triggerFocus,
-        glyph: RaftGlyph.ellipsisVertical,
-        tooltip: widget.tooltip,
-        onPressed: () => toggle(),
-        onKeyboardActivate: () => toggle(keyboard: true),
+      child: MouseRegion(
+        onEnter: (_) {
+          if (menu.isShowing) setState(() {});
+        },
+        onExit: (_) {
+          if (menu.isShowing) setState(() {});
+        },
+        child: RaftPanelIconButton(
+          anchorLink: anchor,
+          anchorKey: popupAnchor,
+          focusNode: triggerFocus,
+          glyph: RaftGlyph.ellipsisVertical,
+          tooltip: widget.tooltip,
+          onPressed: () => toggle(),
+          onKeyboardActivate: () => toggle(keyboard: true),
+        ),
       ),
     ),
   );

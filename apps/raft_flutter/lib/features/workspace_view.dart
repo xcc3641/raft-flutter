@@ -24,7 +24,6 @@ import '../data/source_server_unread.dart';
 import 'workspace_menu_invite.dart';
 import '../data/workspace_mode_store.dart';
 import 'workspace_grid_view.dart';
-import 'workspace_mode_settings_card.dart';
 import '../data/personal_presentation.dart';
 import '../data/device_preferences.dart';
 import '../data/mobile_tabbar_preferences.dart';
@@ -52,6 +51,8 @@ import 'channel_members.dart';
 import 'create_channel_dialog.dart';
 import 'create_joint_channel_dialog.dart' show CreateJointChannelDialog;
 import 'workspace_settings.dart';
+import 'mobile_resource_direct.dart';
+import 'mobile_settings_owner.dart';
 import 'server_views.dart';
 import 'layout_hold.dart';
 import 'mobile_workspace_navigation.dart';
@@ -89,6 +90,7 @@ import '../data/feature_flag_client_facts.dart';
 
 part 'workspace_view_sidebar_menus.dart';
 part 'mobile_workspace_route.dart';
+part 'mobile_settings_route.dart';
 
 class WorkspaceView extends StatefulWidget {
   const WorkspaceView({
@@ -146,8 +148,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
   // The most recently admitted Settings page survives a conversation visit.
   // Other destinations retire it; workspace authority retires both panes.
   Widget? retainedSettingsContent;
-  Widget? accountSettingsWidget;
-  Object? accountSettingsInputs;
 
   /// Sidebar.tsx `menuOpen`: the row whose context menu is open (`c:<id>` /
   /// `a:<id>`) keeps its muted fill.
@@ -292,7 +292,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
     final channel = w.channels
         .where((c) => c.id == channelSearchSeed)
         .firstOrNull;
-    if (channelSearchAuthority != workspaceAuthority(w) ||
+    if (channelSearchAuthority != channelSearchPageAuthority(w) ||
         channel == null ||
         !w.can('viewChannel', resource: channel)) {
       channelSearchSeed = channelSearchAuthority = null;
@@ -977,6 +977,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
 
   @override
   void dispose() {
+    clearWorkspaceSettingsCache(this);
     _mobileNavigationSelection?.dispose();
     w.removeListener(syncMobileAppBadge);
     mobileAppBadge.removeListener(chatSelectionChanged);
@@ -1163,7 +1164,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
         channelSearchSeed = searchChannelId;
         channelSearchAuthority = searchChannelId == null
             ? null
-            : workspaceAuthority(w);
+            : channelSearchPageAuthority(w);
         channelSearchRevoked = false;
       });
     } else {
@@ -1266,8 +1267,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
       }
       retainedSettingsContent = null;
       conversationInstance = null;
-      accountSettingsWidget = null;
-      accountSettingsInputs = null;
+      clearWorkspaceSettingsCache(this);
       lastAuthority = authority;
       final navigator = Navigator.of(context, rootNavigator: true);
       for (final observer
@@ -1393,7 +1393,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
           !channelSearchRevoked &&
           location.query('channelId') != null) {
         channelSearchSeed = location.query('channelId');
-        channelSearchAuthority = workspaceAuthority(w);
+        channelSearchAuthority = channelSearchPageAuthority(w);
       }
       final t = RaftTokens.of(context);
       final sidePanels = DesktopNavigationPolicy.sidePanels(
@@ -1403,6 +1403,15 @@ class _WorkspaceViewState extends State<WorkspaceView>
         target: desktopNavigation.target?.kind,
       );
       final thread = sidePanels.thread;
+      final phoneChatDirect =
+          widget.mobileRoutePage &&
+          !gridActive &&
+          (location.route == RaftRoute.channel ||
+              location.route == RaftRoute.dm) &&
+          context
+                  .findAncestorStateOfType<_MobileWorkspaceRouteState>()
+                  ?.pageDirect ==
+              true;
       final rootTab = w.navigation.mobileRootTabOf(location);
       // The left rail stands in for the bottom bar on the same tab roots.
       final railShown = railNavigation && rootTab != null && w.server != null;
@@ -1418,18 +1427,27 @@ class _WorkspaceViewState extends State<WorkspaceView>
               'settings' => 'Settings',
               _ => route[0].toUpperCase() + route.substring(1),
             });
-      Widget conversation() => ServerSetupGate(
-        controller: w,
-        onSwitchServer: showWorkspaceSwitcher,
-        child: ConversationPanel(
+      Widget conversation() {
+        final panel = ConversationPanel(
           controller: w,
           selectionHandle: mainSelection,
           onTask: openTaskSurface,
           onMessageTask: openMessageTaskSurface,
           onViewBilling: () => select('billing'),
           onOpenChannelSettings: channelSettings,
-        ),
-      );
+        );
+        return ServerSetupGate(
+          controller: w,
+          onSwitchServer: showWorkspaceSwitcher,
+          child: phoneChatDirect
+              ? MobileChatDirectRead(
+                  channel: true,
+                  thread: false,
+                  child: panel,
+                )
+              : panel,
+        );
+      }
       // Mobile home keeps the sidebar mounted while the lists load and shows
       // SidebarRowsSkeleton rows (Sidebar.tsx channelsLoading), not a spinner.
       Widget content = w.loading && w.server == null
@@ -1523,13 +1541,37 @@ class _WorkspaceViewState extends State<WorkspaceView>
           ? shownConversation(conversation)
           : route == 'search' && channelSearchRevoked
           ? Center(child: Text(tr('Channel is no longer available')))
-          : ResourceView(
-              key: ValueKey(
-                '${w.server?.id}:$route:${route == 'search' ? '$searchEntryRevision:$channelSearchSeed:$channelSearchAuthority' : 0}',
+          : mobileResourceBody(
+              route: route,
+              page: w,
+              outer: mobileHost?.w,
+              direct:
+                  context
+                      .findAncestorStateOfType<_MobileWorkspaceRouteState>()
+                      ?.pageDirect ==
+                  true,
+              wide: wide,
+              rootTab: rootTab,
+              activityMasterDetail: activityFlag.masterDetail(
+                MediaQuery.sizeOf(context).width,
               ),
-              controller: w,
+              buildList: (owner) => ResourceView(
+              key: ValueKey(
+                '${owner.server?.id}:$route:${route == 'search' ? '$searchEntryRevision:$channelSearchSeed:$channelSearchAuthority' : (wide ? 'wide' : 'narrow')}',
+              ),
+              controller: owner,
               section: route,
-              onTask: openTaskSurface,
+              // Phone tasks open on the outer workspace. That controller is
+              // the direct list's owner. Desktop has no outer host, so this
+              // page's controller is the owner.
+              onTask: (row, reload) {
+                final host = mobileHost;
+                if (host != null) {
+                  host.openTaskSurface(row, reload);
+                  return;
+                }
+                openTaskSurface(row, reload);
+              },
               mobileRoot: !wide && rootTab == 'activity',
               activitySidebarEnabled:
                   route == 'activity' && activityFlag.enabled,
@@ -1573,17 +1615,19 @@ class _WorkspaceViewState extends State<WorkspaceView>
                   ? channelSearchSeed
                   : null,
               onBack: dismissPanel,
+              // Search and activity are not direct. [owner] is this page's
+              // controller, and these openers use that same controller.
               onSearchEntity: wide ? openDesktopEntity : null,
               onSearchMessage: openSearchMessage,
               onSearchQueryCommitted: route == 'search'
                   ? (query) {
                       if (!mounted ||
                           navigationScope != mobileAuthority ||
-                          !w.canVisitSection('search')) {
+                          !owner.canVisitSection('search')) {
                         return;
                       }
-                      if (w.navigation.replaceSearchQuery(query)) {
-                        w.notifyListeners();
+                      if (owner.navigation.replaceSearchQuery(query)) {
+                        owner.notifyListeners();
                       }
                     }
                   : null,
@@ -1620,9 +1664,10 @@ class _WorkspaceViewState extends State<WorkspaceView>
                   await openDesktopConversation(channelId, messageId);
                 } else {
                   desktopNavigation.clear();
-                  await w.jumpToMessage(channelId, messageId);
+                  await owner.jumpToMessage(channelId, messageId);
                 }
               },
+            ),
             );
       if (['members', 'agents', 'computers'].contains(route)) {
         final detail = desktopContentDetail();
@@ -1658,10 +1703,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
         final currentContent = content;
         if (!showingConversation) {
           retainedSettingsContent = route == 'settings' ? currentContent : null;
-          if (route != 'settings') {
-            accountSettingsWidget = null;
-            accountSettingsInputs = null;
-          }
+          if (route != 'settings') clearWorkspaceSettingsCache(this);
         }
         // Keep one admitted conversation, not an unbounded cache of routes.
         // The pager removes hidden content from layout, focus and semantics;
@@ -2002,15 +2044,13 @@ class _WorkspaceViewState extends State<WorkspaceView>
                                         child: ServerSetupGate(
                                           controller: w,
                                           onSwitchServer: showWorkspaceSwitcher,
-                                          child: RaftChatView(
-                                            controller: w,
-                                            thread: true,
-                                            viewportHandle: threadViewport,
-                                            selectionHandle: threadSelection,
-                                            onTask: openMessageTaskSurface,
-                                            onViewBilling: () =>
-                                                select('billing'),
-                                          ),
+                                          child: phoneChatDirect
+                                              ? MobileChatDirectRead(
+                                                  channel: false,
+                                                  thread: true,
+                                                  child: _phoneThreadChat(),
+                                                )
+                                              : _phoneThreadChat(),
                                         ),
                                       ),
                                     ],
@@ -2088,6 +2128,15 @@ class _WorkspaceViewState extends State<WorkspaceView>
   }
 
   final profilePanelKey = GlobalKey();
+
+  Widget _phoneThreadChat() => RaftChatView(
+    controller: w,
+    thread: true,
+    viewportHandle: threadViewport,
+    selectionHandle: threadSelection,
+    onTask: openMessageTaskSurface,
+    onViewBilling: () => select('billing'),
+  );
 
   Widget profileSidePanel(RaftProfileLocation profile, {bool page = false}) =>
       ProfileSidePanel(
@@ -4018,89 +4067,42 @@ class _WorkspaceViewState extends State<WorkspaceView>
     onCreated: (channel) => chooseChannel(channel),
   );
 
-  Widget modeCard() => WorkspaceModeSettingsCard(
-    controller: w,
-    store: workspaceMode,
-  );
-
   Widget settings() {
-    final scope = mobileAuthority;
-    final tab = WorkspaceNavigation.settingsTab(
-      w.location.settingsPath.firstOrNull ?? 'account',
-    );
-    // Reuse the admitted Account subtree when its actual inputs are unchanged.
-    // Compare record contents, including profile updates within one session.
-    // Other settings pages continue receiving controller projection updates.
-    final inputs = (
-      lastAuthority,
-      scope,
-      jsonEncode(w.client.user?.json),
-      jsonEncode(w.server?.json),
-      tab,
-      w.location.settingsPath.isEmpty,
-      mobileSettingsRevision,
-      widget.appearance.mode,
-      widget.appearance.light,
-      widget.onAppearance,
-      widget.notifications,
-      widget.onLogout,
-      presentation,
-      mobileTabbar.settings,
-      railSideStore.side,
-      workspaceMode,
-      providerEnabled,
-      bridgeEnabled,
-      labsEnabled,
-    );
-    if (tab == 'account' && inputs == accountSettingsInputs) {
-      return accountSettingsWidget!;
+    final host = mobileHost;
+    if (host != null && mobileSettingsDirectHost[host] == true) {
+      final route = w.location;
+      return MobileSettingsDirectPage(
+        controller: host.w,
+        presentation: host.presentation,
+        workspaceMode: host.workspaceMode,
+        buildPage: host.settings,
+        active: () =>
+            mobilePageIdentity(route) ==
+            mobilePageIdentity(host.w.location),
+      );
     }
-    final content = KeyedSubtree(
-      key: const Key('workspace-account-settings'),
-      child: Builder(
-        builder: (serviceContext) => WorkspaceSettings(
-          key: ValueKey(
-            'workspace-account-settings-${w.client.generation}-${w.client.user?.id}-${w.server?.id}-${w.server?.string('role')}',
-          ),
-          controller: w,
-          initialTab: tab,
-          appUpdate: AppServicesScope.of(serviceContext).appUpdate,
-          workspaceModeCard: modeCard(),
-          appearance: widget.appearance,
-          onAppearance: (appearance) => widget.onAppearance(appearance),
-          presentation: presentation,
-          notifications: widget.notifications,
-          onLogout: widget.onLogout,
-          mobileRoot: w.location.settingsPath.isEmpty,
-          mobileResetRevision:
-              mobileSettingsRevision + (mobileHost?.mobileSettingsRevision ?? 0),
-          mobileTabbar: mobileTabbar,
-          railSide: railSideStore,
-          onMobileLocationChanged: (tab) {
-            if (!mounted || scope != mobileAuthority) return;
-            if (tab == null) {
-              dismissPanel();
-              return;
-            }
-            final current = w.location;
-            w.navigation.navigate(
-              RaftLocation.at(
-                serverSlug: current.serverSlug,
-                route: RaftRoute.settings,
-                settingsPath: [WorkspaceNavigation.settingsRouteSlug(tab)],
-              ),
-              kind: RaftNavigationKind.push,
-            );
-            w.notifyListeners();
-          },
-          providerEnabled: providerEnabled,
-          bridgeEnabled: bridgeEnabled,
-          labsEnabled: labsEnabled,
-        ),
-      ),
+    final scope = mobileAuthority;
+    return workspaceSettingsSurface(
+      cacheKey: this,
+      controller: w,
+      authority: lastAuthority,
+      scope: scope,
+      revision: mobileSettingsRevision,
+      hostRevision: mobileHost?.mobileSettingsRevision ?? 0,
+      appearance: widget.appearance,
+      onAppearance: widget.onAppearance,
+      notifications: widget.notifications,
+      onLogout: widget.onLogout,
+      presentation: presentation,
+      mobileTabbar: mobileTabbar,
+      railSide: railSideStore,
+      workspaceMode: workspaceMode,
+      providerEnabled: providerEnabled,
+      bridgeEnabled: bridgeEnabled,
+      labsEnabled: labsEnabled,
+      wide: wide,
+      allowed: () => mounted && scope == mobileAuthority,
+      dismiss: dismissPanel,
     );
-    accountSettingsInputs = tab == 'account' ? inputs : null;
-    accountSettingsWidget = tab == 'account' ? content : null;
-    return content;
   }
 }

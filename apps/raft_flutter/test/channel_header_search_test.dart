@@ -56,7 +56,7 @@ class _Workspace extends WorkspaceController {
 }
 
 void main() {
-  for (final revoke in ['channel', 'principal']) {
+  for (final revoke in ['channel', 'principal', 'server']) {
     testWidgets(
       'real channel header seeds a fresh search; $revoke revocation cannot open global search',
       (t) async {
@@ -124,10 +124,19 @@ void main() {
         expect(w.searches, ['c']);
         if (revoke == 'channel') {
           w.channels = [];
-        } else {
+        } else if (revoke == 'principal') {
           client.user = RaftRecord({
             'id': 'other',
             'name': 'Other public human',
+          });
+        } else {
+          // Keep the navigation slug so the search page stays mounted while
+          // the server id changes.
+          w.server = RaftRecord({
+            'id': 'other',
+            'slug': 's',
+            'role': 'owner',
+            'name': 'Other server',
           });
         }
         w.notifyListeners();

@@ -275,7 +275,7 @@ const Map<String, String> zhCatalogWeb6 = <String, String>{
       "Agent 分配到机器后才能上传运行时记录。",
   "Runtime-owned keys are generated from Provider/Model above; add only extra launch env here.":
       "运行时持有的密钥会根据上方提供方/Model 自动生成；这里只添加额外启动环境变量。",
-  "Safe cancellation": "安全取消",
+  "Canceling is safe": "可以放心取消",
   "Save": "保存",
   "Save Image": "保存图片",
   "Save Message": "收藏消息",
@@ -334,7 +334,7 @@ const Map<String, String> zhCatalogWeb6 = <String, String>{
   "Search everything": "搜索所有内容",
   "Search failed": "搜索失败",
   "Search for “{query}”": "搜索「{query}」",
-  "Search in thread": "在消息列中搜索",
+  "Search in thread": "搜索消息列",
   "Search is too broad": "搜索范围过宽",
   "Search members by name": "按名称搜索成员",
   "Search members...": "搜索成员…",

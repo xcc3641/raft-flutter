@@ -15,6 +15,7 @@ import '../data/workspace_controller.dart';
 import '../data/raft_location.dart';
 import '../data/raft_navigation_history.dart';
 import '../features/invite_accept_view.dart';
+import 'app_window.dart';
 import 'content_target.dart';
 import 'content_links.dart';
 import 'native_notifications.dart';
@@ -24,6 +25,7 @@ import 'desktop_inbox_notifications.dart';
 import 'macos_dock_unread.dart';
 import 'notification_reconciler.dart';
 import 'native_sharing.dart';
+import 'windows_tray.dart';
 
 /// Binds platform links and notification clicks to the currently signed-in
 /// principal. Every navigation rechecks server membership and visible context.
@@ -33,10 +35,15 @@ class NativeContentCoordinator with WidgetsBindingObserver {
     this.links,
     this.onIncomingShare,
     MacOSDockUnread? dockUnread,
-  }) : _providedDockUnread = dockUnread,
+    WindowsTray? tray,
+  }) : _providedTray = tray,
+       _providedDockUnread = dockUnread,
        notifications = notifications ?? NativeNotificationService();
   final NativeNotificationService notifications;
   final MacOSDockUnread? _providedDockUnread;
+  final WindowsTray? _providedTray;
+  late final tray =
+      _providedTray ?? WindowsTray(platform: notifications.platform);
   late final dockUnread =
       _providedDockUnread ?? MacOSDockUnread(platform: notifications.platform);
 
@@ -48,6 +55,20 @@ class NativeContentCoordinator with WidgetsBindingObserver {
   final background = BackgroundNotificationScheduler();
   DesktopInboxNotifications? desktop;
   bool? _appForeground;
+
+  bool get _isDesktop => const {
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
+    TargetPlatform.linux,
+  }.contains(notifications.platform);
+
+  /// Whether the app is active.
+  ///
+  /// Unknown mobile state preserves foreground read receipts. Desktop startup
+  /// resolves native activation, defaulting to background if unavailable.
+  /// The root also checks workspace visibility, such as the server chooser.
+  bool get appForeground => _appForeground ?? !_isDesktop;
+  void Function()? onForegroundChanged;
   WorkspaceController? _workspace;
   StreamSubscription<Uri>? _linkSubscription;
   StreamSubscription<RaftEvent>? _events;
@@ -66,15 +87,20 @@ class NativeContentCoordinator with WidgetsBindingObserver {
         ? null
         : WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
+    tray.onHidden = () => _setAppForeground(false);
+    await tray.initialize(notifications.localize);
+    if (_closed) return;
     dockUnread.bind(_workspace);
     reconciler.bind(_workspace);
     notifications.onTap = _tap;
+    // Desktop startup waits for native activation; unknown mobile lifecycle
+    // retains the workspace visibility fallback for incoming notifications.
     notifications.deliveryAllowed = () =>
-        !_closed && !(_appForeground ?? _workspace?.foreground ?? true);
+        !_closed &&
+        (!_isDesktop || _appForeground != null) &&
+        !(_appForeground ?? _workspace?.foreground ?? true);
     notifications.addListener(_notificationSettingsChanged);
-    if (notifications.platform == TargetPlatform.macOS ||
-        notifications.platform == TargetPlatform.windows ||
-        notifications.platform == TargetPlatform.linux) {
+    if (_isDesktop) {
       desktop = DesktopInboxNotifications(notifications: notifications);
       desktop!.bind(_workspace);
     }
@@ -83,6 +109,12 @@ class NativeContentCoordinator with WidgetsBindingObserver {
       receiveLink,
       onError: (_) {},
     );
+    if (_appForeground == null && _isDesktop) {
+      final active = await isAppWindowActive(platform: notifications.platform);
+      if (_closed) return;
+      // A lifecycle event received during the native read is newer evidence.
+      if (_appForeground == null) _setAppForeground(active);
+    }
     await notifications.initialize();
     for (final argument in initialArguments) {
       final uri = Uri.tryParse(argument);
@@ -144,6 +176,7 @@ class NativeContentCoordinator with WidgetsBindingObserver {
     _workspace?.removeListener(_changed);
     _events?.cancel();
     _workspace = workspace;
+    if (!appForeground) workspace?.setForeground(false);
     desktop?.bind(workspace);
     dockUnread.bind(workspace);
     reconciler.bind(workspace);
@@ -168,6 +201,7 @@ class NativeContentCoordinator with WidgetsBindingObserver {
   }
 
   void _changed() {
+    unawaited(tray.configure(notifications.localize));
     final scope = currentScope;
     if (_scope == scope) return;
     _scope = scope;
@@ -672,10 +706,16 @@ class NativeContentCoordinator with WidgetsBindingObserver {
     return (server, RaftChannel(Map<String, dynamic>.from(channel)));
   }
 
+  void _setAppForeground(bool active) {
+    _appForeground = active;
+    if (!active) _workspace?.setForeground(false);
+    onForegroundChanged?.call();
+    desktop?.sync();
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _appForeground = state == AppLifecycleState.resumed;
-    desktop?.sync();
+    _setAppForeground(state == AppLifecycleState.resumed);
     if (_linuxProbe) {
       stderr.writeln('raft-probe lifecycle=$state');
       unawaited(_linuxProbeSend());
@@ -683,11 +723,14 @@ class NativeContentCoordinator with WidgetsBindingObserver {
   }
 
   Future<void> dispose() async {
+    if (_closed) return;
     _closed = true;
+    onForegroundChanged = null;
     WidgetsBinding.instance.removeObserver(this);
     desktop?.dispose();
     reconciler.dispose();
     await dockUnread.dispose();
+    await tray.dispose();
     _epoch++;
     _navigation++;
     _workspace?.removeListener(_changed);

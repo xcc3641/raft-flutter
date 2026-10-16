@@ -163,12 +163,12 @@ class TaskSnapshot extends PageSnapshot {
       );
 }
 
-/// Workspace Tasks window stored on the session cache.
+/// One workspace page window on the session cache, keyed by page.
 ///
-/// The concrete window lives in another library. This type is the part the
-/// cache and the page both use, so neither side stores it as [Object].
-abstract interface class ServerTaskSlot {
-  TaskSnapshot get snapshot;
+/// The concrete window lives in another library. Tasks and Saved share this
+/// slot. It is not the snapshot map.
+abstract interface class ServerPageSlot {
+  PageSnapshot get snapshot;
   bool get needsRevalidate;
   set needsRevalidate(bool value);
   int get attached;
@@ -176,43 +176,31 @@ abstract interface class ServerTaskSlot {
   void detach();
 }
 
+/// Page keys for the session windows. Not snapshot slots.
+const serverTasksPage = 'tasks';
+const serverSavedPage = 'saved';
+
 class ResourceSnapshotCache {
   final _snapshots = <String, PageSnapshot>{};
+  final _pages = <String, ({ServerPageSlot slot, void Function() release})>{};
 
-  /// The workspace Tasks window. Not the `tasks` snapshot slot.
-  ServerTaskSlot? serverTasks;
-  void Function()? _releaseServerTasks;
-
-  /// [release] runs when this window is replaced or the cache is cleared.
-  void keepServerTasks(ServerTaskSlot window, void Function() release) {
-    if (!identical(serverTasks, window)) _releaseServerTasks?.call();
-    serverTasks = window;
-    _releaseServerTasks = release;
-  }
-
-  void dropServerTasks() {
-    final release = _releaseServerTasks;
-    _releaseServerTasks = null;
-    serverTasks = null;
-    release?.call();
-  }
-
-  /// The workspace Saved window. Not the `saved` snapshot slot.
-  ServerSavedSlot? serverSaved;
-  void Function()? _releaseServerSaved;
+  /// The window for [key], if the session still holds one.
+  ServerPageSlot? serverPage(String key) => _pages[key]?.slot;
 
   /// [release] runs when this window is replaced or the cache is cleared.
-  void keepServerSaved(ServerSavedSlot window, void Function() release) {
-    if (!identical(serverSaved, window)) _releaseServerSaved?.call();
-    serverSaved = window;
-    _releaseServerSaved = release;
+  void keepServerPage(
+    String key,
+    ServerPageSlot window,
+    void Function() release,
+  ) {
+    final current = _pages[key];
+    if (!identical(current?.slot, window)) current?.release();
+    _pages[key] = (slot: window, release: release);
   }
 
-  void dropServerSaved() {
-    final release = _releaseServerSaved;
-    _releaseServerSaved = null;
-    serverSaved = null;
-    release?.call();
+  void dropServerPage(String key) {
+    final current = _pages.remove(key);
+    current?.release();
   }
 
   /// The [T] snapshot of [section] accepted under exactly [identity], if any.
@@ -231,23 +219,13 @@ class ResourceSnapshotCache {
 
   /// Server or account switch: no page snapshot survives.
   void clear() {
-    dropServerTasks();
-    dropServerSaved();
+    final held = _pages.values.toList();
+    _pages.clear();
+    for (final page in held) {
+      page.release();
+    }
     _snapshots.clear();
   }
-}
-
-/// Workspace Saved window stored on the session cache.
-///
-/// The concrete window lives in another library. This type is the part the
-/// cache and the page both use, so neither side stores it as [Object].
-abstract interface class ServerSavedSlot {
-  ResourceSnapshot get snapshot;
-  bool get needsRevalidate;
-  set needsRevalidate(bool value);
-  int get attached;
-  void attach();
-  void detach();
 }
 
 /// A management or settings page's accepted projection (the page's own data

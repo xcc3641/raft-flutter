@@ -103,4 +103,35 @@ void main() {
       expect(submitted, '  valid password  ');
     },
   );
+
+  testWidgets('errorContent replaces the plain banner; a code suffix follows the message', (
+    tester,
+  ) async {
+    Object? error = const RaftUserError('Plain failure', suffix: ' (SOME_CODE)');
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: raftTheme(RaftFamily.elegant),
+        home: Scaffold(
+          body: RaftFormDialog(
+            title: 'Create',
+            fields: const [],
+            errorContent: (context, e) =>
+                e is StateError ? const Text('Custom failure block') : null,
+            onSubmit: (_) async => throw error!,
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    // No custom content for this error: the plain banner, suffix appended.
+    expect(find.text('Plain failure (SOME_CODE)'), findsOneWidget);
+    expect(find.text('Custom failure block'), findsNothing);
+    error = StateError('x');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Custom failure block'), findsOneWidget);
+    expect(find.textContaining('Plain failure'), findsNothing);
+    expect(find.text('Something went wrong'), findsNothing);
+  });
 }

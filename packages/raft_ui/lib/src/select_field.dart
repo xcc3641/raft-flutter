@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'design_primitives.dart';
+import 'anchored_popup.dart';
 import 'dismiss_scope.dart';
 import 'icons.dart';
 import 'localization.dart';
@@ -72,6 +73,7 @@ class RaftSelectField<T> extends StatefulWidget {
 class _RaftSelectFieldState<T> extends State<RaftSelectField<T>> {
   final portal = OverlayPortalController();
   final link = LayerLink();
+  final anchorKey = GlobalKey();
   final triggerFocus = FocusNode();
   Size triggerSize = Size.zero;
 
@@ -185,6 +187,7 @@ class _RaftSelectFieldState<T> extends State<RaftSelectField<T>> {
       },
     );
     return CompositedTransformTarget(
+      key: anchorKey,
       link: link,
       child: OverlayPortal(
         controller: portal,
@@ -234,11 +237,9 @@ class _RaftSelectFieldState<T> extends State<RaftSelectField<T>> {
           takeFocus: true,
           child: Stack(
             children: [
-              CompositedTransformFollower(
-                link: link,
-                targetAnchor: Alignment.bottomLeft,
-                // side offset 4px (raft-ui SelectContent sideOffset).
-                offset: const Offset(0, 4),
+              RaftAnchoredPopup(
+                anchorKey: anchorKey,
+                movement: Scrollable.maybeOf(this.context)?.position,
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
                     minWidth: triggerSize.width,

@@ -66,6 +66,18 @@ String workspaceAuthority(WorkspaceController w) => jsonEncode([
   w.channel?.json['channelCapabilities'],
 ]);
 
+/// Account, server, and role for a channel search page.
+///
+/// Unlike [workspaceAuthority] this omits the current channel. Opening another
+/// channel must not revoke that search. Losing the channel or `viewChannel`
+/// still revokes it at the call site.
+String channelSearchPageAuthority(WorkspaceController w) => jsonEncode([
+  w.client.generation,
+  w.client.user?.id,
+  w.server?.id,
+  w.server?.string('role'),
+]);
+
 /// Server-level identity of the shared agent/member directory. Unlike
 /// [workspaceAuthority] it excludes the channel: switching channels, opening a
 /// thread or refreshing channel capabilities keeps the accepted directory.

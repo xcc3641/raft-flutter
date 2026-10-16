@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../raft_ui.dart';
+import 'anchored_popup.dart';
 import 'recipes/input.g.dart' show RaftInputRecipe;
 
 /// `text-foreground-muted theme-brutal:text-black/40`.
@@ -586,13 +587,13 @@ class _RaftAdminPrincipalPickerState extends State<RaftAdminPrincipalPicker> {
     return KeyedSubtree(
       key: const ValueKey('admin-principal-picker-region'),
       child: CompositedTransformTarget(
+        key: region,
         link: link,
         child: OverlayPortal(
           controller: portal,
           overlayChildBuilder: raftBackDismissed(close, (context) {
             final box = this.context.findRenderObject() as RenderBox?;
             final width = box?.size.width ?? 240;
-            final height = box?.size.height ?? 40;
             final needle = search.text.trim().toLowerCase();
             final options = [
               for (final c in widget.candidates)
@@ -615,51 +616,45 @@ class _RaftAdminPrincipalPickerState extends State<RaftAdminPrincipalPicker> {
                       onPointerDown: (_) => close(),
                     ),
                   ),
-                  CompositedTransformFollower(
-                    link: link,
-                    showWhenUnlinked: false,
-                    offset: Offset(0, height + 8),
-                    child: Align(
-                      alignment: Alignment.topLeft,
-                      child: RaftSelectionPopover(
-                        key: const ValueKey('admin-principal-popover'),
-                        title: raftText(context, 'Members'),
-                        width: width,
-                        searchController: search,
-                        searchPlaceholder: raftText(
-                          context,
-                          'Search members...',
-                        ),
-                        onSearchChanged: (_) => setState(() {}),
-                        emptyLabel: raftText(context, 'No matching members'),
-                        clearLabel: raftText(context, 'Clear'),
-                        onClear: selected == null
-                            ? null
-                            : () {
-                                widget.onSelect(null);
-                                close();
-                              },
-                        options: [
-                          for (final c in options)
-                            RaftSelectionOption(
-                              rowKey: ValueKey('admin-candidate-${c.key}'),
-                              label: c.optionLabel ?? c.label,
-                              checked: c.key == widget.selectedKey,
-                              reserveLeadingSlot: true,
-                              leading: RaftAvatarSlot(
-                                name: c.label,
-                                slot: RaftAvatarSlotContext.compactList,
-                                agent: c.agent,
-                                avatarUrl: c.avatarUrl,
-                              ),
-                              onTap: () {
-                                widget.onSelect(c.key);
-                                search.clear();
-                                close();
-                              },
+                  RaftAnchoredPopup(
+                    anchorKey: region,
+                    movement: Scrollable.maybeOf(this.context)?.position,
+                    gap: 8,
+                    child: RaftSelectionPopover(
+                      key: const ValueKey('admin-principal-popover'),
+                      title: raftText(context, 'Members'),
+                      width: width,
+                      searchController: search,
+                      searchPlaceholder: raftText(context, 'Search members...'),
+                      onSearchChanged: (_) => setState(() {}),
+                      emptyLabel: raftText(context, 'No matching members'),
+                      clearLabel: raftText(context, 'Clear'),
+                      onClear: selected == null
+                          ? null
+                          : () {
+                              widget.onSelect(null);
+                              close();
+                            },
+                      options: [
+                        for (final c in options)
+                          RaftSelectionOption(
+                            rowKey: ValueKey('admin-candidate-${c.key}'),
+                            label: c.optionLabel ?? c.label,
+                            checked: c.key == widget.selectedKey,
+                            reserveLeadingSlot: true,
+                            leading: RaftAvatarSlot(
+                              name: c.label,
+                              slot: RaftAvatarSlotContext.compactList,
+                              agent: c.agent,
+                              avatarUrl: c.avatarUrl,
                             ),
-                        ],
-                      ),
+                            onTap: () {
+                              widget.onSelect(c.key);
+                              search.clear();
+                              close();
+                            },
+                          ),
+                      ],
                     ),
                   ),
                 ],

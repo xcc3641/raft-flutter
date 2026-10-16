@@ -118,6 +118,7 @@ void main() {
             t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
               const MethodChannel('app.raft/window'),
               (call) async {
+                if (call.method == 'isActive') return true;
                 presented.add(call.method);
                 return null;
               },
@@ -170,7 +171,12 @@ void main() {
             final observed = <String>[];
             void observe() => observed.add(w.location.toString());
             w.addListener(observe);
-            await t.runAsync(coordinator.init);
+            var initialized = false;
+            final starting = coordinator.init().whenComplete(
+              () => initialized = true,
+            );
+            await _until(t, () => initialized);
+            await starting;
             // initialize captures the cold target before clearing old OS alerts.
             expect(w.location, before);
             expect(plugin.cancellations, 1);

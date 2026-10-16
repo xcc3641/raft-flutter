@@ -50,6 +50,9 @@ class _Client extends RaftClient {
   Object? Function(String runtime) models = (_) =>
       const RaftApiException('offline');
   Map<String, dynamic>? form;
+
+  /// `GET /agents/a1/migration`: the agent's latest migration, if any.
+  Map<String, dynamic>? migration;
   Completer<void>? patchGate;
   Object? patchError;
 
@@ -107,6 +110,7 @@ class _Client extends RaftClient {
       return out;
     }
     if (path == '/agents/a1/runtime-form') return form;
+    if (path == '/agents/a1/migration') return {'migration': migration};
     return [];
   }
 }
@@ -652,12 +656,18 @@ void main() {
   });
 
   group('Move to another computer', () {
-    Future<void> profile(WidgetTester tester, {required bool flag}) async {
+    Future<_Client> profile(
+      WidgetTester tester, {
+      required bool flag,
+      Map<String, dynamic>? migration,
+    }) async {
       SharedPreferences.setMockInitialValues({});
       tester.view.physicalSize = const Size(900, 2400);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
-      final c = _Client(_agent())..selectServer('s');
+      final c = _Client(_agent())
+        ..selectServer('s')
+        ..migration = migration;
       final w = WorkspaceController(c)
         ..server = RaftRecord({'id': 's', 'name': 'Fixture', 'role': 'owner'})
         ..agentMigrationEnabled = flag;
@@ -680,7 +690,83 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      return c;
     }
+
+    bool moveEnabled(WidgetTester tester) => tester
+        .widget<RaftButton>(
+          find.widgetWithText(RaftButton, 'Move to another computer'),
+        )
+        .onPressed != null;
+
+    const active = {
+      'migrationRef': 'ref-1',
+      'revision': 2,
+      'state': 'in_transit',
+      'sourceMachineId': 'm1',
+      'targetMachineId': 'm2',
+    };
+
+    testWidgets('shows the migration inline and disables Move while it runs', (
+      tester,
+    ) async {
+      await profile(tester, flag: true, migration: active);
+      expect(find.text('Migrating to m2'), findsOneWidget);
+      expect(find.text('Transferring workspace to m2.'), findsOneWidget);
+      expect(moveEnabled(tester), isFalse);
+    });
+
+    testWidgets('no migration shows nothing and keeps Move enabled', (
+      tester,
+    ) async {
+      await profile(tester, flag: true);
+      expect(find.textContaining('Migrating to'), findsNothing);
+      expect(moveEnabled(tester), isTrue);
+    });
+
+    testWidgets('an ended migration stays visible and Move comes back', (
+      tester,
+    ) async {
+      await profile(
+        tester,
+        flag: true,
+        migration: {...active, 'state': 'failed', 'failureReason': 'x'},
+      );
+      expect(find.text('Migration to m2 needs attention'), findsOneWidget);
+      expect(
+        find.textContaining('The agent is still on Box and works as usual.'),
+        findsOneWidget,
+      );
+      expect(moveEnabled(tester), isTrue);
+    });
+
+    testWidgets('a migration push re-reads and the 2s poll covers a missed push', (
+      tester,
+    ) async {
+      final c = await profile(tester, flag: true, migration: active);
+      int reads() => c.calls.where((x) => x.$2 == '/agents/a1/migration').length;
+      final first = reads();
+      // A missed push: the server moved on and nothing was sent.
+      c.migration = {...active, 'state': 'arriving'};
+      await tester.pump(const Duration(seconds: 2, milliseconds: 100));
+      await tester.pump();
+      expect(reads(), greaterThan(first));
+      expect(find.text('Setting up the workspace on m2.'), findsOneWidget);
+      // A push for this agent re-reads at once; one for another agent does not.
+      final before = reads();
+      c.stream.add(const RaftEvent('agent:migration-updated', {'agentId': 'zz'}));
+      await tester.pump();
+      expect(reads(), before);
+      c.migration = {...active, 'state': 'completed'};
+      c.stream.add(const RaftEvent('agent:migration-updated', {'agentId': 'a1'}));
+      await tester.pumpAndSettle();
+      expect(find.text('Migrated to m2'), findsOneWidget);
+      expect(moveEnabled(tester), isTrue);
+      // Ended: no more polling.
+      final settled = reads();
+      await tester.pump(const Duration(seconds: 10));
+      expect(reads(), settled);
+    });
 
     testWidgets('is offered only while agent_migration_v0 is on', (
       tester,

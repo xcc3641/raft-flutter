@@ -166,6 +166,14 @@ CreateWindowsNotificationsChannel(flutter::BinaryMessenger* messenger,
           } else if (call.method_name() == "permission") {
             const auto id = AppId(call.arguments());
             result->Success(EncodableValue(NotificationPermission(id)));
+          } else if (call.method_name() == "isActive") {
+            const HWND foreground = GetForegroundWindow();
+            DWORD process_id = 0;
+            if (foreground != nullptr) {
+              GetWindowThreadProcessId(foreground, &process_id);
+            }
+            result->Success(EncodableValue(
+                foreground != nullptr && process_id == GetCurrentProcessId()));
           } else if (call.method_name() == "present") {
             ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
             SetForegroundWindow(window);

@@ -5,7 +5,9 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:raft_flutter/data/attachment_image_repository.dart';
+import 'package:raft_flutter/data/cache_directory_listing.dart';
 
 AttachmentImageStoreKey key(
   String id, {
@@ -41,7 +43,7 @@ class _Downloads {
 }
 
 Future<List<File>> allFiles(Directory root) async => [
-  await for (final e in root.list(recursive: true))
+  await for (final e in listCacheDirectory(root, recursive: true))
     if (e is File) e,
 ];
 
@@ -101,9 +103,8 @@ void main() {
       expect(await c.contains(key('d')), isFalse);
       expect(await c.contains(key('a')), isTrue);
       expect(await c.contains(key('e')), isTrue);
-      final onDisk = (await allFiles(
-        root,
-      )).fold<int>(0, (sum, f) => sum + f.lengthSync());
+      final onDisk = (await allFiles(root))
+          .fold<int>(0, (sum, f) => sum + f.lengthSync());
       expect(onDisk, 300, reason: 'evicted from the disk, not only the index');
     });
 
@@ -234,9 +235,8 @@ void main() {
         await small.write(key('e$i'), bytes(30));
         expect(await small.sizeBytes(), lessThanOrEqualTo(100));
       }
-      final onDisk = (await allFiles(
-        root,
-      )).fold<int>(0, (sum, f) => sum + f.lengthSync());
+      final onDisk = (await allFiles(root))
+          .fold<int>(0, (sum, f) => sum + f.lengthSync());
       expect(onDisk, await small.sizeBytes());
     });
 
@@ -434,6 +434,81 @@ void main() {
       await broken.writePublic('k', bytes(3));
       expect(await broken.sizeBytes(), 0);
     });
+  });
+
+  group('long cache roots', () {
+    late Directory longRoot;
+    AttachmentDiskCache openLong() => AttachmentDiskCache(() async => longRoot);
+
+    setUp(() async {
+      longRoot = await Directory(
+        p.join(root.path, 'long cache-测试-${'r' * 100}'),
+      ).create();
+    });
+
+    test(
+      'restart indexes bytes and files without changing their paths',
+      () async {
+        final first = openLong();
+        await first.write(key('bytes'), bytes(3));
+        await first.writePublic('avatar', bytes(5));
+        final file = (await first.fetchFile(
+          key('file'),
+          filename: 'paper.pdf',
+          download: _Downloads().call,
+        ))!;
+        final path = file.file.path;
+        file.release();
+
+        final restarted = openLong();
+        expect(await restarted.sizeBytes(), 18);
+        expect(await restarted.read(key('bytes')), bytes(3));
+        expect(await restarted.readPublic('avatar'), bytes(5));
+        final hit = await restarted.openFile(
+          key('file'),
+          filename: 'paper.pdf',
+        );
+        expect(hit, isNotNull);
+        expect(hit!.file.path, path);
+        expect(await hit.file.readAsBytes(), bytes(10));
+        hit.release();
+
+        await restarted.clear(namespace: AttachmentCacheNamespace.attachments);
+        expect(File(path).existsSync(), isFalse);
+        expect(await restarted.sizeBytes(), 5);
+        expect(await restarted.readPublic('avatar'), bytes(5));
+      },
+    );
+
+    test(
+      'startup removes partials and revocation removes the stored file',
+      () async {
+        final file = (await openLong().fetchFile(
+          key('file'),
+          filename: 'paper.pdf',
+          download: _Downloads().call,
+        ))!;
+        final path = file.file.path;
+        file.release();
+        final partial = File(
+          p.join(file.file.parent.path, 'paper.pdf.9.raft-part'),
+        )..writeAsBytesSync(bytes(7));
+
+        final restarted = openLong();
+        await restarted.warm();
+        expect(partial.existsSync(), isFalse);
+        expect(await restarted.sizeBytes(), 10);
+        final hit = await restarted.openFile(
+          key('file'),
+          filename: 'paper.pdf',
+        );
+        expect(hit, isNotNull);
+        hit!.release();
+        await restarted.purgeAccount('https://x.invalid', 'alice');
+        expect(File(path).existsSync(), isFalse);
+        expect(await openLong().sizeBytes(), 0);
+      },
+    );
   });
 
   group('file entries', () {
@@ -734,8 +809,9 @@ void main() {
     test('clear empties the cache and only the cache', () async {
       await fill();
       // Things that live next to the cache directory are not the cache's.
-      final session = File('${root.path}/session.json')..writeAsStringSync('x');
-      final saved = File('${root.path}/Downloads/report.pdf')
+      final session = File(p.join(root.path, 'session.json'))
+        ..writeAsStringSync('x');
+      final saved = File(p.join(root.path, 'Downloads', 'report.pdf'))
         ..createSync(recursive: true)
         ..writeAsStringSync('mine');
       expect(await cache.sizeBytes(), 30);
