@@ -6,6 +6,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'avatar_button.dart';
 import 'design_primitives.dart' hide RaftPanelHeaderRecipe;
 import 'icons.dart';
 import 'indicators.dart';
@@ -338,6 +339,9 @@ class RaftDmHeader extends StatelessWidget {
     this.backKey,
     this.onSearch,
     this.onSettings,
+    this.onAvatarTap,
+    this.avatarButtonKey,
+    this.avatarSemanticLabel,
     this.backLabel = 'Back',
     this.searchLabel = 'Search this channel',
     this.settingsLabel = 'Channel settings',
@@ -354,9 +358,10 @@ class RaftDmHeader extends StatelessWidget {
   final bool external;
   final String? activityText;
   final bool muted;
-  final VoidCallback? onBack, onSearch, onSettings;
-  final Key? backKey;
+  final VoidCallback? onBack, onSearch, onSettings, onAvatarTap;
+  final Key? backKey, avatarButtonKey;
   final String backLabel, searchLabel, settingsLabel, mutedLabel;
+  final String? avatarSemanticLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -375,13 +380,21 @@ class RaftDmHeader extends StatelessWidget {
       color: t.colors['foreground-muted'],
     ).copyWith(leadingDistribution: TextLeadingDistribution.even);
     final status = activityText;
+    final headerAvatar = onAvatarTap == null
+        ? avatar
+        : RaftAvatarButton(
+            key: avatarButtonKey ?? const Key('dm-header-avatar-button'),
+            semanticLabel: avatarSemanticLabel ?? name,
+            onPressed: onAvatarTap,
+            child: avatar,
+          );
     return RaftConversationHeader(
       onBack: onBack,
       backKey: backKey,
       backLabel: backLabel,
       content: Row(
         children: [
-          avatar,
+          headerAvatar,
           const SizedBox(width: 12),
           Expanded(
             child: _RaftCssShrinkRow(
