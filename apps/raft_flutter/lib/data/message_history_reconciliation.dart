@@ -5,13 +5,13 @@ import 'history_capacity.dart';
 import 'history_read_policy.dart';
 import 'message_history.dart';
 import 'message_history_pages.dart';
-import 'workspace_controller.dart';
+import 'workspace_message_host.dart';
 import 'workspace_message_windows.dart';
 
 /// Applies one complete authorized page before its coverage can be shared.
 class MessageHistoryReconciliation {
   static Future<bool> read(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     MessageHistoryScope scope,
     Object ticket, {
@@ -25,11 +25,12 @@ class MessageHistoryReconciliation {
     void Function(Map<String, dynamic>)? received,
     void Function(Object cause)? failed,
   }) async {
-    final db = MessageHistoryPages.storage(w.deviceStore.cache);
+    final w = host.messageDomain;
+    final db = MessageHistoryPages.storage(w.device.cache);
     if (db == null) return false;
     bool current() =>
         request.current &&
-        w.deviceStore.writable &&
+        w.device.writable &&
         !db.reads.closed &&
         ticket == w.messageHistoryTicket(scope.parentChannel) &&
         w.messageWindows.notRevoked(scope.channel) &&
@@ -44,7 +45,7 @@ class MessageHistoryReconciliation {
     final upper = shown.isEmpty ? null : shown.last.seq;
     try {
       final page = await MessageHistoryPages.load(
-        cache: w.deviceStore.cache,
+        cache: w.device.cache,
         scope: scope,
         current: current,
         held: () => w.ledger.messages(scope.channel),
@@ -57,14 +58,14 @@ class MessageHistoryReconciliation {
         localFirst: false,
         reason: reason,
         remote: () async => target == null
-            ? w.client.messagePage(
+            ? w.transport.client.messagePage(
                 scope.channel,
                 before: before,
                 after: after,
                 limit: limit,
               )
             : Map<String, dynamic>.from(
-                await w.client.get(
+                await w.transport.client.get(
                   '/messages/context/$target',
                   query: {'channelId': scope.channel},
                 ),
@@ -135,7 +136,7 @@ class MessageHistoryReconciliation {
             )
             .map((row) => row['id'] as String),
       );
-      w.messageSync.replaceBodies(scope.channel, accepted);
+      w.state.messageSync.replaceBodies(scope.channel, accepted);
       final sequences = raw.map((row) => BigInt.parse('${row['seq']}')).toList()
         ..sort();
       final coversOldest =
@@ -150,17 +151,17 @@ class MessageHistoryReconciliation {
           : target != null && coversOldest
           ? page['hasOlder'] as bool?
           : boundary?.hasMore;
-      if (w.threadChannelId == scope.channel) {
-        w.threadHistoryLimited = limited;
-        if (more != null) w.threadHasMore = more;
-      } else if (w.channel?.id == scope.channel) {
-        w.historyLimited = limited;
-        if (more != null) w.hasMore = more;
+      if (w.state.threadChannelId == scope.channel) {
+        w.state.threadHistoryLimited = limited;
+        if (more != null) w.state.threadHasMore = more;
+      } else if (w.presentation.channel?.id == scope.channel) {
+        w.state.historyLimited = limited;
+        if (more != null) w.state.hasMore = more;
       }
-      w.notifyListeners();
+      w.context.changed();
       await w.saveHistoryWindow(
         scope.channel,
-        thread: w.threadChannelId == scope.channel,
+        thread: w.state.threadChannelId == scope.channel,
       );
       return current();
     } on RaftApiException catch (error) {
@@ -186,7 +187,7 @@ class MessageHistoryReconciliation {
         }
       } else if (error.status == 403 || error.status == 404) {
         w.rejectHistoryRead(scope.channel);
-        await w.flushCache();
+        await w.entries.flushCache();
       }
       db.reads.count(HistoryReadReason.failed);
       return false;

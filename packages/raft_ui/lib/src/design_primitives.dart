@@ -1,3 +1,4 @@
+import 'hover_region.dart';
 import 'raft_underline.dart';
 import 'anchored_popup.dart';
 import 'dismiss_scope.dart';
@@ -291,9 +292,9 @@ class RaftAttachmentRecipe {
         : tokens.colors[hovered || focused ? 'line-muted' : 'line-hairline']!,
   );
   BorderRadius get radius => RaftShapes.attachment(tokens);
-  TextStyle get title => RaftTypography.attachmentTitle(
-    tokens,
-  ).copyWith(fontWeight: FontWeight.w700);
+  TextStyle get title =>
+      RaftTypography.attachmentTitle(tokens)
+          .copyWith(fontWeight: FontWeight.w700);
   TextStyle get metadata => RaftTypography.attachmentMeta(tokens);
 }
 
@@ -1029,7 +1030,7 @@ class _RaftControlState extends State<RaftControl> {
           : null,
       enabled: inert ? null : enabled,
       onTap: enabled ? activateControl : null,
-      child: MouseRegion(
+      child: RaftHoverRegion(
         onEnter: enabled ? (_) => setState(() => hovered = true) : null,
         onExit: (_) => setState(() => hovered = false),
         child: FocusableActionDetector(
@@ -1840,12 +1841,11 @@ enum RaftDropdownSide { bottom, top, right }
 enum RaftDropdownAlign { start, end }
 
 /// The popup retains ownership of its trigger focus and dismissal callbacks.
-typedef RaftDropdownTriggerBuilder =
-    Widget Function(
-      BuildContext context,
-      FocusNode focusNode,
-      VoidCallback? onPressed,
-    );
+typedef RaftDropdownTriggerBuilder = Widget Function(
+  BuildContext context,
+  FocusNode focusNode,
+  VoidCallback? onPressed,
+);
 
 class RaftDropdownMenu extends StatefulWidget {
   const RaftDropdownMenu({
@@ -2162,7 +2162,7 @@ class _RaftDropdownMenuState extends State<RaftDropdownMenu> {
                       toRight: widget.side == RaftDropdownSide.right,
                       alignRight: right,
                       gap: gap,
-                      child: MouseRegion(
+                      child: RaftHoverRegion(
                         onEnter: (_) => hoverClose?.cancel(),
                         onExit: (_) => hoverExit(),
                         child: TapRegion(
@@ -2244,7 +2244,7 @@ class _RaftDropdownMenuState extends State<RaftDropdownMenu> {
                 ],
               ),
       ),
-      child: MouseRegion(
+      child: RaftHoverRegion(
         onEnter: (_) => hoverEnter(),
         onExit: (_) => hoverExit(),
         child: TapRegion(
@@ -2518,7 +2518,7 @@ class _RaftMenuItemState extends State<RaftMenuItem> {
             },
           ),
         },
-        child: MouseRegion(
+        child: RaftHoverRegion(
           onEnter: (_) => setState(() => hovered = true),
           onExit: (_) => setState(() => hovered = false),
           child: GestureDetector(
@@ -3200,7 +3200,7 @@ class _RaftInteractiveState extends State<RaftInteractive> {
       checked: widget.checked,
       enabled: enabled,
       onTap: enabled ? activateControl : null,
-      child: MouseRegion(
+      child: RaftHoverRegion(
         onEnter: enabled ? (_) => setState(() => hovered = true) : null,
         onExit: (_) => setState(() => hovered = false),
         child: FocusableActionDetector(

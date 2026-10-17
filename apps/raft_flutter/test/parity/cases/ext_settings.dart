@@ -14,7 +14,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:raft_client/raft_client.dart';
 import 'package:raft_flutter/data/personal_presentation.dart';
-import 'package:raft_flutter/features/workspace_mode_settings_card.dart';
 import 'package:raft_flutter/features/workspace_settings.dart';
 import 'package:raft_flutter/platform/native_notifications.dart';
 import 'package:raft_ui/raft_ui.dart';
@@ -184,7 +183,6 @@ Widget _page(ParityContext ctx) {
         onLogout: () async {},
         initialTab: ctx.props['tab'] as String,
         mobileRoot: false,
-        workspaceModeCard: WorkspaceModeSettingsCard(controller: w),
         providerEnabled: flags.contains('providers'),
         bridgeEnabled: flags.contains('bridge'),
         labsEnabled: flags.contains('labs'),

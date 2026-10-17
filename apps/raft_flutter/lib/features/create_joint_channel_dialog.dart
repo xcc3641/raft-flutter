@@ -93,7 +93,7 @@ class CreateJointChannelDialog extends StatefulWidget {
     }
 
     if (!context.mounted) return;
-    final created = await showRaftModal<Map<String, dynamic>>(
+    final created = await showRaftForm<Map<String, dynamic>>(
       context,
       builder: (_) => CreateJointChannelDialog(
         agents: agents,

@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -704,7 +706,7 @@ class _RaftShowMoreToggleState extends State<RaftShowMoreToggle> {
     final color = hovered
         ? MessageContentSemantic(tokens).toggleHover
         : style.color;
-    return MouseRegion(
+    return RaftHoverRegion(
       onEnter: (_) => setState(() => hovered = true),
       onExit: (_) => setState(() => hovered = false),
       child: RaftControl(

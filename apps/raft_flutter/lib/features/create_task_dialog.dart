@@ -28,7 +28,7 @@ class CreateTaskDialog extends StatefulWidget {
     required WorkspaceController controller,
     required String channelId,
     Future<void> Function()? onCreated,
-  }) => showRaftModal<void>(
+  }) => showRaftForm<void>(
     context,
     builder: (_) => CreateTaskDialog(
       controller: controller,

@@ -1,6 +1,8 @@
 // Small status primitives: Badge (raft-ui `badge` recipe), and the Web
 // client's StatusDot / AttentionDot / CheckMarker (packages/web/src/components
 // /ui/*.tsx — plain Tailwind classes, resolved in the comments below).
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'icons.dart';
@@ -152,7 +154,7 @@ class _RaftBadgeState extends State<RaftBadge> {
     if (!interactive) return badge;
     return Semantics(
       button: true,
-      child: MouseRegion(
+      child: RaftHoverRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => hovered = true),
         onExit: (_) => setState(() => hovered = false),

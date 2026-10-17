@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import 'design_primitives.dart';
 import 'dialog_card.dart';
+import 'form_presentation.dart';
 import 'icons.dart';
 import 'indicators.dart';
 import 'localization.dart';
@@ -123,31 +124,30 @@ class RaftEditProviderDialogView extends StatelessWidget {
                 ),
               ),
             ],
-            gap,
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              spacing: 8, // gap-2
-              children: [
-                RaftRecipeButton(
-                  key: const ValueKey('provider-edit-cancel'),
-                  label: 'Cancel',
-                  onPressed: onClose,
-                ),
-                RaftRecipeButton(
-                  key: const ValueKey('provider-edit-save'),
-                  label: 'Save changes',
-                  glyph: submitting ? null : RaftGlyph.pencil,
-                  child: submitting
-                      ? const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [RaftSpinner()],
-                        )
-                      : null,
-                  variant: RaftButtonRecipeVariant.default_,
-                  disabled: !canSubmit || submitting,
-                  onPressed: onSubmit,
-                ),
-              ],
+          ],
+        ),
+        footer: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          spacing: 8, // gap-2
+          children: [
+            RaftRecipeButton(
+              key: const ValueKey('provider-edit-cancel'),
+              label: 'Cancel',
+              onPressed: raftExplicitClose(context, onClose),
+            ),
+            RaftRecipeButton(
+              key: const ValueKey('provider-edit-save'),
+              label: 'Save changes',
+              glyph: submitting ? null : RaftGlyph.pencil,
+              child: submitting
+                  ? const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [RaftSpinner()],
+                    )
+                  : null,
+              variant: RaftButtonRecipeVariant.default_,
+              disabled: !canSubmit || submitting,
+              onPressed: onSubmit,
             ),
           ],
         ),

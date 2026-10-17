@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'dart:ui' show SemanticsRole;
 
 import 'package:flutter/widgets.dart';
@@ -280,7 +282,7 @@ class _TailedDescription extends StatelessWidget {
           baseline: TextBaseline.alphabetic,
           child: Padding(
             padding: const EdgeInsets.only(left: 4),
-            child: MouseRegion(
+            child: RaftHoverRegion(
               cursor: SystemMouseCursors.click,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,

@@ -7,7 +7,6 @@ import 'package:raft_flutter/data/raft_location.dart';
 import 'package:raft_flutter/data/workspace_controller.dart';
 import 'package:raft_flutter/data/workspace_entity_directory.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
-import 'package:raft_flutter/features/workspace_grid_view.dart';
 import 'package:raft_flutter/features/source_feedback_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:raft_ui/test_themes.dart';
@@ -219,42 +218,6 @@ void main() {
           api.calls.where((r) => r.path == '/servers/join-community'),
           isEmpty,
         );
-        await retire(t);
-      },
-      variant: TargetPlatformVariant({TargetPlatform.linux}),
-    );
-    testWidgets(
-      '[K08c] $family/$dark actual available workspace toggle is lg gated and retains location/draft',
-      (t) async {
-        final (w, api) = await pageFixture(t, section: 'chat');
-        // Entering the grid reads this available channel. An unconfigured
-        // fixture returns 404, which correctly revokes shared private drafts.
-        api.routes['GET /messages/channel/c1'] = (_) => {
-          'messages': <dynamic>[],
-          'hasMore': false,
-        };
-        api.routes['GET /agents'] = (_) => [];
-        api.routes['GET /servers/s1/members'] = (_) => [];
-        w.drafts['c1'] = 'Keep this editor';
-        await mountShell(t, w, family, dark, width: 1023);
-        expect(find.byKey(const Key('workspace-mode-toggle')), findsNothing);
-        t.view.physicalSize = const Size(1024, 800);
-        await t.pumpAndSettle();
-        final uri = w.location.toString(), count = w.navigation.entries.length;
-        expect(find.byKey(const Key('workspace-mode-toggle')), findsOneWidget);
-        await t.tap(find.byKey(const Key('workspace-mode-toggle')));
-        await frames(t, () {});
-        await t.pumpAndSettle();
-        expect(find.byType(WorkspaceGridView), findsOneWidget);
-        expect(w.location.toString(), uri);
-        expect(w.navigation.entries.length, count);
-        expect(w.drafts['c1'], 'Keep this editor');
-        await t.tap(find.byKey(const Key('workspace-mode-toggle')));
-        await frames(t, () {});
-        await t.pumpAndSettle();
-        expect(find.byType(WorkspaceGridView), findsNothing);
-        expect(w.location.toString(), uri);
-        expect(w.drafts['c1'], 'Keep this editor');
         await retire(t);
       },
       variant: TargetPlatformVariant({TargetPlatform.linux}),

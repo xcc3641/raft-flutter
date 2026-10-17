@@ -37,7 +37,7 @@ void main() {
   }
 
   testWidgets(
-    'Activity five sections share owner; revisits retain offset and show cached window before network',
+    'Activity six sections share owner; revisits retain offset and show cached window before network',
     (t) async {
       final (client, w) = activityFixture();
       addTearDown(() async {
@@ -60,7 +60,7 @@ void main() {
       await t.pumpAndSettle();
       final double offset = owner.listScroll.offset;
       expect(offset, greaterThan(100));
-      for (final view in ['unread', 'mentions', 'saved', 'done']) {
+      for (final view in ['unread', 'mentions', 'saved', 'dms', 'done']) {
         await swipe(t);
         expect(owner.filter, view);
         expect(t.state(find.byType(ResourceView)), same(originalOwner));

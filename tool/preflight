@@ -65,6 +65,7 @@ GUARD_TESTS = [
     'apps/raft_flutter/test/state_parity_guard_test.dart',       # docs/state-parity.json entries are well formed and resolve
     'apps/raft_flutter/test/image_cache_ban_guard_test.dart',    # no second image/disk cache path in app sources
     'apps/raft_flutter/test/proxy_hook_guard_test.dart',         # network paths still go through the proxy hook
+    'apps/raft_flutter/test/workspace_domain_boundary_guard_test.dart',  # typed domains cannot grow a controller dependency
     'apps/raft_flutter/test/media_controls_guard_test.dart',     # media rails components still exist
 ]
 DOCS_INDEX_TEST = 'tool/tests/test_docs_index.py'

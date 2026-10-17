@@ -1,6 +1,8 @@
 // Web inline audio / video attachment cards (MessageItem.tsx
 // InlineVideoAttachmentCard, InlineAudioAttachmentCard, InlineAudioPlayer).
 // The app owns the media: URL, download, decoding, play state.
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'design_primitives.dart';
@@ -103,30 +105,34 @@ class _RaftInlineVideoState extends State<RaftInlineVideo> {
       fontWeight: t.brutal ? FontWeight.w700 : weight,
       color: Colors.white.withValues(alpha: alpha),
     );
-    Widget link(Key key, RaftGlyph glyph, String label, VoidCallback? onTap) =>
-        GestureDetector(
-          key: key,
-          onTap: onTap,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            spacing: 4,
-            children: [
-              RaftIcon(
-                glyph,
-                size: 13,
-                color: Colors.white.withValues(alpha: .75),
-              ),
-              Text(raftText(context, label), style: style(.75, FontWeight.w400)),
-            ],
-          ),
-        );
+    Widget link(
+      Key key,
+      RaftGlyph glyph,
+      String label,
+      VoidCallback? onTap,
+    ) => GestureDetector(
+      key: key,
+      onTap: onTap,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        spacing: 4,
+        children: [
+          RaftIcon(glyph, size: 13, color: Colors.white.withValues(alpha: .75)),
+          Text(raftText(context, label), style: style(.75, FontWeight.w400)),
+        ],
+      ),
+    );
     final extra = widget.onRetry != null || widget.onNetworkSettings != null;
     final body = Column(
       mainAxisSize: MainAxisSize.min,
       spacing: t.brutal ? 8 : (extra ? 8 : 12),
       children: [
         if (!extra)
-          const RaftIcon(RaftGlyph.alertTriangle, size: 24, color: Colors.white),
+          const RaftIcon(
+            RaftGlyph.alertTriangle,
+            size: 24,
+            color: Colors.white,
+          ),
         Text(
           widget.failureMessage ??
               raftText(
@@ -257,7 +263,7 @@ class _RaftInlineVideoState extends State<RaftInlineVideo> {
                       child: Semantics(
                         button: true,
                         label: openLabel,
-                        child: MouseRegion(
+                        child: RaftHoverRegion(
                           cursor: SystemMouseCursors.click,
                           onEnter: (_) => setState(() => actionHovered = true),
                           onExit: (_) => setState(() => actionHovered = false),
@@ -444,9 +450,8 @@ class RaftVideoPosterCard extends StatelessWidget {
             fit: BoxFit.cover,
             gaplessPlayback: true,
             excludeFromSemantics: true,
-            errorBuilder: (_, _, _) => ColoredBox(
-              color: t.colors['layer-canvas-muted']!,
-            ),
+            errorBuilder: (_, _, _) =>
+                ColoredBox(color: t.colors['layer-canvas-muted']!),
           );
     final Widget stage = heroTag == null
         ? picture
@@ -481,7 +486,10 @@ class RaftVideoPosterCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   child: Text(
                     raftMediaDuration(length),
                     style: const TextStyle(
@@ -687,10 +695,7 @@ class RaftInlineAudio extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         spacing: 6,
-        children: [
-          RaftIcon(glyph, size: 13),
-          Text(raftText(context, label)),
-        ],
+        children: [RaftIcon(glyph, size: 13), Text(raftText(context, label))],
       ),
     );
     final Widget body = state == RaftInlineMediaState.ready

@@ -3,6 +3,8 @@
 // `<ComposerAttachments>` and the failed-upload alert rows) over the raft-ui
 // `composerAttachment` recipe. The app owns the upload lifecycle and passes a
 // view model; this file never reads files, network or controllers.
+import 'hover_region.dart';
+
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -290,7 +292,7 @@ class _AttachmentChipState extends State<_AttachmentChip> {
         label: raftFormat(context, 'Preview {file}', {'file': item.name}),
         child: RaftTooltip(
           message: raftText(context, 'Preview image'),
-          child: MouseRegion(
+          child: RaftHoverRegion(
             cursor: SystemMouseCursors.zoomIn,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -406,7 +408,7 @@ class _AttachmentChipState extends State<_AttachmentChip> {
     // brutal image chip's border); here the layout box already carries the
     // 6px overhang, so it lies inside the Stack and takes hover and taps.
     final inset = fixed ? s.attachment.borderWidth : EdgeInsets.zero;
-    return MouseRegion(
+    return RaftHoverRegion(
       onEnter: (_) => setState(() => hovered = true),
       onExit: (_) => setState(() => hovered = false),
       child: Stack(

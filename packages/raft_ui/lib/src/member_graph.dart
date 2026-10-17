@@ -5,6 +5,8 @@
 // member_graph_layout.dart (a port of the Web code); the app owns the request,
 // the avatars and the profile hover card and passes them in.
 // Tailwind classes written in the JSX are resolved in comments.
+import 'hover_region.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -678,7 +680,7 @@ class _RaftMemberGraphCanvasState extends State<RaftMemberGraphCanvas> {
                           ..onEnd = onScaleEnd;
                       }),
                 },
-                child: MouseRegion(
+                child: RaftHoverRegion(
                   cursor: SystemMouseCursors.grab,
                   child: SizedBox(
                     width: size.width,

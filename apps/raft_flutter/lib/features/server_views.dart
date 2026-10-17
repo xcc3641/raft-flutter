@@ -20,9 +20,8 @@ class WorkspaceActions {
     BuildContext context,
     WorkspaceController w,
   ) async {
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
+    await showRaftForm<void>(
+      context,
       builder: (_) => RaftFormDialog(
         title: 'Create workspace',
         submitLabel: 'Create',
@@ -53,9 +52,8 @@ class WorkspaceActions {
   /// Join workspace: paste an invite link or code; the invite page (the Web
   /// InviteAcceptPage) then shows the invitation and joins.
   static Future<void> join(BuildContext context, WorkspaceController w) async {
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
+    await showRaftForm<void>(
+      context,
       builder: (dialogContext) => RaftFormDialog(
         title: 'Join workspace',
         submitLabel: 'Review invitation',
@@ -88,9 +86,8 @@ class WorkspaceActions {
   }) async {
     final server = w.server;
     if (server == null) return;
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
+    await showRaftForm<void>(
+      context,
       builder: (_) => RaftFormDialog(
         title: delete ? 'Delete workspace?' : 'Leave workspace?',
         description: delete

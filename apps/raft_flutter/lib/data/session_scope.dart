@@ -48,7 +48,6 @@ abstract interface class SessionScopeBinding {
   void resetServerSelectionState();
   Future<void> refreshMessageSyncFlag();
   Future<void> loadSidebar();
-  set syncCoreMessagesEnabled(bool value);
   void notifyListeners();
 }
 
@@ -132,7 +131,6 @@ class SessionScope {
     onReset(ServerResetStage.reactions, (_) => binding.reactionViewer.reset());
     onReset(ServerResetStage.messages, (_) {
       binding.messageSync.reset();
-      binding.syncCoreMessagesEnabled = false;
     });
 
     onServerRevoked(ServerRevocationStage.sharing, (event) {

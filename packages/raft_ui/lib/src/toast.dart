@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -531,7 +533,7 @@ class _RaftToastPortalState extends State<RaftToastPortal> {
                 focused = value;
                 widget.controller.pause(hovered || focused);
               },
-              child: MouseRegion(
+              child: RaftHoverRegion(
                 onEnter: (_) {
                   hovered = true;
                   widget.controller.pause(true);

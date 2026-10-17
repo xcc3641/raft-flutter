@@ -93,6 +93,9 @@ final Finder anyX = find.byWidgetPredicate(
 
 const _corner = Offset(6, 6);
 
+/// The drag handle of a bottom sheet (a form below 768).
+final _handle = find.byKey(const ValueKey('raft-sheet-handle'));
+
 Future<SurfaceProbe> confirmDialog(WidgetTester t, Size size) async {
   await openFromButton(
     t,
@@ -133,6 +136,7 @@ Future<SurfaceProbe> inWorkspace(
     isOpen: () => dialog.evaluate().isNotEmpty,
     x: find.descendant(of: dialog, matching: anyX),
     scrim: _corner,
+    dragHandle: _handle,
   );
 }
 
@@ -339,6 +343,7 @@ Future<SurfaceProbe> fromProviders(
     isOpen: () => surface.evaluate().isNotEmpty,
     x: find.descendant(of: surface, matching: anyX),
     scrim: _corner,
+    dragHandle: _handle,
   );
 }
 
@@ -389,6 +394,7 @@ void main() {
             find.byKey(const ValueKey('section-dialog')).evaluate().isNotEmpty,
         x: anyX,
         scrim: _corner,
+        dragHandle: _handle,
       );
     },
     'add-computer-dialog': (t, size) async {
@@ -530,6 +536,7 @@ void main() {
         isOpen: () => dialog.evaluate().isNotEmpty,
         x: find.descendant(of: dialog, matching: anyX),
         scrim: _corner,
+        dragHandle: _handle,
       );
     },
     'feedback-close-dialog': (t, size) async {
@@ -593,6 +600,7 @@ void main() {
         isOpen: () => dialog.evaluate().isNotEmpty,
         x: find.descendant(of: dialog, matching: anyX),
         scrim: _corner,
+        dragHandle: _handle,
       );
     },
     'agent-reset-dialog': (t, size) async {
@@ -630,7 +638,12 @@ void main() {
           ),
         ),
       );
-      return SurfaceProbe(isOpen: probe.isOpen, x: probe.x);
+      return SurfaceProbe(
+        isOpen: probe.isOpen,
+        x: probe.x,
+        scrim: _corner,
+        dragHandle: _handle,
+      );
     },
     'avatar-discard-confirm': (t, size) async {
       ignoreOverflow();

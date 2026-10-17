@@ -1,5 +1,7 @@
 // Web QuotedMessageCard (components/ui/cards/QuotedMessageCard.tsx) with its
 // PreviewShell skin, and the permalink preview's loading skeleton.
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 import 'package:markdown/markdown.dart' as md;
 
@@ -366,7 +368,7 @@ class _RaftQuotedMessageCardState extends State<RaftQuotedMessageCard> {
               children: [body, ?attachment],
             ),
           );
-    return MouseRegion(
+    return RaftHoverRegion(
       onEnter: (_) => setState(() => hovered = true),
       onExit: (_) => setState(() => hovered = false),
       cursor: SystemMouseCursors.click,

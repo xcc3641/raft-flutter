@@ -5,6 +5,8 @@
 // requests, billing gates and navigation.
 import 'package:flutter/material.dart';
 
+import 'form_presentation.dart';
+
 import 'banner.dart';
 import 'dialog_card.dart';
 import 'error_presentation.dart';
@@ -194,44 +196,43 @@ class _RaftInviteHumanDialogState extends State<RaftInviteHumanDialog> {
               ),
               const SizedBox(height: 16),
               if (tab == 'email') _email(context, t) else _link(context, t),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  RaftRecipeButton(
-                    label: raftText(context, 'Cancel'),
-                    variant: RaftButtonRecipeVariant.outline,
-                    size: RaftButtonRecipeSize.sm,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    textStep: RaftTextSteps.sm,
-                    onPressed: widget.onClose,
-                  ),
-                  if (tab == 'email') ...[
-                    const SizedBox(width: 12),
-                    RaftRecipeButton(
-                      key: const ValueKey('invite-send'),
-                      label: sending
-                          ? raftText(context, 'Sending…')
-                          : raftText(context, 'Send invites'),
-                      glyph: RaftGlyph.mail,
-                      glyphSize: 14,
-                      variant: RaftButtonRecipeVariant.accent,
-                      size: RaftButtonRecipeSize.sm,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      textStep: RaftTextSteps.sm,
-                      gap: 6,
-                      disabled: sending || seatReached,
-                      onPressed: send,
-                    ),
-                  ],
-                ],
+            ],
+          ),
+          footer: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              RaftRecipeButton(
+                label: raftText(context, 'Cancel'),
+                variant: RaftButtonRecipeVariant.outline,
+                size: RaftButtonRecipeSize.sm,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                textStep: RaftTextSteps.sm,
+                onPressed: raftExplicitClose(context, widget.onClose),
               ),
+              if (tab == 'email') ...[
+                const SizedBox(width: 12),
+                RaftRecipeButton(
+                  key: const ValueKey('invite-send'),
+                  label: sending
+                      ? raftText(context, 'Sending…')
+                      : raftText(context, 'Send invites'),
+                  glyph: RaftGlyph.mail,
+                  glyphSize: 14,
+                  variant: RaftButtonRecipeVariant.accent,
+                  size: RaftButtonRecipeSize.sm,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  textStep: RaftTextSteps.sm,
+                  gap: 6,
+                  disabled: sending || seatReached,
+                  onPressed: send,
+                ),
+              ],
             ],
           ),
         ),

@@ -62,6 +62,7 @@ import 'profile_preview.dart';
 import 'quoted_message_preview.dart';
 import 'message_task_projection.dart';
 import 'saved_sidebar_entry.dart';
+import 'composer_slot.dart';
 
 /// Controlled mounted-viewport action; no route, controller or data ownership.
 class ChatViewportHandle {
@@ -3582,9 +3583,10 @@ class _RaftChatViewState extends State<RaftChatView>
           else if (channelFooter != null)
             channelFooter
           else
-            ValueListenableBuilder<int>(
-              valueListenable: w.draftChanges(thread: thread),
-              builder: (context, revision, _) => RaftComposer(
+            ComposerSlot(
+              controller: w,
+              thread: thread,
+              builder: (context) => RaftComposer(
                 // Web MessageInput drag-and-drop, paste and keyboard images.
                 frame: (_, composer, enabled) => ComposerFileDropTarget(
                   controller: w,

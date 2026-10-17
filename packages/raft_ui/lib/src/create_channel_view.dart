@@ -3,7 +3,11 @@
 // with Name, Description (optional), Visibility segmented control, Members
 // (optional) search + AGENTS/HUMANS picker and Cancel/Create Channel. The app
 // adapter owns loading, selection state and the create command.
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
+
+import 'form_presentation.dart';
 
 import 'dialog_card.dart';
 import 'icons.dart';
@@ -123,37 +127,30 @@ class RaftCreateChannelDialogView extends StatelessWidget {
                 onToggle: submitting ? null : onToggle,
               ),
             ),
-            gap,
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                RaftRecipeButton(
-                  label: 'Cancel',
-                  variant: RaftButtonRecipeVariant.outline,
-                  size: RaftButtonRecipeSize.sm,
-                  // px-4 py-2 text-sm
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  textStep: RaftTextSteps.sm,
-                  disabled: submitting,
-                  onPressed: onClose,
-                ),
-                const SizedBox(width: 12), // gap-3
-                RaftRecipeButton(
-                  label: submitting ? 'Creating…' : 'Create Channel',
-                  variant: RaftButtonRecipeVariant.accent,
-                  size: RaftButtonRecipeSize.sm,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  textStep: RaftTextSteps.sm,
-                  disabled: submitting,
-                  onPressed: onSubmit,
-                ),
-              ],
+          ],
+        ),
+        footer: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            RaftRecipeButton(
+              label: 'Cancel',
+              variant: RaftButtonRecipeVariant.outline,
+              size: RaftButtonRecipeSize.sm,
+              // px-4 py-2 text-sm
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              textStep: RaftTextSteps.sm,
+              disabled: submitting,
+              onPressed: raftExplicitClose(context, onClose),
+            ),
+            const SizedBox(width: 12), // gap-3
+            RaftRecipeButton(
+              label: submitting ? 'Creating…' : 'Create Channel',
+              variant: RaftButtonRecipeVariant.accent,
+              size: RaftButtonRecipeSize.sm,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              textStep: RaftTextSteps.sm,
+              disabled: submitting,
+              onPressed: onSubmit,
             ),
           ],
         ),
@@ -324,7 +321,7 @@ class _MemberRowState extends State<_MemberRow> {
     return Semantics(
       button: true,
       selected: widget.selected,
-      child: MouseRegion(
+      child: RaftHoverRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => hovered = true),
         onExit: (_) => setState(() => hovered = false),

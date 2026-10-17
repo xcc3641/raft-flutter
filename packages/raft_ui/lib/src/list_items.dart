@@ -2,6 +2,8 @@
 // SurfaceListItem (raft-ui Card + product overrides), AvatarListRow,
 // SectionEyebrow and SectionHeader. Class lists are cited per widget.
 
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -168,7 +170,7 @@ class _RaftSurfaceListItemState extends State<RaftSurfaceListItem> {
       child: widget.child,
     );
     if (interactive) {
-      item = MouseRegion(
+      item = RaftHoverRegion(
         cursor: widget.onTap != null
             ? SystemMouseCursors.click
             : MouseCursor.defer,

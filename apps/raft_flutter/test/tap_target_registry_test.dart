@@ -72,7 +72,6 @@ void main() {
     ],
     'SourceTaskSurface': ['onTask', 'onViewBilling'],
     'WorkspaceTaskHost': ['onTask', 'onViewBilling'],
-    'WorkspaceGridView': ['onViewBilling'],
   };
 
   /// Source of each `Name(...)` call (not the definition) in [text].

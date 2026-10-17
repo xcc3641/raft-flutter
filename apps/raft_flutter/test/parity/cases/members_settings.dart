@@ -43,7 +43,6 @@ import 'package:raft_flutter/features/managed_agent_launcher.dart';
 import 'package:raft_flutter/features/runtime_form_dialog.dart';
 import 'package:raft_flutter/features/create_agent_dialog.dart';
 import 'package:raft_flutter/features/workspace_settings.dart';
-import 'package:raft_flutter/features/workspace_mode_settings_card.dart';
 import 'package:raft_flutter/platform/native_notifications.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -628,5 +627,4 @@ Widget _settingsPage(
   onLogout: () async {},
   initialTab: tab,
   mobileRoot: root,
-  workspaceModeCard: WorkspaceModeSettingsCard(controller: w),
 );

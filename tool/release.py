@@ -293,14 +293,16 @@ def commit_sha(environ):
     return value
 
 
-def release_defines(shown_version, number, environ):
+def release_defines(shown_version, number, environ, tag=''):
     """Every compile-time define a formal release build passes, validated.
 
     Required: version, build number, API origin, Web origin, deployment
     environment and commit. RAFT_FEEDBACK_EXPORT_URL is optional: it is the
     repository Actions variable of the feedback export worker and, when unset,
     the Report Issue entry is hidden (as on the Web without
-    VITE_FEEDBACK_EXPORT_URL).
+    VITE_FEEDBACK_EXPORT_URL). RAFT_RELEASE_TAG (the release tag, when there is
+    one) lets the app list the release notes between its own release and an
+    offered update.
     """
     defines = {
         'RAFT_APP_VERSION': shown_version,
@@ -311,6 +313,8 @@ def release_defines(shown_version, number, environ):
         'RAFT_DEPLOYMENT_ENV': 'production',
         'RAFT_COMMIT_SHA': commit_sha(environ),
     }
+    if tag:
+        defines['RAFT_RELEASE_TAG'] = tag
     feedback = environ.get('RAFT_FEEDBACK_EXPORT_URL', '').strip()
     if feedback:
         defines['RAFT_FEEDBACK_EXPORT_URL'] = feedback
@@ -331,6 +335,9 @@ def validate_release_defines(defines):
     for key, official in (('RAFT_ORIGIN', OFFICIAL_API_ORIGIN), ('RAFT_FRONTEND_ORIGIN', OFFICIAL_WEB_ORIGIN)):
         if defines[key] != official:
             raise ValueError(f'{key} must be {official} in a release build, got {defines[key]!r}')
+    tag = defines.get('RAFT_RELEASE_TAG')
+    if tag is not None and not re.fullmatch(r'v[0-9A-Za-z.+\-]+', str(tag)):
+        raise ValueError('RAFT_RELEASE_TAG must be a release tag like v1.2.3+4')
     feedback = defines.get('RAFT_FEEDBACK_EXPORT_URL')
     if feedback is not None:
         parsed = urlsplit(feedback)
@@ -367,7 +374,7 @@ def build(platform):
     public_key = appcast.read_public_key(env) if platform in {'macos', 'windows', 'appimage'} else ''
     command = [sys.executable, ROOT / 'tool/flutter', 'build', 'apk' if platform == 'android' else 'linux' if platform == 'appimage' else platform,
                '--release', '--target=lib/main.dart', f'--build-name={shown_version}', f'--build-number={number}',
-               *[f'--dart-define={key}={value}' for key, value in release_defines(shown_version, number, env).items()]]
+               *[f'--dart-define={key}={value}' for key, value in release_defines(shown_version, number, env, identity['tag']).items()]]
     if suffix:
         # Same value as the CMake environment variable: id, keyring, no raft:// handler.
         command.append(f'--dart-define=RAFT_LINUX_APPLICATION_ID_SUFFIX={suffix}')

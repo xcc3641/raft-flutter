@@ -10,6 +10,7 @@ import '../data/workspace_controller.dart';
 import 'channel_conversion_section.dart';
 import 'channel_form_fields.dart';
 import 'channel_members.dart';
+import 'channel_sos.dart';
 import 'composer_directory.dart' show cachedChannelRoster;
 import 'create_channel_dialog.dart' show ChannelMemberCandidate;
 import 'management_support.dart'
@@ -359,7 +360,10 @@ class _ChannelSettingsState extends State<ChannelSettings> {
       final result = await w.command(
         'POST',
         '/feature-flags/evaluate',
-        data: featureFlagEvaluateBody(keys: [guestFlag, channelConversionFlag], serverId: serverId),
+        data: featureFlagEvaluateBody(
+          keys: [guestFlag, channelConversionFlag],
+          serverId: serverId,
+        ),
       );
       bool enabled(String key) =>
           result is Map &&
@@ -437,9 +441,8 @@ class _ChannelSettingsState extends State<ChannelSettings> {
   Future<void> editMetadata() async {
     final c = channel, identity = pageIdentity(w);
     if (c.archived || !cap('editChannelMetadata')) return;
-    await showRaftDialog<void>(
-      context: context,
-      barrierDismissible: false,
+    await showRaftForm<void>(
+      context,
       builder: (_) => RaftFormDialog(
         title: 'Edit channel',
         fields: [
@@ -1544,65 +1547,15 @@ class _ChannelSettingsState extends State<ChannelSettings> {
     );
   }
 
-  /// Web SOSDialog: `POST /channels/:id/stop-all-agents`, then the guidance
-  /// prompt through `POST /channels/:id/resume-all-agents`. Both re-check
-  /// that this account may still control agent runtime in the same session.
-  Future<void> stopAgents() async {
-    final c = channel, identity = pageIdentity(w);
-    String? refused() =>
-        identity != pageIdentity(w) || !w.can('controlAgentRuntime')
-        ? 'You no longer have permission to control agents here.'
-        : null;
-    String failure(Object error, String fallback) =>
-        userErrorText(error, fallback: fallback, where: 'channel SOS');
-    await showRaftDialog<void>(
-      context: context,
-      // Web `DialogCard` (SOSDialog): no scrim close, Escape and X close.
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        String tr(String text) => raftText(dialogContext, text);
-        return Center(
-          child: RaftSosDialog(
-            key: const ValueKey('channel-sos-dialog'),
-            channelName: c.name,
-            onClose: () => Navigator.of(dialogContext).pop(),
-            onStop: () async {
-              final denied = refused();
-              if (denied != null) return tr(denied);
-              try {
-                await w.command('POST', '/channels/${c.id}/stop-all-agents');
-                return null;
-              } catch (e) {
-                return failure(
-                  e,
-                  tr('Agents could not be stopped. Try again.'),
-                );
-              }
-            },
-            onResume: (guidance) async {
-              final denied = refused();
-              if (denied != null) return tr(denied);
-              final prompt =
-                  '[SOS] The user has emergency-stopped all agents in #${c.name} because they were going off-track. Here is the user\'s correction and new guidance:\n\n$guidance\n\nRead this carefully, acknowledge the correction, and adjust your approach accordingly. Use check_messages and read_history to understand the current state before taking any action.';
-              try {
-                await w.command(
-                  'POST',
-                  '/channels/${c.id}/resume-all-agents',
-                  data: {'prompt': prompt},
-                );
-                return null;
-              } catch (e) {
-                return failure(
-                  e,
-                  tr('Agents could not be resumed. Try again.'),
-                );
-              }
-            },
-          ),
-        );
-      },
-    );
-  }
+  Future<void> stopAgents() => showChannelSos(
+    context,
+    w,
+    channel,
+    agentName: (id) =>
+        members.where((row) => row['id'] == id).firstOrNull?['name']
+            as String? ??
+        id,
+  );
 
   Future<void> deleteChannel() async {
     final accepted = await showDialog<bool>(

@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'design_primitives.dart';
@@ -89,7 +91,7 @@ class _RaftSearchInputState extends State<RaftSearchInput> {
       tokens: rt,
     ).root;
     final style = g.control.text(rt, base: DefaultTextStyle.of(context).style);
-    return MouseRegion(
+    return RaftHoverRegion(
       onEnter: (_) => setState(() => hovered = true),
       onExit: (_) => setState(() => hovered = false),
       child: RaftRecipeBox(

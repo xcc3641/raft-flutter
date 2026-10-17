@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'raft_underline.dart';
@@ -138,14 +140,13 @@ class _RaftTranslationActionState extends State<_RaftTranslationAction> {
     final decoration = slot['text-decoration-line'];
     final underline =
         decoration is CssKeyword && decoration.value == 'underline';
-    final decorationColor = RaftColorRef.fromCss(
-      slot['text-decoration-color'],
-    )?.resolve(tokens, currentColor: style.color);
+    final decorationColor = RaftColorRef.fromCss(slot['text-decoration-color'])
+        ?.resolve(tokens, currentColor: style.color);
     final background = slot.backgroundColor?.resolve(
       tokens,
       currentColor: style.color,
     );
-    return MouseRegion(
+    return RaftHoverRegion(
       onEnter: (_) => setState(() => hovered = true),
       onExit: (_) => setState(() => hovered = false),
       child: RaftControl(

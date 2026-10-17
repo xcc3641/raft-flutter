@@ -85,11 +85,15 @@ Future<Uint8List> largePng() async {
   return data!.buffer.asUint8List();
 }
 
-Future<(int, int)> resolvedSize(ImageProvider provider) {
+Future<(int, int)> resolvedSize(
+  ImageProvider provider, {
+  void Function(ui.Image)? observeImage,
+}) {
   final done = Completer<(int, int)>();
   final stream = provider.resolve(ImageConfiguration.empty);
   late ImageStreamListener listener;
   listener = ImageStreamListener((info, _) {
+    observeImage?.call(info.image);
     done.complete((info.image.width, info.image.height));
     info.dispose();
     stream.removeListener(listener);
@@ -202,9 +206,18 @@ void main() {
     (tester) async {
       final (client, w) = workspace(null);
       final files = _Files(original);
+      // Borrow a disposed Image reference only to inspect all bitmap handles.
+      ui.Image? previewImage;
       addTearDown(() async {
         w.dispose();
         await client.dispose();
+        if (previewImage case final image?) {
+          expect(
+            image.debugGetOpenHandleStackTraces(),
+            isEmpty,
+            reason: 'The disposed workspace must release every preview bitmap handle.',
+          );
+        }
       });
       await tester.pumpWidget(view(w, files));
       expect(find.byType(CircularProgressIndicator), findsNothing);
@@ -215,7 +228,10 @@ void main() {
       expect(tester.getRect(find.byType(RaftAttachmentCard)), reserved);
       final listProvider = tester.widget<Image>(find.byType(Image)).image;
       final listSize = (await tester.runAsync(
-        () => resolvedSize(listProvider),
+        () => resolvedSize(
+          listProvider,
+          observeImage: (image) => previewImage = image,
+        ),
       ))!;
       // 384x288 logical at the test view's 3x.
       expect(listSize, (1152, 864));
@@ -252,6 +268,16 @@ void main() {
       expect(w.retainedImageDecodedBytes, 1152 * 864 * 4);
       expect(w.retainedImageCount, 1);
       await tester.pumpWidget(const SizedBox());
+      // Evict while the widget test can still finish the release frame.
+      // ImageCache defers its keep-alive handle disposal to that frame;
+      // addTearDown runs after the binding has already stopped pumping.
+      // Client shutdown does real asynchronous I/O, outside the fake clock.
+      await tester.runAsync(() async {
+        w.dispose();
+        await client.dispose();
+      });
+      tester.binding.scheduleFrame();
+      await tester.pump();
     },
   );
 
@@ -409,10 +435,7 @@ void main() {
         'raft-image-cache',
       );
       addTearDown(() => directory.delete(recursive: true));
-      final disk = AttachmentDiskCache(
-        () async => directory,
-        maxBytes: 3000,
-      );
+      final disk = AttachmentDiskCache(() async => directory, maxBytes: 3000);
       AttachmentImageStoreKey entry(int i) => AttachmentImageStoreKey(
         identity: 'identity',
         channelId: 'channel',

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:raft_client/raft_client.dart';
 import 'package:raft_ui/raft_ui.dart';
 
+import '../data/billing_plans.dart';
 import '../data/cause_notice.dart';
 import '../data/user_error.dart';
 import '../data/workspace_controller.dart';
@@ -218,8 +219,7 @@ class _CreateAgentDialogState extends State<CreateAgentDialog> {
     final maxSeats = capacity['maxUniversalSeats'],
         seats = usage['universalSeats'];
     if (maxSeats is num && seats is num && maxSeats != -1) {
-      // PRO_AGENT_SEAT_FRACTION
-      if (seats + .25 > maxSeats) {
+      if (seats + RaftBillingPlans.proAgentSeatFraction > maxSeats) {
         return (label: 'Seat limit', usage: seats, limit: maxSeats);
       }
     }
@@ -581,7 +581,9 @@ class _CreateAgentDialogState extends State<CreateAgentDialog> {
           // on both BannerDescription and its inline Upgrade button.
           backgroundColor: tokens.dark ? tokens.colors['warning-soft'] : null,
           foregroundColor: tokens.dark ? tokens.colors['warning-strong'] : null,
-          actionForeground: tokens.dark ? tokens.colors['warning-strong'] : null,
+          actionForeground: tokens.dark
+              ? tokens.colors['warning-strong']
+              : null,
           description: raftFormat(
             context,
             '{limitLabel} reached ({usage}/{limit} on {planName} plan).',
@@ -762,6 +764,25 @@ class _CreateAgentDialogState extends State<CreateAgentDialog> {
       child: RaftAgentDialogCard(
         title: 'Create Agent',
         onClose: close,
+        footerGap: raftAgentFormGap,
+        footer: ListenableBuilder(
+          listenable: f ?? const AlwaysStoppedAnimation(0),
+          builder: (context, _) => RaftAgentDialogFooter(
+            children: [
+              RaftAgentDialogButton(label: 'Cancel', onPressed: close),
+              RaftAgentDialogButton(
+                label: 'Create Agent',
+                primary: true,
+                // CreateAgentDialog.tsx2103 caller; other primary buttons keep defaults.
+                foreground: tokens.dark
+                    ? tokens.colors['foreground-inverse']
+                    : null,
+                busy: busy,
+                onPressed: createDisabled ? null : submit,
+              ),
+            ],
+          ),
+        ),
         children: [
           if (f == null)
             Column(
@@ -797,23 +818,6 @@ class _CreateAgentDialogState extends State<CreateAgentDialog> {
                 ],
               ),
             ),
-          const SizedBox(height: raftAgentFormGap),
-          ListenableBuilder(
-            listenable: f ?? const AlwaysStoppedAnimation(0),
-            builder: (context, _) => RaftAgentDialogFooter(
-              children: [
-                RaftAgentDialogButton(label: 'Cancel', onPressed: close),
-                RaftAgentDialogButton(
-                  label: 'Create Agent',
-                  primary: true,
-                  // CreateAgentDialog.tsx2103 caller; other primary buttons keep defaults.
-                  foreground: tokens.dark ? tokens.colors['foreground-inverse'] : null,
-                  busy: busy,
-                  onPressed: createDisabled ? null : submit,
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );

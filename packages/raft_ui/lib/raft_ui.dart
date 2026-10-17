@@ -240,6 +240,9 @@ export 'src/app_icon_choices.dart';
 export 'src/markdown_editing.dart';
 export 'src/composer_expand.dart';
 export 'src/presentation.dart';
+export 'src/form_presentation.dart';
 export 'src/sheet.dart';
 export 'src/composer_action_row.dart';
 export 'src/composer_tool_button.dart';
+
+export 'src/hover_region.dart';

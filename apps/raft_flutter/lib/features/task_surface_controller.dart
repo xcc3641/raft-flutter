@@ -5,6 +5,7 @@ import 'package:raft_client/raft_client.dart';
 import 'package:raft_ui/raft_ui.dart';
 
 import '../data/panel_caches.dart';
+import '../data/task_discussion_read.dart';
 import '../data/workspace_controller.dart';
 
 /// Source taskModal owns a separate discussion identity, never the main or
@@ -302,6 +303,7 @@ class TaskSurfaceController extends ChangeNotifier {
       main: false,
       thread: false,
     );
+    admitTaskDiscussion(c);
     discussion = c;
     unawaited(
       c.openThreadIdentity(

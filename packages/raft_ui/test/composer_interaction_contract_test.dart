@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -316,6 +317,45 @@ void main() {
       expect(_value(tester).composing, _composingEnd);
     });
 
+    // A real mouse click on desktop: pointer down outside a text field's tap
+    // region unfocuses it, and the platform commits the marked text before
+    // onPressed runs. The toolbar and the card belong to the field.
+    for (final place in ['Bold', 'blank']) {
+      testWidgets(
+        'macOS mouse click on $place keeps the composition and the focus',
+        (tester) async {
+          _size(tester, _desktop);
+          final s = _store(tester, draft: _three);
+          await tester.pumpWidget(_app(s));
+          await _open(tester);
+          await _compose(tester);
+          final before = _value(tester);
+          final field = _live(tester).widget.focusNode;
+          final target = place == 'Bold'
+              ? tester.getCenter(
+                  find.byWidgetPredicate(
+                    (w) => w is RaftComposerToolButton && w.tooltip == 'Bold',
+                  ),
+                )
+              // The editor's padding, left of the text.
+              : tester.getCenter(find.byWidget(_live(tester).widget)) -
+                    Offset(
+                      tester
+                                  .getSize(find.byWidget(_live(tester).widget))
+                                  .width /
+                              2 +
+                          RaftSpace.x1_5,
+                      0,
+                    );
+          await tester.tapAt(target, kind: PointerDeviceKind.mouse);
+          await tester.pump();
+          expect(field.hasFocus, isTrue, reason: 'the click took the focus');
+          expect(_value(tester), before);
+        },
+        variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+      );
+    }
+
     testWidgets('expanding is refused while composing, inline', (tester) async {
       _size(tester, _desktop);
       final s = _store(tester, draft: _three);
@@ -446,6 +486,34 @@ void main() {
       expect(focus.hasFocus, isTrue);
       expect(tester.takeException(), isNull);
     });
+
+    // Mac, task #155 step 10: opened as a sheet in a 390-wide window, then
+    // the window is dragged straight to 1200.
+    testWidgets('opened as a sheet, widened to 1200: stays, caret kept', (
+      tester,
+    ) async {
+      _size(tester, const Size(390, 844));
+      final s = _store(tester, draft: _three);
+      await tester.pumpWidget(_app(s));
+      await _open(tester);
+      expect(_sheet, findsOneWidget);
+      _ctl(tester).selection = const TextSelection.collapsed(offset: 6);
+      await tester.pump();
+      final state = _live(tester);
+      final before = _value(tester);
+
+      for (final w in [600.0, 900.0, 1200.0]) {
+        tester.view.physicalSize = Size(w, 800);
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      expect(_view, findsOneWidget, reason: 'stays expanded');
+      expect(_sheet, findsNothing, reason: 'now a dialog');
+      expect(identical(_live(tester), state), isTrue, reason: 'same editor');
+      expect(_value(tester), before, reason: 'draft and caret');
+      expect(state.widget.focusNode.hasFocus, isTrue);
+      expect(tester.takeException(), isNull);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
     testWidgets('the cut is 768: 767 is a sheet, 768 a dialog', (tester) async {
       final s = _store(tester, draft: _three);

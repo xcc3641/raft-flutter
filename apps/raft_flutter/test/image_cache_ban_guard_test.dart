@@ -12,10 +12,10 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/repo_root.dart';
+
 void main() {
-  final root = Directory.current.path.endsWith('apps/raft_flutter')
-      ? Directory('../..')
-      : Directory('.');
+  final root = repoRoot();
 
   /// Dart sources shipped in the app: every lib/ except the vendored
   /// flutter_chat_ui itself.
@@ -52,13 +52,26 @@ void main() {
     ),
   };
 
+  test(
+    'the scan reads the app sources (an empty scan would pass anything)',
+    () {
+      // Windows paths can mix both slashes; compare in one form.
+      final sources = [
+        for (final f in appSources())
+          if (f.path.replaceAll(r'\', '/').contains('/lib/')) f,
+      ];
+      expect(sources, hasLength(greaterThan(100)));
+    },
+  );
+
   test('the app never uses flutter_chat_ui / cross_cache image loading', () {
     final hits = <String>[];
     for (final file in appSources()) {
       final text = file.readAsStringSync();
       for (final entry in banned.entries) {
         for (final match in entry.value.allMatches(text)) {
-          final line = '\n'.allMatches(text.substring(0, match.start)).length + 1;
+          final line =
+              '\n'.allMatches(text.substring(0, match.start)).length + 1;
           final lineText = text.split('\n')[line - 1].trimLeft();
           if (lineText.startsWith('//')) continue;
           hits.add('${file.path}:$line: ${entry.key}');
@@ -94,7 +107,9 @@ void main() {
 
   test('the guard sees the vendored chat.dart that creates a CrossCache', () {
     // If flutter_chat_ui stops using cross_cache this guard can be retired.
-    final chat = File('${root.path}/packages/flutter_chat_ui/lib/src/chat.dart');
+    final chat = File(
+      '${root.path}/packages/flutter_chat_ui/lib/src/chat.dart',
+    );
     expect(chat.readAsStringSync(), contains('CrossCache()'));
     expect(banned['CrossCache']!.hasMatch(chat.readAsStringSync()), isTrue);
   });

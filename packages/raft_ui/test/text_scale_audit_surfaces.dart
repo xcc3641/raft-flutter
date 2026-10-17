@@ -116,6 +116,20 @@ final auditSurfaces = <AuditSurface>[
     Size(440, 590),
   ),
   AuditSurface(
+    'activityDirectMessagesMobilePreview',
+    'Activity DMs mobile',
+    activityDirectMessagesMobilePreview,
+    Size(390, 70),
+    representative: true,
+  ),
+  AuditSurface(
+    'activityDirectMessagesPickerPreview',
+    'Activity DMs picker',
+    activityDirectMessagesPickerPreview,
+    Size(440, 590),
+    representative: true,
+  ),
+  AuditSurface(
     'activityLoadingPreview',
     'Activity pending results',
     activityLoadingPreview,

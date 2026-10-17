@@ -976,23 +976,18 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
     final view = View.of(context);
     final logicalWidth = view.physicalSize.width / view.devicePixelRatio;
     (workspace ??= WorkspaceController(
-          c,
-          cache: cache,
-          restoreSharedAttachment: sharing.inbox.restore,
-          discardSharedScope: (origin, principal, server, channel) async {
-            try {
-              await sharing.inbox.clearScope(
-                origin,
-                principal,
-                server,
-                channel,
-              );
-            } catch (_) {
-              // Provider/storage failures cannot interrupt authority revocation.
-            }
-          },
-          mobileNavigation: logicalWidth < RaftLayoutMetrics.desktopBreakpoint,
-        ))
+        c,
+        cache: cache,
+        restoreSharedAttachment: sharing.inbox.restore,
+        discardSharedScope: (origin, principal, server, channel) async {
+          try {
+            await sharing.inbox.clearScope(origin, principal, server, channel);
+          } catch (_) {
+            // Provider/storage failures cannot interrupt authority revocation.
+          }
+        },
+        mobileNavigation: logicalWidth < RaftLayoutMetrics.desktopBreakpoint,
+      ))
       ..setForeground(false)
       ..addListener(workspaceChanged);
     setState(() {});
@@ -2174,28 +2169,30 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
       locale: locale,
       supportedLocales: const [Locale('en'), Locale('zh', 'CN')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      builder: (context, child) => AppWindowCommands(
-        navigatorKey: appRouter.navigatorKey,
-        openSection: workspace?.setSection,
-        child: AppServicesHost(
-          services: widget.services,
-          ownsAppUpdate: widget.ownsAppUpdate,
-          child: RaftTextScaling(
-            child: RepaintBoundary(
-              key: raftScreenshotKey,
-              child: DesktopTitleBar(
-                child: RaftTooltipProvider(
-                  delay: const Duration(milliseconds: 600),
-                  child: RaftViewportBreakpointScope(
-                    // Resolves the theme's font combinations once the app is idle.
-                    child: RaftFontWarmUpScope(
-                      child: RaftSystemBars(
-                        child: RaftErrorScope(
-                          format: raftAppErrorFormatter,
-                          child: RaftToastHost(
-                            child: KeyboardInsetGuard(
-                              imeVisible: platformImeVisibility,
-                              child: child!,
+      builder: (context, child) => RaftHoverScope.forPlatform(
+        child: AppWindowCommands(
+          navigatorKey: appRouter.navigatorKey,
+          openSection: workspace?.setSection,
+          child: AppServicesHost(
+            services: widget.services,
+            ownsAppUpdate: widget.ownsAppUpdate,
+            child: RaftTextScaling(
+              child: RepaintBoundary(
+                key: raftScreenshotKey,
+                child: DesktopTitleBar(
+                  child: RaftTooltipProvider(
+                    delay: const Duration(milliseconds: 600),
+                    child: RaftViewportBreakpointScope(
+                      // Resolves the theme's font combinations once the app is idle.
+                      child: RaftFontWarmUpScope(
+                        child: RaftSystemBars(
+                          child: RaftErrorScope(
+                            format: raftAppErrorFormatter,
+                            child: RaftToastHost(
+                              child: KeyboardInsetGuard(
+                                imeVisible: platformImeVisibility,
+                                child: child!,
+                              ),
                             ),
                           ),
                         ),

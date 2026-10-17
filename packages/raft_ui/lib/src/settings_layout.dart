@@ -1,3 +1,4 @@
+import 'hover_region.dart';
 import 'panel_layout.dart' show RaftCssText, RaftPanelAction, raftRecipeTheme;
 import 'recipe_surface.dart' show RaftLayeredDecoration, RaftOuterShadowPainter;
 export 'panel_layout.dart' show raftRecipeTheme;
@@ -174,7 +175,7 @@ class _RaftSettingsSidebarItemState extends State<RaftSettingsSidebarItem> {
         button: true,
         selected: widget.active,
         label: widget.entry.label,
-        child: MouseRegion(
+        child: RaftHoverRegion(
           cursor: SystemMouseCursors.click,
           onEnter: (_) => setState(() => hovered = true),
           onExit: (_) => setState(() => hovered = false),

@@ -644,8 +644,9 @@ Future<void> showReportIssueDialog(
     browser: reportIssueBrowserFacts(context),
     transport: transport,
   );
-  late final RawDialogRoute<void> route;
-  route = raftModalRoute<void>(
+  // A form: a bottom sheet below 768, a centered dialog from 768.
+  final route = raftFormRoute<void>(
+    context,
     builder: (dialogContext) => RaftReportIssueDialog(
       agentName: session.agentLabel,
       hasMachine: session.machineId != null,

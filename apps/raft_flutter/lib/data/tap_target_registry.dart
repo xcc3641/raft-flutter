@@ -260,12 +260,6 @@ abstract final class TapTargetRegistry {
       'tap_target_matrix_test.dart (chat, Activity, Search hosts)',
     ),
     TapContainer(
-      'workspace-grid',
-      'features/workspace_grid_view.dart',
-      ['RaftChatView'],
-      'workspace_grid_view_test.dart, workspace_grid_task_thread_test.dart (thread); profile column is a recorded gap',
-    ),
-    TapContainer(
       'task-discussion',
       'features/task_surface.dart',
       ['RaftChatView'],

@@ -22,8 +22,6 @@ import '../data/navigation_registry.dart';
 import '../data/workspace_navigation.dart';
 import '../data/source_server_unread.dart';
 import 'workspace_menu_invite.dart';
-import '../data/workspace_mode_store.dart';
-import 'workspace_grid_view.dart';
 import '../data/personal_presentation.dart';
 import '../data/device_preferences.dart';
 import '../data/mobile_tabbar_preferences.dart';
@@ -720,7 +718,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
     if (mobileHost == null) w.resumes.addListener(appResumed);
     w.addListener(syncServerMenu);
     syncServerMenu();
-    workspaceMode = mobileHost?.workspaceMode ?? WorkspaceModeStore(w);
     activityFlag = mobileHost?.activityFlag ?? DesktopActivityFlag(w);
     activityFlag.addListener(activityFlagChanged);
     activityDirectory =
@@ -754,12 +751,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
       labsEnabled = mobileHost!.labsEnabled;
     }
   }
-
-  late WorkspaceModeStore workspaceMode;
-  final gridKey = GlobalKey<WorkspaceGridViewState>();
-  bool gridEntered = false;
-  Size? retainedGridSize;
-  bool get gridActive => workspaceMode.active(MediaQuery.sizeOf(context).width);
 
   void syncBridgeFlag() {
     if (skipCoveredPage) return;
@@ -881,8 +872,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
       activityDirectory.dispose();
       activityFlag.removeListener(activityFlagChanged);
       activityFlag.dispose();
-      workspaceMode.dispose();
-      workspaceMode = WorkspaceModeStore(w);
       activityFlag = DesktopActivityFlag(w)..addListener(activityFlagChanged);
       activityDirectory = MessageReferenceDirectory(w);
       liveActivities = ChatAgentPresentation(w, activityDirectory)
@@ -1013,7 +1002,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
     serverUnread.removeListener(serverUnreadChanged);
     if (mobileHost == null) {
       serverUnread.dispose();
-      workspaceMode.dispose();
     }
     serverUnreadTimer?.cancel();
     persistPanels?.cancel();
@@ -1225,10 +1213,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
       return;
     }
     scaffold.currentState?.closeDrawer();
-    if (gridActive && gridKey.currentState?.openChannel(c.id) == true) {
-      w.setSection('chat');
-      return;
-    }
     desktopNavigation.clear();
     await w.selectChannel(fresh ?? c);
   }
@@ -1371,7 +1355,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
       liveActivityShown,
       shellIdentities,
       sidebarDisclosure,
-      workspaceMode,
     ]),
     builder: (context, _) {
       final pageRoute = widget.mobileRoutePage
@@ -1393,11 +1376,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
       final attentionOwner = activityUnread;
       final attentionScope = attentionOwner.scope;
       final attentionEpoch = attentionOwner.authorityEpoch;
-      if (gridActive) gridEntered = true;
-      if (!workspaceMode.enabled || !workspaceMode.showCard) {
-        gridEntered = false;
-        retainedGridSize = null;
-      }
       updateChannelAuthority();
       final authority = bindPageAuthority();
       if (mobileRouteAuthority != mobileAuthority) {
@@ -1435,7 +1413,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
       final thread = sidePanels.thread;
       final phoneChatDirect =
           widget.mobileRoutePage &&
-          !gridActive &&
           (location.route == RaftRoute.channel ||
               location.route == RaftRoute.dm);
       final rootTab = w.navigation.mobileRootTabOf(location);
@@ -1822,17 +1799,17 @@ class _WorkspaceViewState extends State<WorkspaceView>
                     Expanded(
                       child: ProfileOutsideTapDismiss(
                         controller: w,
-                        panelKey: profilePanelKey,
+                        panelKey: profilePanelKeyFor(w),
                         // Wide layouts only: a phone / folded profile is a page.
-                        enabled: wide && !gridActive,
+                        enabled: wide,
                         onDismiss: w.closeProfile,
                         child: RaftAdaptiveWorkspace(
                           key: ValueKey('adaptive-workspace-$authority'),
                           onPresentationChanged: (main, thread) =>
                               w.setConversationPresentation(
                                 this,
-                                main: main && !gridActive,
-                                thread: thread && !gridActive,
+                                main: main,
+                                thread: thread,
                               ),
                           sidebarWidth: sidebarWidth,
                           trailingExtent: legacyDockWidth,
@@ -1840,11 +1817,9 @@ class _WorkspaceViewState extends State<WorkspaceView>
                           onPanelWidthsChanged: savePanels,
                           sidebarResizeLabel: tr('Resize sidebar'),
                           threadResizeLabel: tr('Resize thread'),
-                          sidebarVisible:
-                              gridActive ||
-                              DesktopNavigationPolicy.forSection(
-                                route,
-                              ).usesConversationSidebar,
+                          sidebarVisible: DesktopNavigationPolicy.forSection(
+                            route,
+                          ).usesConversationSidebar,
                           // Phones mount neither; only desktop widths consume them.
                           sidebar: wide ? sidebar() : const SizedBox.shrink(),
                           navigationOnRight: navigationOnRight,
@@ -1894,17 +1869,8 @@ class _WorkspaceViewState extends State<WorkspaceView>
                                     mobileNavigation(),
                                   ],
                                 ),
-                          content: Stack(
-                            fit: StackFit.expand,
+                          content: Column(
                             children: [
-                              Offstage(
-                                offstage: gridActive,
-                                child: ExcludeFocus(
-                                  excluding: gridActive,
-                                  child: TickerMode(
-                                    enabled: !gridActive,
-                                    child: Column(
-                                      children: [
                                         // The Computers root header sits in the
                                         // content region beside the rail.
                                         if (railShown &&
@@ -1998,65 +1964,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
                                         ),
                                       ],
                                     ),
-                                  ),
-                                ),
-                              ),
-                              if (gridEntered)
-                                Positioned.fill(
-                                  child: Offstage(
-                                    offstage: !gridActive,
-                                    child: ExcludeFocus(
-                                      excluding: !gridActive,
-                                      child: TickerMode(
-                                        enabled: gridActive,
-                                        child: LayoutBuilder(
-                                          builder: (context, bounds) {
-                                            if (gridActive) {
-                                              retainedGridSize = bounds.biggest;
-                                            }
-                                            final capturedAuthority =
-                                                workspaceMode.authority;
-                                            final size =
-                                                retainedGridSize ??
-                                                bounds.biggest;
-                                            // Hidden grid editors retain their last admitted
-                                            // layout; shrinking the classic mobile host must
-                                            // not lay out two desktop tabsets at phone width.
-                                            return OverflowBox(
-                                              alignment: Alignment.topLeft,
-                                              minWidth: size.width,
-                                              maxWidth: size.width,
-                                              minHeight: size.height,
-                                              maxHeight: size.height,
-                                              child: WorkspaceGridView(
-                                                key: gridKey,
-                                                controller: w,
-                                                onViewBilling: () =>
-                                                    select('billing'),
-                                                route: route,
-                                                routeBody: content,
-                                                active: gridActive,
-                                                onRouteSelected: (next) {
-                                                  if (!mounted ||
-                                                      !gridActive ||
-                                                      capturedAuthority !=
-                                                          workspaceMode
-                                                              .authority) {
-                                                    return;
-                                                  }
-                                                  select(next);
-                                                },
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          thread: thread && !gridActive
+                          thread: thread
                               ? RaftConversationSurface(
                                   role: RaftConversationSurfaceRole
                                       .threadTimeline,
@@ -2080,8 +1988,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
                                   ),
                                 )
                               : null,
-                          profile:
-                              sidePanels.profile && !gridActive
+                          profile: sidePanels.profile
                               ? profileSidePanel(location.profile!, page: !wide)
                               : null,
                         ),
@@ -2100,7 +2007,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
         onViewBilling: () => select('billing'),
         seed: taskSeed ?? mobileHost?.taskSeed,
         // RightPanel handles content routes before its workspace guard.
-        presented: !gridActive || route == 'search' || route == 'activity',
+        presented: true,
         leadingOnRight: navigationOnRight,
         leadingExtent: wide
             ? RaftLayoutMetrics.railWidth(
@@ -2155,8 +2062,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
     }
   }
 
-  final profilePanelKey = GlobalKey();
-
   Widget _phoneThreadChat() => RaftChatView(
     controller: w,
     thread: true,
@@ -2168,7 +2073,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
 
   Widget profileSidePanel(RaftProfileLocation profile, {bool page = false}) =>
       ProfileSidePanel(
-        key: profilePanelKey,
+        key: profilePanelKeyFor(w),
         controller: w,
         profile: profile,
         agentTab: w.location.agentTab,
@@ -2930,19 +2835,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
               ),
             ],
           ),
-          if (MediaQuery.sizeOf(context).width >= 1024 &&
-              workspaceMode.showCard)
-            RaftWorkspaceRailAction(
-              key: const Key('workspace-mode-toggle'),
-              label: tr(gridActive ? 'Exit Workspace' : 'Enter Workspace'),
-              glyph: RaftGlyph.squareSplitHorizontal,
-              selected: gridActive,
-              depressed: true,
-              onPressed: () => workspaceMode.setEnabled(
-                !workspaceMode.enabled,
-                capturedAuthority: workspaceMode.authority,
-              ),
-            ),
           settingsRailAction(),
         ],
       ),
@@ -3731,9 +3623,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
       conversationKind: c.type == 'dm'
           ? RaftConversationNavKind.directMessage
           : RaftConversationNavKind.channel,
-      selected: gridActive
-          ? gridKey.currentState?.activeChannelId == c.id
-          : w.section == 'chat' && w.channel?.id == c.id,
+      selected: w.section == 'chat' && w.channel?.id == c.id,
       unread: w.unread[c.id] ?? 0,
       joined: c.joined,
       activityMuted: c.flag('activityMuted'),
@@ -3787,7 +3677,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
             else
               RaftChatSidebarHeading(
                 label: tr('Chat'),
-                workspaceEnabled: gridActive,
               ),
             Expanded(
               child: GestureDetector(
@@ -4100,7 +3989,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
       return MobileSettingsDirectPage(
         controller: host.w,
         presentation: host.presentation,
-        workspaceMode: host.workspaceMode,
         buildPage: host.settings,
         active: () => pageRoute?.active ?? true,
       );
@@ -4120,7 +4008,6 @@ class _WorkspaceViewState extends State<WorkspaceView>
       presentation: presentation,
       mobileTabbar: mobileTabbar,
       railSide: railSideStore,
-      workspaceMode: workspaceMode,
       providerEnabled: providerEnabled,
       bridgeEnabled: bridgeEnabled,
       labsEnabled: labsEnabled,

@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:receive_intent/receive_intent.dart' as intents;
 import 'package:raft_flutter/platform/native_sharing.dart';
 import 'package:raft_flutter/platform/attachment_files.dart';
@@ -298,7 +299,10 @@ void main() {
       onProgress: (_, _) {},
     );
     expect(await lease!.file.readAsString(), 'private proof bytes');
-    expect(lease.file.path, endsWith('/proof.txt'));
+    // The traversal is stripped: the file is proof.txt inside the staging
+    // folder (path checks that work with either separator).
+    expect(p.basename(lease.file.path), 'proof.txt');
+    expect(p.isWithin(folder.path, lease.file.path), isTrue);
     expect(
       await folder.list(recursive: true).where((e) => e is File).length,
       1,

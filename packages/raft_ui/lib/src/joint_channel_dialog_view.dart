@@ -6,6 +6,8 @@
 // Cancel / Create Joint Channel. The app adapter owns state and the create command.
 import 'package:flutter/material.dart';
 
+import 'form_presentation.dart';
+
 import 'banner.dart';
 import 'create_channel_view.dart';
 import 'dialog_card.dart';
@@ -99,7 +101,7 @@ class RaftCreateJointChannelDialogView extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           textStep: RaftTextSteps.sm,
           disabled: submitting,
-          onPressed: onClose,
+          onPressed: raftExplicitClose(context, onClose),
         ),
         RaftRecipeButton(
           key: const ValueKey('joint-create-submit'),
@@ -268,10 +270,9 @@ class RaftCreateJointChannelDialogView extends StatelessWidget {
                 onToggle: submitting ? null : onToggle,
               ),
             ),
-            gap,
-            actionButtons(),
           ],
         ),
+        footer: actionButtons(),
       ),
     );
   }

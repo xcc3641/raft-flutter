@@ -2,18 +2,23 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:raft_updater/raft_updater.dart';
 
 import 'cache_exit.dart';
 
 /// The runner owns the icon and persisted window preference. Dart only supplies
-/// labels/unread and consumes visibility events; message authority stays shared.
+/// labels/unread and routes window commands; message authority stays shared.
 class WindowsTray {
-  WindowsTray({TargetPlatform? platform, MethodChannel? channel, bool? lab})
-    : supported =
-          !kIsWeb &&
-          (platform ?? defaultTargetPlatform) == TargetPlatform.windows,
-      _channel = channel ?? nativeChannel,
-      lab = lab ?? const bool.fromEnvironment('RAFT_WINDOWS_NOTIFICATION_LAB');
+  WindowsTray({
+    TargetPlatform? platform,
+    MethodChannel? channel,
+    bool? lab,
+    this._updater,
+  }) : supported =
+           !kIsWeb &&
+           (platform ?? defaultTargetPlatform) == TargetPlatform.windows,
+       _channel = channel ?? nativeChannel,
+       lab = lab ?? const bool.fromEnvironment('RAFT_WINDOWS_NOTIFICATION_LAB');
 
   static const nativeChannel = MethodChannel('app.raft/windows-tray');
 
@@ -57,6 +62,8 @@ class WindowsTray {
 
   final bool supported, lab;
   final MethodChannel _channel;
+  final AppUpdater? _updater;
+  Future<String>? _updateCheck;
   void Function()? onHidden;
   bool _closed = false;
   String? _labels;
@@ -75,6 +82,10 @@ class WindowsTray {
       'hide': localize('Hide window'),
       'quit': localize('Quit Raft'),
       'unread': localize('unread'),
+      'checkUpdates': '${localize('Check for updates')}…',
+      'updateFailed': localize(
+        "Can't check for a new version right now. Try again later.",
+      ),
     };
     final key = labels.toString();
     if (_labels == key) return;
@@ -103,8 +114,28 @@ class WindowsTray {
     if (call.method == 'prepareExit') {
       return answerPrepareExit(call.arguments);
     }
+    if (call.method == 'checkForUpdates') {
+      if (_closed || !supported) return AppUpdateOutcome.failed.name;
+      final pending = _updateCheck;
+      if (pending != null) return pending;
+      final request = _runUpdateCheck();
+      _updateCheck = request;
+      try {
+        return await request;
+      } finally {
+        if (identical(_updateCheck, request)) _updateCheck = null;
+      }
+    }
     if (!_closed && call.method == 'hidden') onHidden?.call();
     return null;
+  }
+
+  Future<String> _runUpdateCheck() async {
+    try {
+      return (await (_updater ?? AppUpdater.instance).checkAndInstall()).name;
+    } catch (_) {
+      return AppUpdateOutcome.failed.name;
+    }
   }
 
   Future<Map<String, dynamic>?> _invoke(String method, [Object? args]) async {

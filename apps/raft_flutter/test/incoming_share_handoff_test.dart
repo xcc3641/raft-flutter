@@ -13,6 +13,32 @@ import 'package:raft_ui/raft_ui.dart';
 import 'app_global_server_selector_test.dart' show RootFixture;
 import 'flutter_test_config.dart' show leakDebt;
 
+class _TrackedIosSharing extends NativeSharing {
+  _TrackedIosSharing({required super.incomingDirectory})
+    : super(supported: true, ios: true);
+
+  final _pending = <Future<void>>{};
+  bool get settled => _pending.isEmpty;
+
+  Future<void> _track(Future<void> future) {
+    late final Future<void> observed;
+    observed = future.whenComplete(() {
+      _pending.remove(observed);
+    });
+    _pending.add(observed);
+    return observed;
+  }
+
+  @override
+  Future<void> init() => _track(super.init());
+
+  @override
+  Future<void> resume() => _track(super.resume());
+
+  @override
+  Future<void> dispose() => _track(super.dispose());
+}
+
 /// Flushes frames until [done] holds, bounded by wall time and not by a frame
 /// count. The hand-off chains many real file operations (stage, claim, restore,
 /// bind, draft); under the fake clock each one resumes only after a real
@@ -60,6 +86,9 @@ void main() {
       'iOS ${cold ? 'cold' : 'warm'} handoff opens the shared picker once without sending',
       (t) async {
         final directory = await scratch(t, 'raft-ios-root-share-test-');
+        final sharing = _TrackedIosSharing(
+          incomingDirectory: () async => directory,
+        );
         final token = 'a' * 32;
         Future<void> publish() async {
           final folder = await Directory('${directory.path}/$token').create();
@@ -74,34 +103,40 @@ void main() {
           );
         }
 
-        final sharing = NativeSharing(
-          supported: true,
-          ios: true,
-          incomingDirectory: () async => directory,
-        );
         final f = RootFixture(sharing: sharing);
         final wake = Uri.parse('raft://share/$token');
-        if (cold) await t.runAsync(publish);
-        await f.mount(t, 'elegant', 390, uri: cold ? wake : null);
-        if (!cold) {
-          await t.runAsync(publish);
+        try {
+          if (cold) await t.runAsync(publish);
+          await f.mount(t, 'elegant', 390, uri: cold ? wake : null);
+          if (!cold) {
+            await t.runAsync(publish);
+            f.content.receiveLink(wake);
+          }
+          await flushUntil(t, f, pickerOpen, what: 'the shared picker');
+          expect(find.byType(IncomingSharePicker), findsOneWidget);
           f.content.receiveLink(wake);
+          f.content.receiveLink(wake);
+          await f.flush(t);
+          expect(find.byType(IncomingSharePicker), findsOneWidget);
+          expect(
+            f.adapter.calls.where(
+              (call) =>
+                  call.path == '/v2/messages' ||
+                  call.path.contains('/attachments/upload'),
+            ),
+            isEmpty,
+          );
+        } finally {
+          await t.pumpWidget(const SizedBox());
+          // Unmounting stops arrivals; queued inbox reads still need real I/O
+          // and fake-clock microtasks before scratch() can delete the files.
+          await flushUntil(
+            t,
+            f,
+            () => sharing.settled,
+            what: 'incoming share reads to finish before cleanup',
+          );
         }
-        await flushUntil(t, f, pickerOpen, what: 'the shared picker');
-        expect(find.byType(IncomingSharePicker), findsOneWidget);
-        f.content.receiveLink(wake);
-        f.content.receiveLink(wake);
-        await f.flush(t);
-        expect(find.byType(IncomingSharePicker), findsOneWidget);
-        expect(
-          f.adapter.calls.where(
-            (call) =>
-                call.path == '/v2/messages' ||
-                call.path.contains('/attachments/upload'),
-          ),
-          isEmpty,
-        );
-        await t.pumpWidget(const SizedBox());
       },
     );
   }

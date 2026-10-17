@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'design_primitives.dart';
@@ -183,7 +185,7 @@ class _RaftMountedMessageTaskChipState
     final recipe = RaftMessageTaskChipRecipe(tokens, widget.status);
     final enabled = widget.onOpen != null && !widget.loading;
     final brightness = enabled && hovered ? recipe.hoverBrightness : 1.0;
-    return MouseRegion(
+    return RaftHoverRegion(
       onEnter: (_) => setState(() => hovered = true),
       onExit: (_) => setState(() => hovered = false),
       child: TweenAnimationBuilder<double>(

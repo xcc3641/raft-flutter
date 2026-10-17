@@ -329,9 +329,8 @@ class _MessageActionCardState extends State<MessageActionCard> {
   );
 
   Future<bool?> form(String authority, Widget Function(BuildContext) builder) =>
-      showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
+      showRaftForm<bool>(
+        context,
         builder: (ctx) {
           ownedDialog = ModalRoute.of(ctx);
           return builder(ctx);

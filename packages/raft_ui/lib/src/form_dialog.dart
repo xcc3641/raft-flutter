@@ -5,6 +5,8 @@ import 'localization.dart';
 import 'components.dart';
 import 'dialog_card.dart' show RaftCloseButton;
 import 'dismiss_scope.dart';
+import 'form_presentation.dart';
+import 'settings_layout.dart' show RaftSpace;
 import 'error_presentation.dart';
 import 'theme.dart';
 import 'design_primitives.dart';
@@ -33,6 +35,12 @@ class RaftFormField {
 
 /// Owns each editor for the full dialog route lifetime, including its exit
 /// transition. Failed submissions keep the values and focus in the dialog.
+///
+/// Opened with [showRaftForm] it is a bottom sheet below 768 (the title and
+/// close button pinned above, the fields scrolling, Cancel / submit pinned
+/// below the fields, above the keyboard) and an `AlertDialog` from 768, in the
+/// same route: crossing the breakpoint keeps the typed text, the focus and the
+/// caret. Opened with a plain `showDialog` it is the dialog.
 class RaftFormDialog extends StatefulWidget {
   const RaftFormDialog({
     super.key,
@@ -101,10 +109,22 @@ class _RaftFormDialogState extends State<RaftFormDialog> {
     }
   }
 
+  /// A choice moved off the value it opened with (the guard asks before a
+  /// close throws it away).
+  bool _choicesChanged() => widget.fields.any(
+    (f) =>
+        f.choices != null &&
+        choices[f.id] !=
+            (f.initial.isEmpty ? f.choices!.keys.first : f.initial),
+  );
+
+  RaftUnsavedGuardState? _guard;
+
   @override
   void initState() {
     super.initState();
     _sync();
+    _guard = RaftUnsavedGuard.maybeOf(context)?..watch(_choicesChanged);
   }
 
   @override
@@ -115,6 +135,7 @@ class _RaftFormDialogState extends State<RaftFormDialog> {
 
   @override
   void dispose() {
+    _guard?.unwatch(_choicesChanged);
     for (final editor in editors.values) {
       editor.dispose();
     }
@@ -213,7 +234,12 @@ class _RaftFormDialogState extends State<RaftFormDialog> {
                             ),
                           ),
                       ],
-                      onChanged: busy ? null : (v) => choices[field.id] = v!,
+                      onChanged: busy
+                          ? null
+                          : (v) {
+                              choices[field.id] = v!;
+                              RaftUnsavedGuard.maybeOf(context)?.recheck();
+                            },
                     )
                   : TextFormField(
                       autofillHints: null,
@@ -248,68 +274,89 @@ class _RaftFormDialogState extends State<RaftFormDialog> {
     );
   }
 
+  /// The fields, the description, the extra content and the error: the same
+  /// widgets in the dialog and in the sheet. The form key moves them from one
+  /// to the other with their state (focus, caret) when the window crosses the
+  /// breakpoint.
+  Widget _form() => Form(
+    key: form,
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.description != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Text(widget.description!),
+          ),
+        for (final field in widget.fields) _field(field),
+        if (widget.extra != null)
+          ExcludeFocus(
+            excluding: busy,
+            child: IgnorePointer(ignoring: busy, child: widget.extra!),
+          ),
+        ?errorWidget,
+        if (error != null) RaftErrorBanner(error!),
+      ],
+    ),
+  );
+
+  List<Widget> _actions() => [
+    RaftTextButton(
+      label: 'Cancel',
+      variant: RaftControlVariant.outline,
+      onPressed: busy ? null : () => Navigator.pop(context, false),
+    ),
+    RaftButton(
+      label: widget.submitLabel,
+      busy: busy,
+      onPressed: submit,
+      destructive: widget.destructive,
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !busy,
     // Web `DialogCard`: Escape and the header X close it, a scrim press does
     // not (the call sites open it with `barrierDismissible: false`).
     child: RaftDismissScope(
-      child: AlertDialog(
-        title: Row(
-          children: [
-            Expanded(child: Text(raftText(context, widget.title))),
-            RaftCloseButton(
-              onPressed: busy ? null : () => Navigator.pop(context, false),
-            ),
-          ],
-        ),
-        titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-        actionsPadding: const EdgeInsets.all(16),
-        content: SizedBox(
-          width: 480,
-          child: Form(
-            key: form,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+      child: RaftFormFrame.sheetOf(context)
+          ? RaftFormSheet(
+              title: raftText(context, widget.title),
+              uppercase: false,
+              onClose: busy ? null : () => Navigator.pop(context, false),
+              body: _form(),
+              footer: OverflowBar(
+                alignment: MainAxisAlignment.end,
+                spacing: RaftSpace.x2,
+                overflowSpacing: RaftSpace.x2,
+                children: _actions(),
+              ),
+            )
+          : AlertDialog(
+              title: Row(
                 children: [
-                  if (widget.description != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: Text(widget.description!),
-                    ),
-                  for (final field in widget.fields) _field(field),
-                  if (widget.extra != null)
-                    ExcludeFocus(
-                      excluding: busy,
-                      child: IgnorePointer(
-                        ignoring: busy,
-                        child: widget.extra!,
-                      ),
-                    ),
-                  ?errorWidget,
-                  if (error != null) RaftErrorBanner(error!),
+                  Expanded(child: Text(raftText(context, widget.title))),
+                  RaftCloseButton(
+                    onPressed: busy
+                        ? null
+                        : raftGuardedClose(
+                            context,
+                            () => Navigator.pop(context, false),
+                          ),
+                  ),
                 ],
               ),
+              titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              actionsPadding: const EdgeInsets.all(16),
+              content: SizedBox(
+                width: 480,
+                child: SingleChildScrollView(child: _form()),
+              ),
+              actions: _actions(),
             ),
-          ),
-        ),
-        actions: [
-          RaftTextButton(
-            label: 'Cancel',
-            variant: RaftControlVariant.outline,
-            onPressed: busy ? null : () => Navigator.pop(context, false),
-          ),
-          RaftButton(
-            label: widget.submitLabel,
-            busy: busy,
-            onPressed: submit,
-            destructive: widget.destructive,
-          ),
-        ],
-      ),
     ),
   );
 }

@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -577,7 +579,7 @@ class _RaftTooltipState extends State<RaftTooltip>
       },
       child: Semantics(
         tooltip: widget.excludeDescription || !allowed ? null : widget.message,
-        child: MouseRegion(
+        child: RaftHoverRegion(
           onEnter: _enter,
           onExit: _exit,
           onHover: _hover,

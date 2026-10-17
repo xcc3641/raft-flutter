@@ -26,6 +26,7 @@ import 'components.dart';
 import 'anchored_popup.dart';
 import 'design_primitives.dart';
 import 'dismiss_scope.dart';
+import 'form_presentation.dart';
 import 'icons.dart';
 import 'indicators.dart' show RaftCheckbox, RaftCheckboxRecipeSize;
 import 'localization.dart';
@@ -78,7 +79,11 @@ Future<T?> showRaftAgentModal<T>(
 /// Web DialogCard: Card (`w-full max-w-md p-6`) with header row
 /// (`mb-4 flex items-center justify-between`), title (`text-lg font-bold
 /// uppercase`) and a CloseButton (ghost icon-sm, brutal: bordered white).
-class RaftAgentDialogCard extends StatelessWidget {
+///
+/// In a presented form window on a phone ([showRaftForm], below 768) the card
+/// is the sheet: the title and close button pin to the top, [children] scroll
+/// and [footer] pins to the bottom, above the keyboard.
+class RaftAgentDialogCard extends StatefulWidget {
   const RaftAgentDialogCard({
     super.key,
     required this.title,
@@ -89,7 +94,15 @@ class RaftAgentDialogCard extends StatelessWidget {
     this.surfaceKey,
     this.bare = false,
     this.plainCard = false,
+    this.footer,
+    this.footerGap = 4 * _tw,
   });
+
+  /// The submit row of a form. In a dialog it follows [children] after
+  /// [footerGap]; in a bottom sheet it pins to the bottom while [children]
+  /// scroll.
+  final Widget? footer;
+  final double footerGap;
 
   /// The `card-brutal` utility instead of the raft-ui Card (the agent runtime
   /// config modal): `border border-line-muted bg-layer-panel shadow-raft-md`,
@@ -112,9 +125,33 @@ class RaftAgentDialogCard extends StatelessWidget {
   final double maxWidth;
 
   @override
+  State<RaftAgentDialogCard> createState() => _RaftAgentDialogCardState();
+}
+
+class _RaftAgentDialogCardState extends State<RaftAgentDialogCard> {
+  final _body = GlobalKey(debugLabel: 'agent card body');
+  final _footer = GlobalKey(debugLabel: 'agent card footer');
+
+  @override
   Widget build(BuildContext context) {
+    final title = widget.title,
+        onClose = widget.onClose,
+        onBackdrop = widget.onBackdrop,
+        maxWidth = widget.maxWidth;
     final t = RaftTokens.of(context);
     final tokens = RaftRecipeTokens(t);
+    final footerRow = widget.footer;
+    final body = KeyedSubtree(
+      key: _body,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: widget.children,
+      ),
+    );
+    final footer = footerRow == null
+        ? null
+        : KeyedSubtree(key: _footer, child: footerRow);
     final card_ = RaftCardRecipe.resolve(
       theme: _theme(t),
       states: _states(t),
@@ -135,6 +172,22 @@ class RaftAgentDialogCard extends StatelessWidget {
           // CSS line boxes: half the leading above, half below.
           leadingDistribution: TextLeadingDistribution.even,
         );
+    if (RaftFormFrame.sheetOf(context)) {
+      return DefaultTextStyle(
+        style: base,
+        child: RaftFormSheet(
+          title: raftText(context, title),
+          onClose: onClose,
+          closeButton: onClose == null
+              ? const SizedBox.shrink()
+              : RaftAgentCloseButton(
+                  onPressed: raftGuardedClose(context, onClose),
+                ),
+          body: body,
+          footer: footer,
+        ),
+      );
+    }
     final titleStyle = card_.title
         .textStyle(tokens)
         .copyWith(
@@ -145,8 +198,8 @@ class RaftAgentDialogCard extends StatelessWidget {
     final card = Material(
       type: MaterialType.transparency,
       child: _CardSurface(
-        key: surfaceKey,
-        plain: plainCard && !t.brutal,
+        key: widget.surfaceKey,
+        plain: widget.plainCard && !t.brutal,
         style: card_.root.withCssUsedBorderWidths(),
         child: DefaultTextStyle(
           style: base,
@@ -165,20 +218,36 @@ class RaftAgentDialogCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (onClose != null) RaftAgentCloseButton(onPressed: onClose),
+                  if (onClose != null)
+                    RaftAgentCloseButton(
+                      onPressed: raftGuardedClose(context, onClose),
+                    ),
                 ],
               ),
               const SizedBox(height: 4 * _tw), // mb-4
-              ...children,
+              body,
+              if (footer != null) ...[
+                SizedBox(height: widget.footerGap),
+                footer,
+              ],
             ],
           ),
         ),
       ),
     );
-    if (bare) {
+    if (widget.bare) {
       return ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
         child: card,
+      );
+    }
+    if (RaftFormFrame.framedOf(context)) {
+      // The presented window already centers the card over its scrim.
+      return SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: card,
+        ),
       );
     }
     // Edge to edge: a dialog taller than the screen scrolls clear of the

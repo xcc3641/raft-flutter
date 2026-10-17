@@ -436,28 +436,35 @@ class _RaftComposerExpandedViewState extends State<RaftComposerExpandedView> {
       decoration: recipe.shellDecoration(focused: true),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(recipe.shellRadius),
-        child: RaftTapSlopHost(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Desktop: toolbar above the text. Phone: between the text and
-              // the action row, so it rides directly above the keyboard.
-              if (!phone) ...[
-                toolbar,
-                const _Rule(key: ValueKey('composer-toolbar-rule')),
+        // The whole card, padding included, is the field's: on desktop a
+        // click outside a field's tap region unfocuses it, and the platform
+        // commits a composition before the toolbar button even runs.
+        child: TapRegion(
+          groupId: EditableText,
+          behavior: HitTestBehavior.opaque,
+          child: RaftTapSlopHost(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Desktop: toolbar above the text. Phone: between the text and
+                // the action row, so it rides directly above the keyboard.
+                if (!phone) ...[
+                  toolbar,
+                  const _Rule(key: ValueKey('composer-toolbar-rule')),
+                ],
+                Expanded(child: body),
+                if (phone && !pagePreview) ...[
+                  const _Rule(key: ValueKey('composer-toolbar-rule')),
+                  toolbar,
+                ],
+                if (widget.attachments != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(pad, 0, pad, gap),
+                    child: widget.attachments!,
+                  ),
+                widget.footer(recipe),
               ],
-              Expanded(child: body),
-              if (phone && !pagePreview) ...[
-                const _Rule(key: ValueKey('composer-toolbar-rule')),
-                toolbar,
-              ],
-              if (widget.attachments != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(pad, 0, pad, gap),
-                  child: widget.attachments!,
-                ),
-              widget.footer(recipe),
-            ],
+            ),
           ),
         ),
       ),

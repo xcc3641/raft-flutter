@@ -5,6 +5,8 @@
 // raft-ui TaskChip variant="inline" (status icon + `#N`), unknown tasks →
 // Badge variant muted. Every visual value resolves from the generated
 // raft-ui recipes.
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'raft_underline.dart';
@@ -166,7 +168,7 @@ class _ReferenceLinkState extends State<_ReferenceLink> {
       label: widget.label,
       onTap: widget.onTap,
       child: ExcludeSemantics(
-        child: MouseRegion(
+        child: RaftHoverRegion(
           // In-message refs keep the arrow cursor (`cursor-default`).
           cursor: SystemMouseCursors.basic,
           child: GestureDetector(

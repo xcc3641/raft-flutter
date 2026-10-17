@@ -32,9 +32,15 @@ Raft server's. Every release must have a notes file before its tag is pushed:
    has the shape of one Web `GET /release-notes` page and holds the full
    history, so the latest release always carries every earlier entry.
 3. The app downloads `releases/latest/download/release-notes.json` (through the
-   Settings > Network proxy), keeps the last copy for offline use and refreshes
-   it at most every 6 hours. English entries are shown as written; there is no
-   translation of the notes themselves.
+   Settings > Network proxy) and keeps the last copy for offline use. Opening
+   Settings > Release Notes shows that copy at once and refreshes it in the
+   background (also on returning to the app and on pull-to-refresh); a copy
+   written by another app build is never reused as current, so the first look
+   after an update downloads again. The update prompt in Settings > About reads
+   the notes of the offered release from the same asset and lists every release
+   between the installed one and the offered one; release builds pass the tag
+   as `RAFT_RELEASE_TAG` so the installed release is known. English entries are
+   shown as written; there is no translation of the notes themselves.
 
 ## Trigger a release
 

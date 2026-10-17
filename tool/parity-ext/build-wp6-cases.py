@@ -183,17 +183,12 @@ settings_add('settings.language-provider-missing', 'Language & Region, no transl
 settings_add('settings.language-server-off', 'Language & Region, translation off for the server (admin)',
              tab='language-region', route_set='wp6-translation-server-off', hint=LANG)
 
-# Account tab cards: WorkspaceModeSettingsCard and UsageDataSettingsCard.
-# The account tab's content column (`flex-1 overflow-y-auto`): the workspace
-# mode card is its first child, the usage data card sits in a `mt-6` wrapper.
+# Account tab card: UsageDataSettingsCard. The workspace-mode card left with
+# the desktop grid (Web v1.21.x).
 CONTENT = "[data-parity-region='settings-panel'] > section > div.overflow-y-auto"
-WM_SEL = f'{CONTENT} > label:first-child'
 UD_SEL = f'{CONTENT} > div.mt-6 > [data-slot="card"]'
 for plat in ('desktop', 'mobile'):
     sfx = '' if plat == 'desktop' else '-mobile'
-    settings_add(f'settings.workspace-mode{sfx}', f'Account: workspace mode card ({plat})', tab='account',
-                 platform=plat, selector=WM_SEL, android_key='workspace-mode-card',
-                 hint=SETTINGS_HINT + '#WorkspaceModeSettingsCard')
     settings_add(f'settings.usage-data{sfx}', f'Account: usage data card ({plat})', tab='account', platform=plat,
                  flags='analytics', selector=UD_SEL, android_key='usage-data-card',
                  android=[{'type': 'reveal', 'key': 'usage-data-card'}],

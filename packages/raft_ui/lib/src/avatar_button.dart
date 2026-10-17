@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 /// Web SenderAvatar `<button>`: `transition-[filter,transform] duration-75
@@ -45,7 +47,7 @@ class _RaftAvatarButtonState extends State<RaftAvatarButton> {
     return Semantics(
       button: enabled,
       label: widget.semanticLabel,
-      child: MouseRegion(
+      child: RaftHoverRegion(
         cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
         onEnter: (_) => setState(() => hovered = true),
         onExit: (_) => setState(() => hovered = false),

@@ -1,6 +1,8 @@
 // Presentational pieces of Web ForwardComposerMobile
 // (packages/web/src/components/message/ForwardComposerMobile.tsx,
 // ForwardComposerTargetList.tsx). The app owns targets, search and sending.
+import 'hover_region.dart';
+
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
@@ -603,7 +605,7 @@ class _RaftForwardTargetRowState extends State<RaftForwardTargetRow> {
       enabled: widget.onTap != null,
       label: widget.label,
       excludeSemantics: true,
-      child: MouseRegion(
+      child: RaftHoverRegion(
         cursor: widget.onTap == null
             ? SystemMouseCursors.forbidden
             : SystemMouseCursors.click,

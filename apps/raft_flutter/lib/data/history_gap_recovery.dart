@@ -10,23 +10,30 @@ import 'history_read_policy.dart';
 import 'history_range_reads.dart';
 import 'message_history_verification.dart';
 import 'message_history_pages.dart';
-import 'workspace_controller.dart';
+import 'workspace_message_host.dart';
+import 'workspace_messages.dart';
 import 'user_error.dart';
 
 /// Event-driven repair for an actually presented conversation. Failed gaps
 /// retry with bounded backoff while connected, or resume on reconnect.
 class HistoryGapRecovery extends ChangeNotifier {
-  HistoryGapRecovery._(this.w, this.thread);
-  final WorkspaceController w;
+  HistoryGapRecovery._(WorkspaceMessageHost host, this.thread)
+    : w = host.messageDomain;
+  final WorkspaceMessages w;
   final bool thread;
   static final _owners = Expando<Map<bool, HistoryGapRecovery>>();
-  static HistoryGapRecovery of(WorkspaceController w, bool thread) =>
-      (_owners[w] ??= {}).putIfAbsent(
-        thread,
-        () => HistoryGapRecovery._(w, thread),
-      );
-  static void reconnect(WorkspaceController w) {
-    for (final value in _owners[w]?.values ?? <HistoryGapRecovery>[]) {
+  static HistoryGapRecovery of(WorkspaceMessageHost host, bool thread) {
+    final w = host.messageDomain;
+    return (_owners[w.context.receiverKey] ??= {}).putIfAbsent(
+      thread,
+      () => HistoryGapRecovery._(w, thread),
+    );
+  }
+
+  static void reconnect(WorkspaceMessageHost host) {
+    final w = host.messageDomain;
+    for (final value
+        in _owners[w.context.receiverKey]?.values ?? <HistoryGapRecovery>[]) {
       value._retry.cancel();
       value._attempts.clear();
       value._attempted.clear();
@@ -48,13 +55,13 @@ class HistoryGapRecovery extends ChangeNotifier {
   final _zone = Zone.current;
   final _retry = RaftIdleTimer(yieldToAnimation: false);
   bool contains(String id) => _gaps.containsKey(id);
-  bool failed(String id) => w.connected && _failed.contains(id);
+  bool failed(String id) => w.session.connected && _failed.contains(id);
   String? error(String id) => failed(id) ? _errors[id] : null;
 
   /// Explicit recovery after the bounded automatic attempts have failed.
   void retry(String id) {
     final gap = _gaps[id];
-    if (_closed || gap == null || !w.connected || !failed(id)) return;
+    if (_closed || gap == null || !w.session.connected || !failed(id)) return;
     _retry.cancel();
     _attempted.remove((_identity, gap.before));
     _failed.remove(id);
@@ -65,8 +72,8 @@ class HistoryGapRecovery extends ChangeNotifier {
 
   void start(Object view) {
     if (!_views.add(view) || _views.length > 1) return;
-    _source = MessageHistoryPages.storage(w.deviceStore.cache)?.gaps;
-    w.addListener(refresh);
+    _source = MessageHistoryPages.storage(w.device.cache)?.gaps;
+    w.notifications.changes.addListener(refresh);
     _source?.addListener(refresh);
     refresh();
   }
@@ -75,25 +82,25 @@ class HistoryGapRecovery extends ChangeNotifier {
     _views.remove(view);
     if (_views.isNotEmpty) return;
     _closed = true;
-    HistoryRangeReads.of(w).restart();
+    HistoryRangeReads.of(w.context.receiverKey).restart();
     _retry.cancel();
-    w.removeListener(refresh);
+    w.notifications.changes.removeListener(refresh);
     _source?.removeListener(refresh);
-    _owners[w]?.remove(thread);
+    _owners[w.context.receiverKey]?.remove(thread);
     dispose();
   }
 
   void refresh() {
     if (_closed || _views.isEmpty) return;
-    if (_online != w.connected) {
-      _online = w.connected;
+    if (_online != w.session.connected) {
+      _online = w.session.connected;
       notifyListeners();
     }
     if (_running) {
       _again = true;
       return;
     }
-    final db = MessageHistoryPages.storage(w.deviceStore.cache);
+    final db = MessageHistoryPages.storage(w.device.cache);
     if (db == null) return;
     _running = true;
     db.reads.background(() async {
@@ -109,9 +116,12 @@ class HistoryGapRecovery extends ChangeNotifier {
   }
 
   Future<void> _scan(MessageHistoryStorage db) async {
-    final id = thread ? w.threadChannelId : w.channel?.id;
+    final id = thread ? w.state.threadChannelId : w.presentation.channel?.id;
     final visible = thread ? w.threadWindow?.visible : w.messageWindow?.visible;
-    if (id == null || visible != true || !w.foreground || !w.deviceStore.writable) {
+    if (id == null ||
+        visible != true ||
+        !w.presentation.foreground ||
+        !w.device.writable) {
       if (_gaps.isNotEmpty && !_closed) {
         _gaps.clear();
         notifyListeners();
@@ -134,7 +144,7 @@ class HistoryGapRecovery extends ChangeNotifier {
       scope.channel,
       scope.authority,
       ticket,
-      w.navigationRevision,
+      w.presentation.navigationRevision,
       range,
       thread ? w.threadGeneration : w.channelGeneration,
     );
@@ -149,9 +159,9 @@ class HistoryGapRecovery extends ChangeNotifier {
     final request = w.messageWindows.request(
       thread: thread,
       allowed: () =>
-          w.deviceStore.writable &&
+          w.device.writable &&
           ticket == w.messageHistoryTicket(scope.parentChannel) &&
-          id == (thread ? w.threadChannelId : w.channel?.id),
+          id == (thread ? w.state.threadChannelId : w.presentation.channel?.id),
     );
     bool current() =>
         !_closed && request.current && range.current && identity == _identity;
@@ -169,7 +179,7 @@ class HistoryGapRecovery extends ChangeNotifier {
     _errors.removeWhere((id, _) => !_gaps.containsKey(id));
     _attempts.removeWhere((before, _) => !gaps.any((g) => g.before == before));
     if (changed) notifyListeners();
-    if (w.loadingOlder) return;
+    if (w.state.loadingOlder) return;
     final next = gaps.reversed
         .where((gap) => !_attempted.contains((identity, gap.before)))
         .firstOrNull;
@@ -179,8 +189,8 @@ class HistoryGapRecovery extends ChangeNotifier {
     notifyListeners();
     Object? failure;
     var success = false;
-    w.loadingOlder = true;
-    w.notifyListeners();
+    w.state.loadingOlder = true;
+    w.context.changed();
     try {
       final proof = await MessageHistoryVerification.readRange(
         w,
@@ -196,11 +206,13 @@ class HistoryGapRecovery extends ChangeNotifier {
         // unproven boundary, not one entry for every successful history page.
         _attempted.remove((identity, next.before));
       }
-      if (success && current()) db.memory.direction(w, id, older: true);
+      if (success && current()) {
+        db.memory.direction(w.context.receiverKey, id, older: true);
+      }
     } finally {
       if (request.current) {
-        w.loadingOlder = false;
-        w.notifyListeners();
+        w.state.loadingOlder = false;
+        w.context.changed();
       }
     }
     if (!current()) return;
@@ -210,10 +222,10 @@ class HistoryGapRecovery extends ChangeNotifier {
       final denied =
           failure is RaftApiException &&
           {401, 403}.contains((failure as RaftApiException).status);
-      final attempt = w.connected
+      final attempt = w.session.connected
           ? _attempts.update(next.before, (n) => n + 1, ifAbsent: () => 1)
           : 0;
-      if (w.connected && (denied || attempt >= 3)) {
+      if (w.session.connected && (denied || attempt >= 3)) {
         _failed.add(next.newerId);
         _errors[next.newerId] = userErrorText(
           failure,
@@ -225,11 +237,15 @@ class HistoryGapRecovery extends ChangeNotifier {
           where: 'fill message gap',
         );
         notifyListeners();
-      } else if (w.connected && w.foreground && !_retry.isActive) {
+      } else if (w.session.connected &&
+          w.presentation.foreground &&
+          !_retry.isActive) {
         final delay = Duration(seconds: 2 << (attempt - 1));
         _zone.run(
           () => _retry.start(delay, () {
-            if (_closed || _identity != identity || !w.connected) return;
+            if (_closed || _identity != identity || !w.session.connected) {
+              return;
+            }
             for (final gap in _gaps.values) {
               if (!_failed.contains(gap.newerId)) {
                 _attempted.remove((identity, gap.before));

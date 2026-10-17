@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:raft_ui/raft_ui.dart' show RaftPreviewRoute;
+import 'package:raft_ui/raft_ui.dart'
+    show RaftPreviewRoute, raftText, showRaftAlertDialog;
+import 'package:raft_updater/raft_updater.dart';
 
 /// Requests the runner's ordinary close action, preserving its close preference.
 ///
@@ -31,16 +33,22 @@ Future<void> closeAppWindow({
 /// Local preview shortcuts take precedence over the window fallback. Native
 /// macOS menu actions use the same policy: popups and marked previews close
 /// first, protected dialogs veto closing, and ordinary pages stay mounted.
+/// Native Paste uses the focused editor's action, including its attachment
+/// handler, instead of the engine's hidden AppKit accessibility text field.
 class AppWindowCommands extends StatefulWidget {
   const AppWindowCommands({
     super.key,
     required this.navigatorKey,
     this.openSection,
+    this.updater,
     required this.child,
   });
 
   final GlobalKey<NavigatorState> navigatorKey;
   final ValueChanged<String>? openSection;
+
+  /// The same updater used by Settings; defaults to the app-wide instance.
+  final AppUpdater? updater;
   final Widget child;
 
   @override
@@ -53,6 +61,7 @@ class _AppWindowCommandsState extends State<AppWindowCommands> {
   static Object? _handlerOwner;
   late final _mac = !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
   bool _closing = false;
+  bool _checkingUpdates = false;
 
   @override
   void initState() {
@@ -60,6 +69,10 @@ class _AppWindowCommandsState extends State<AppWindowCommands> {
     if (_mac) {
       _handlerOwner = this;
       _channel.setMethodCallHandler((call) async {
+        if (call.method == 'pasteRequested') return _paste();
+        if (call.method == 'checkForUpdatesRequested') {
+          return _checkForUpdates();
+        }
         if (call.method == 'closeRequested') {
           await _close();
         } else if (call.method == 'openPreferences') {
@@ -69,6 +82,7 @@ class _AppWindowCommandsState extends State<AppWindowCommands> {
         }
         return true;
       });
+      FocusManager.instance.addListener(_focusChanged);
       unawaited(_publishState(true));
     }
   }
@@ -82,11 +96,68 @@ class _AppWindowCommandsState extends State<AppWindowCommands> {
     }
   }
 
+  static const _pasteIntent = PasteTextIntent(SelectionChangedCause.keyboard);
+
+  BuildContext? get _pasteContext {
+    final context = FocusManager.instance.primaryFocus?.context;
+    if (context == null || !context.mounted) return null;
+    final editor = context.findAncestorWidgetOfExactType<EditableText>();
+    if (editor != null &&
+        (editor.readOnly ||
+            !editor.selectionEnabled ||
+            !editor.controller.selection.isValid)) {
+      return null;
+    }
+    final action = Actions.maybeFind<PasteTextIntent>(context);
+    return action?.isEnabled(_pasteIntent) == true ? context : null;
+  }
+
+  void _focusChanged() => unawaited(_publishState(true));
+
+  bool _paste() {
+    final target = _pasteContext;
+    if (target == null) return false;
+    Actions.invoke(target, _pasteIntent);
+    return true;
+  }
+
+  Future<bool> _checkForUpdates() async {
+    if (_checkingUpdates) return false;
+    _checkingUpdates = true;
+    await _publishState(true);
+    try {
+      do {
+        final outcome = await (widget.updater ?? AppUpdater.instance)
+            .checkAndInstall();
+        if (outcome != AppUpdateOutcome.failed) return true;
+        final context = widget.navigatorKey.currentState?.overlay?.context;
+        if (!mounted || context == null || !context.mounted) return false;
+        final retry = await showRaftAlertDialog(
+          context: context,
+          title: raftText(context, "Couldn't check for updates"),
+          description: raftText(
+            context,
+            'Check your connection and try again.',
+          ),
+          confirmLabel: raftText(context, 'Try again'),
+          cancelLabel: raftText(context, 'Cancel'),
+        );
+        if (!retry) return false;
+      } while (mounted);
+      return false;
+    } finally {
+      _checkingUpdates = false;
+      if (mounted) await _publishState(true);
+    }
+  }
+
   Future<void> _publishState(bool ready) async {
     if (!identical(_handlerOwner, this)) return;
     try {
       await _channel.invokeMethod<void>('setWindowCommandsState', {
         'ready': ready,
+        'updates': ready && !_checkingUpdates,
+        'paste': ready && _pasteContext != null,
         'preferences': ready && widget.openSection != null,
       });
     } on MissingPluginException {
@@ -128,6 +199,7 @@ class _AppWindowCommandsState extends State<AppWindowCommands> {
 
   @override
   void dispose() {
+    if (_mac) FocusManager.instance.removeListener(_focusChanged);
     if (_mac && identical(_handlerOwner, this)) {
       unawaited(_publishState(false));
       _channel.setMethodCallHandler(null);

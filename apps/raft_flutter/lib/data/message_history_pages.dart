@@ -10,57 +10,103 @@ import 'message_history_memory.dart';
 import 'history_snapshot_writes.dart';
 import 'message_window_snapshot.dart';
 import 'workspace_cache.dart';
-import 'workspace_controller.dart';
+import 'workspace_message_host.dart';
 import 'workspace_message_windows.dart';
 
 /// Transport and local paging use the same admitted projections. Request
 /// metadata is held in a Dart object and never added to the server protocol.
 class MessageHistoryPages {
   static MessageHistoryPage savedContext(
-    WorkspaceController w, MessageHistoryScope scope, Map<String, dynamic> local,
+    WorkspaceMessageHost host,
+    MessageHistoryScope scope,
+    Map<String, dynamic> local,
     Map<String, Map<String, dynamic>> initial,
-  ) => MessageHistoryPage(
-    _live(local, initial, w.ledger.messages(scope.channel), focused: true,
-      pending: (id) => storage(w.deviceStore.cache)!.receiver.hasRow(scope,id)),
-    scope: scope,
-    revision: local is MessageHistoryPage ? local.revision : 0,
-    before: null, after: null, local: true, focused: true,
-    target: local['targetMessageId'] as String?,
-    verifiedAt: local is MessageHistoryPage ? local.verifiedAt : null,
-    heldBeforeAdmission: {for (final row in w.ledger.messages(scope.channel)) row['id'] as String: row},
-  );
+  ) {
+    final w = host.messageDomain;
+    return MessageHistoryPage(
+      _live(
+        local,
+        initial,
+        w.ledger.messages(scope.channel),
+        focused: true,
+        pending: (id) => storage(w.device.cache)!.receiver.hasRow(scope, id),
+      ),
+      scope: scope,
+      revision: local is MessageHistoryPage ? local.revision : 0,
+      before: null,
+      after: null,
+      local: true,
+      focused: true,
+      target: local['targetMessageId'] as String?,
+      verifiedAt: local is MessageHistoryPage ? local.verifiedAt : null,
+      heldBeforeAdmission: {
+        for (final row in w.ledger.messages(scope.channel))
+          row['id'] as String: row,
+      },
+    );
+  }
+
   static String saveError(Object cause) => cause is HistoryReadRetired
       ? 'Local history changed while loading. Try again.'
       : cause is HistoryCapacityExceeded
       ? 'Device message storage is full. Increase the message history limit in Storage settings.'
       : 'Local changes could not be saved on this device.';
-  static void attach(WorkspaceController w) {
-    final device = storage(w.deviceStore.cache);
-    if (device == null || w.presentationSource != null) return;
-    HistorySnapshotWrites.attach(w);
+  static void attach(WorkspaceMessageHost host) {
+    final w = host.messageDomain;
+    final device = storage(w.device.cache);
+    if (device == null || w.source != null) return;
+    HistorySnapshotWrites.attach(w.context.receiverKey);
     MessageHistoryMemory.attach(w, device);
-    device.capacity.protect(w, () sync* {
-      final user = w.client.user?.id, server = w.client.serverId;
-      if (user == null || server == null || !w.deviceStore.writable) return;
-      final account = HistoryAccount(w.client.origin, user);
-      final protected = {
-        w.channel?.id, w.threadChannelId,
-        ...w.unread.entries.where((e) => e.value > 0).map((e) => e.key),
-        ...w.mentions,
-        ...historyPinnedChannels(w.sidebarOrder, [...w.channels, ...w.dms].map((c) => c.json)),
-        ...w.drafts.entries.where((e) => e.value.isNotEmpty).map((e) => e.key),
-        ...w.composer.uploads.byScope.entries.where((e) => e.value.isNotEmpty).map((e) => e.key),
-        ...w.composer.sends.pending.keys,
-      }.nonNulls.map((id) => id.startsWith('thread:')
-        ? w.messageWindows.threads[id.substring(7)]?.threadChannelId ??
-          (w.threadIdentity?.parentMessageId == id.substring(7) ? w.threadChannelId : null)
-        : id).nonNulls;
+    device.capacity.protect(w.context.receiverKey, () sync* {
+      final user = w.transport.client.user?.id,
+          server = w.transport.client.serverId;
+      if (user == null || server == null || !w.device.writable) return;
+      final account = HistoryAccount(w.transport.client.origin, user);
+      final protected =
+          {
+                w.presentation.channel?.id,
+                w.state.threadChannelId,
+                ...w.channels.unread.entries
+                    .where((e) => e.value > 0)
+                    .map((e) => e.key),
+                ...w.channels.mentions,
+                ...historyPinnedChannels(
+                  w.channels.sidebarOrder,
+                  [
+                    ...w.channels.channels,
+                    ...w.channels.dms,
+                  ].map((c) => c.json),
+                ),
+                ...w.drafts.drafts.entries
+                    .where((e) => e.value.isNotEmpty)
+                    .map((e) => e.key),
+                ...w.drafts.composer.uploads.byScope.entries
+                    .where((e) => e.value.isNotEmpty)
+                    .map((e) => e.key),
+                ...w.drafts.composer.sends.pending.keys,
+              }.nonNulls
+              .map(
+                (id) => id.startsWith('thread:')
+                    ? w
+                              .messageWindows
+                              .threads[id.substring(7)]
+                              ?.threadChannelId ??
+                          (w.threadIdentity?.parentMessageId == id.substring(7)
+                              ? w.state.threadChannelId
+                              : null)
+                    : id,
+              )
+              .nonNulls;
       for (final id in protected) {
-        yield HistoryProtectedRows(account, server, id,
+        yield HistoryProtectedRows(
+          account,
+          server,
+          id,
           w.visibleIds[id] ?? const <String>{},
-          wholeChannel: true);
+          wholeChannel: true,
+        );
       }
-      for (final sends in w.composer.sends.pending.values) {
+      for (final sends in w.drafts.composer.sends.pending.values) {
         for (final send in sends) {
           final id = send.channelId ?? send.row.channelId;
           yield HistoryProtectedRows(account, server, id, [send.row.id]);
@@ -69,57 +115,78 @@ class MessageHistoryPages {
     });
   }
 
-  static Future<void> opened(WorkspaceController w, String id) async {
-    final db = storage(w.deviceStore.cache), user = w.client.user?.id, server = w.client.serverId;
-    if (db == null || user == null || server == null || !w.deviceStore.writable) return;
-    await db.capacity.opened(HistoryAccount(w.client.origin, user), server, id);
+  static Future<void> opened(WorkspaceMessageHost host, String id) async {
+    final w = host.messageDomain;
+    final db = storage(w.device.cache),
+        user = w.transport.client.user?.id,
+        server = w.transport.client.serverId;
+    if (db == null || user == null || server == null || !w.device.writable) {
+      return;
+    }
+    await db.capacity.opened(
+      HistoryAccount(w.transport.client.origin, user),
+      server,
+      id,
+    );
   }
 
-  static void detach(WorkspaceController w) {
+  static void detach(WorkspaceMessageHost host) {
+    final w = host.messageDomain;
     MessageHistoryVerification.cancel(w);
-    HistorySnapshotWrites.cancel(w);
-    final device = storage(w.deviceStore.cache);
-    device?.receiver.cancelUpdates(w);
-    device?.reads.forget(w);
-    device?.capacity.release(w);
-    device?.memory.unregister(w);
+    HistorySnapshotWrites.cancel(w.context.receiverKey);
+    final device = storage(w.device.cache);
+    device?.receiver.cancelUpdates(w.context.receiverKey);
+    device?.reads.forget(w.context.receiverKey);
+    device?.capacity.release(w.context.receiverKey);
+    device?.memory.unregister(w.context.receiverKey);
   }
+
   static void recheckContext(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     String id,
     String target,
-  ) => MessageHistoryVerification.recheckContext(w, request, id, target);
+  ) {
+    final w = host.messageDomain;
+    return MessageHistoryVerification.recheckContext(w, request, id, target);
+  }
 
   static Future<Map<String, dynamic>> context(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     String id,
     String target, {
     bool thread = false,
   }) async {
+    final w = host.messageDomain;
     opened(w, id).ignore();
     if (!request.current) return const {'messages': <dynamic>[]};
     return load(
-      cache: w.deviceStore.cache,
+      cache: w.device.cache,
       scope: scope(
         w,
         id,
         parent: thread ? w.threadParentChannelId : id,
         parentMessage: thread ? w.threadIdentity?.parentMessageId : null,
       ),
-      current: () => request.current && w.deviceStore.writable,
+      current: () => request.current && w.device.writable,
       held: () => w.ledger.messages(id),
-      ticket: w.messageHistoryTicket(thread ? w.threadParentChannelId ?? id : id),
+      ticket: w.messageHistoryTicket(
+        thread ? w.threadParentChannelId ?? id : id,
+      ),
       focused: true,
       target: target,
       remote: () async => Map<String, dynamic>.from(
-        await w.client.get('/messages/context/$target', query: {'channelId': id}),
+        await w.transport.client.get(
+          '/messages/context/$target',
+          query: {'channelId': id},
+        ),
       ),
     );
   }
+
   static Future<Map<String, dynamic>> read(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     String id, {
     bool thread = false,
@@ -130,21 +197,22 @@ class MessageHistoryPages {
     bool gap = false,
     Future<Map<String, dynamic>> Function()? remote,
   }) async {
+    final w = host.messageDomain;
     if (before == null && after == null) opened(w, id).ignore();
     if (!request.current) return const {'messages': <dynamic>[]};
     return load(
-      cache: w.deviceStore.cache,
+      cache: w.device.cache,
       scope: scope(
         w,
         id,
         parent: thread ? w.threadParentChannelId : id,
         parentMessage: thread ? w.threadIdentity?.parentMessageId : null,
       ),
-      current: () => request.current && w.deviceStore.writable,
+      current: () => request.current && w.device.writable,
       held: () => w.ledger.messages(id),
       remote:
           remote ??
-          () => w.client.messagePage(
+          () => w.transport.client.messagePage(
             id,
             before: before,
             after: after,
@@ -164,60 +232,69 @@ class MessageHistoryPages {
   }
 
   static MessageHistoryScope? scope(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     String id, {
     String? parent,
     String? parentMessage,
     RaftChannel? resolved,
   }) {
+    final w = host.messageDomain;
     parent ??= id;
     final resource = [
       ?resolved,
-      if (w.channel != null) w.channel!,
-      ...w.channels,
-      ...w.dms,
+      if (w.presentation.channel != null) w.presentation.channel!,
+      ...w.channels.channels,
+      ...w.channels.dms,
     ].where((c) => c.id == parent).firstOrNull;
-    return w.client.user == null ||
-            w.client.serverId == null ||
+    return w.transport.client.user == null ||
+            w.transport.client.serverId == null ||
             resource == null ||
-            !w.can('viewChannel', resource: resource)
+            !w.context.can('viewChannel', resource: resource)
         ? null
         : MessageHistoryScope(
-            origin: w.client.origin,
-            principal: w.client.user!.id,
-            server: w.client.serverId!,
+            origin: w.transport.client.origin,
+            principal: w.transport.client.user!.id,
+            server: w.transport.client.serverId!,
             channel: id,
             parentChannel: parent,
             parentMessage: parentMessage,
             authority: messageWindowAuthority(
-              w.server?.string('role'),
+              w.context.server?.string('role'),
               resource.json,
             ),
           );
   }
 
   static Future<bool> record(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     Map<String, dynamic> page,
   ) async {
+    final w = host.messageDomain;
     if (page is! MessageHistoryPage) return true;
     if (!request.current) return false;
-    final device = storage(w.deviceStore.cache);
+    final device = storage(w.device.cache);
     if (device == null) return true;
     final id = page.scope.channel;
     final initial = {for (final row in w.ledger.messages(id)) row['id']: row};
     try {
       if (!page.local) await device.acceptPage(page);
-      if (!request.current || !w.deviceStore.writable) return false;
+      if (!request.current || !w.device.writable) return false;
       final remoteRows = (page.remotePage ?? page)['messages'];
-      if (!page.local && initial.isNotEmpty && remoteRows is List && remoteRows.isEmpty) {
+      if (!page.local &&
+          initial.isNotEmpty &&
+          remoteRows is List &&
+          remoteRows.isEmpty) {
         // An empty response has no row IDs for the reconciliation loop below.
         // Publish its committed deletions too, while preserving newer events.
-        final stored = await device.projections(page.scope, initial.keys.cast<String>());
-        if (!request.current || !w.deviceStore.writable) return false;
+        final stored = await device.projections(
+          page.scope,
+          initial.keys.cast<String>(),
+        );
+        if (!request.current || !w.device.writable) return false;
         for (final key in initial.keys) {
-          if (stored.containsKey(key) && stored[key] == null &&
+          if (stored.containsKey(key) &&
+              stored[key] == null &&
               identical(initial[key], w.ledger.message(id, key)) &&
               !device.receiver.hasRow(page.scope, key)) {
             w.ledger.remove(id, key);
@@ -235,7 +312,7 @@ class MessageHistoryPages {
         after: page.after,
         focused: page.focused,
       );
-      if (!request.current || !w.deviceStore.writable) return false;
+      if (!request.current || !w.device.writable) return false;
       final current = {for (final row in w.ledger.messages(id)) row['id']: row};
       final accepted = <Map<String, dynamic>>[];
       final ids = <String>{};
@@ -245,7 +322,14 @@ class MessageHistoryPages {
         final pending = device.receiver.pendingUpdate(page.scope, key);
         if (identical(initial[key], current[key]) &&
             (!device.receiver.hasRow(page.scope, key) || pending != null)) {
-          accepted.add(pending == null ? Map<String, dynamic>.from(row as Map) : mergeMessageProjection(Map<String, dynamic>.from(row as Map), pending));
+          accepted.add(
+            pending == null
+                ? Map<String, dynamic>.from(row as Map)
+                : mergeMessageProjection(
+                    Map<String, dynamic>.from(row as Map),
+                    pending,
+                  ),
+          );
         }
       }
       for (final row in page['messages'] as List) {
@@ -258,7 +342,7 @@ class MessageHistoryPages {
         }
       }
       w.messageWindows.acceptRows(request, id, accepted, authoritative: true);
-      w.messageSync.replaceBodies(id, accepted);
+      w.state.messageSync.replaceBodies(id, accepted);
       if (!page.local &&
           !page.focused &&
           page.before == null &&
@@ -277,7 +361,7 @@ class MessageHistoryPages {
       return true;
     } catch (cause) {
       if (cause is HistoryCapacityExceeded) return true;
-      if (request.current && w.deviceStore.writable) {
+      if (request.current && w.device.writable) {
         if (cause is HistoryReadRetired) {
           // The receiver can have admitted this page before its write fence.
           // Restore held versions and drop newly presented, unchanged page
@@ -296,9 +380,16 @@ class MessageHistoryPages {
               }
             }
           }
-          w.messageWindows.acceptRows(request, id, restore, authoritative: true);
+          w.messageWindows.acceptRows(
+            request,
+            id,
+            restore,
+            authoritative: true,
+          );
         }
-        w.error ??= saveError(cause);
+        if (w.presentation.error == null) {
+          w.presentation.assignError(saveError(cause));
+        }
       }
       return false;
     }
@@ -384,7 +475,9 @@ class MessageHistoryPages {
             verifiedAt: await verified(
               local is MessageHistoryPage ? local.verifiedAt : null,
             ),
-            heldBeforeAdmission: {for (final row in held()) row['id'] as String: row},
+            heldBeforeAdmission: {
+              for (final row in held()) row['id'] as String: row,
+            },
           );
         }
       }
@@ -414,12 +507,20 @@ class MessageHistoryPages {
             local: true,
             limit: limit,
             verifiedAt: await verified(local.verifiedAt),
-            heldBeforeAdmission: {for (final row in held()) row['id'] as String: row},
+            heldBeforeAdmission: {
+              for (final row in held()) row['id'] as String: row,
+            },
           );
         }
       }
-      if (localFirst && reason == null &&
-          await device.wasEvicted(scope, before: before, after: after, target: target)) {
+      if (localFirst &&
+          reason == null &&
+          await device.wasEvicted(
+            scope,
+            before: before,
+            after: after,
+            target: target,
+          )) {
         reason = HistoryReadReason.evicted;
       }
     } catch (_) {
@@ -446,10 +547,22 @@ class MessageHistoryPages {
       );
     } on HistoryReadRetired {
       if (retiredAttempts >= 2 || !current()) rethrow;
-      return load(cache: cache, scope: scope, current: current, held: held,
-        remote: remote, before: before, after: after, limit: limit,
-        localFirst: false, focused: focused, target: target, ticket: ticket,
-        reason: HistoryReadReason.evicted, retiredAttempts: retiredAttempts + 1);
+      return load(
+        cache: cache,
+        scope: scope,
+        current: current,
+        held: held,
+        remote: remote,
+        before: before,
+        after: after,
+        limit: limit,
+        localFirst: false,
+        focused: focused,
+        target: target,
+        ticket: ticket,
+        reason: HistoryReadReason.evicted,
+        retiredAttempts: retiredAttempts + 1,
+      );
     } catch (_) {
       merged = raw;
     }

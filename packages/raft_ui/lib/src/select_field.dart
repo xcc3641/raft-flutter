@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'design_primitives.dart';
+import 'hover_region.dart';
 import 'anchored_popup.dart';
 import 'dismiss_scope.dart';
 import 'icons.dart';
@@ -308,7 +309,7 @@ class _SelectItemState<T> extends State<_SelectItem<T>> {
     final sel = RaftSelectRecipe.resolve(
       theme: t.recipeTheme,
       states: t.recipeStates(
-        hovered: hovered && enabled,
+        hovered: hovered && enabled && RaftHoverScope.of(context),
         extra: [
           if (!enabled) 'data-disabled',
           if (widget.selected) 'data-selected',
@@ -326,7 +327,8 @@ class _SelectItemState<T> extends State<_SelectItem<T>> {
         enabled: enabled,
         autofocus: widget.autofocus && enabled,
         onShowFocusHighlight: (v) => setState(() => highlighted = v),
-        onShowHoverHighlight: (v) => setState(() => hovered = v),
+        onShowHoverHighlight: (v) =>
+            setState(() => hovered = v && RaftHoverScope.of(context)),
         mouseCursor: SystemMouseCursors.basic,
         shortcuts: const {
           SingleActivator(LogicalKeyboardKey.arrowDown): NextFocusIntent(),

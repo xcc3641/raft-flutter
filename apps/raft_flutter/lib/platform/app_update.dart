@@ -287,6 +287,7 @@ class AppUpdateService extends ChangeNotifier {
     required this.currentBuild,
     required this.platformKey,
     required this.fetch,
+    this.currentTag = '',
     this.target,
     SearchMemoryStorage? storage,
     DateTime Function()? clock,
@@ -306,6 +307,7 @@ class AppUpdateService extends ChangeNotifier {
   factory AppUpdateService.forThisBuild({
     String version = const String.fromEnvironment('RAFT_APP_VERSION'),
     String buildNumber = const String.fromEnvironment('RAFT_BUILD_NUMBER'),
+    String tag = const String.fromEnvironment('RAFT_RELEASE_TAG'),
     String? platformKey,
     AppUpdateFetcher fetch = fetchManifestOverHttp,
     SearchMemoryStorage? storage,
@@ -318,9 +320,14 @@ class AppUpdateService extends ChangeNotifier {
               '/${AppRelease.repository.substring('https://github.com/'.length)}'
               '/releases/latest/download',
     target: target,
-    releaseNotes: ClientReleaseNotes(fetch: fetch, storage: storage),
+    releaseNotes: ClientReleaseNotes(
+      fetch: fetch,
+      storage: storage,
+      appBuild: int.tryParse(buildNumber),
+    ),
     currentVersion: version,
     currentBuild: int.tryParse(buildNumber),
+    currentTag: tag,
     platformKey: platformKey ?? appUpdatePlatformKey(),
     fetch: fetch,
     storage: storage,
@@ -336,6 +343,12 @@ class AppUpdateService extends ChangeNotifier {
 
   final String currentVersion;
   final int? currentBuild;
+
+  /// The release tag this build was published under (`v0.1.0+5`), compiled in
+  /// by the release build as `RAFT_RELEASE_TAG`; empty for builds made before
+  /// that and for local builds. The update prompt uses it to list exactly the
+  /// releases between this one and the offered one.
+  final String currentTag;
   final String? platformKey;
 
   /// The platform this build runs on; only used to explain [unsupported].
@@ -353,6 +366,11 @@ class AppUpdateService extends ChangeNotifier {
   final void Function(String message) _log;
 
   AppRelease? _remote;
+
+  /// CI build number -> release tag of every release the manifest has shown,
+  /// newest last (a few remembered). Builds made before [currentTag] existed
+  /// learn their own tag here once a check sees their release as the latest.
+  final _tags = <int, String>{};
   int _seen = 0;
   DateTime? _checkedAt, _attemptedAt;
   bool _failedLast = false, _loaded = false, _checking = false;
@@ -406,6 +424,23 @@ class AppUpdateService extends ChangeNotifier {
     final remote = _remote, build = currentBuild;
     if (!enabled || remote == null || build == null) return null;
     return remote.buildNumber > build ? remote : null;
+  }
+
+  /// The release tag of the running build: the compiled-in [currentTag], else
+  /// the one a manifest paired with [currentBuild]; empty when unknown.
+  String get installedTag {
+    if (currentTag.isNotEmpty) return currentTag;
+    final build = currentBuild;
+    return build == null ? '' : _tags[build] ?? '';
+  }
+
+  void _learn(AppRelease release) {
+    _tags
+      ..remove(release.buildNumber)
+      ..[release.buildNumber] = release.releaseTag;
+    while (_tags.length > 20) {
+      _tags.remove(_tags.keys.first);
+    }
   }
 
   /// The red dot: a newer release the user has not looked at yet.
@@ -464,7 +499,10 @@ class AppUpdateService extends ChangeNotifier {
       _checkedAt = _attemptedAt;
       // A release without this platform's manifest (or an unusable one) is
       // not an update; keep what was known before.
-      if (release != null) _remote = release;
+      if (release != null) {
+        _remote = release;
+        _learn(release);
+      }
       await _save();
     } catch (error) {
       _failedLast = true;
@@ -504,6 +542,15 @@ class AppUpdateService extends ChangeNotifier {
       final data = raw == null ? null : jsonDecode(raw);
       if (data is Map) {
         _remote = AppRelease.fromJson(data['remote']);
+        final remembered = data['tags'];
+        if (remembered is Map) {
+          for (final MapEntry(:key, :value) in remembered.entries) {
+            final build = int.tryParse('$key');
+            if (build != null && value is String) _tags[build] = value;
+          }
+        }
+        final remote = _remote;
+        if (remote != null) _learn(remote);
         final seen = data['seen'];
         if (seen is int && seen > 0) _seen = seen;
         final at = data['checkedAt'];
@@ -526,6 +573,7 @@ class AppUpdateService extends ChangeNotifier {
         jsonEncode({
           'checkedAt': _checkedAt?.millisecondsSinceEpoch,
           'remote': _remote?.toJson(),
+          'tags': {for (final e in _tags.entries) '${e.key}': e.value},
           'seen': _seen,
         }),
       );

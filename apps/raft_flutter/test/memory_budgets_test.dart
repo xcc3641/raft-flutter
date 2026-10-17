@@ -11,6 +11,8 @@ import 'package:raft_flutter/platform/bounded_lru.dart';
 import 'package:raft_flutter/platform/memory_budgets.dart';
 import 'package:raft_flutter/platform/memory_release.dart';
 
+import 'support/repo_root.dart';
+
 const _mib = 1024 * 1024;
 
 void main() {
@@ -82,9 +84,7 @@ void main() {
     });
 
     test('the table in docs/architecture.md lists every tier of describe()', () {
-      final root = Directory.current.path.endsWith('apps/raft_flutter')
-          ? Directory('../..')
-          : Directory('.');
+      final root = repoRoot();
       final doc = File('${root.path}/docs/architecture.md').readAsStringSync();
       expect(doc, contains('RaftMemoryBudgets'));
       for (final tier in [

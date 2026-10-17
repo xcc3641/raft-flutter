@@ -517,7 +517,7 @@ void main() {
       w.newFlags = {'c1'};
       w.historyLimited = w.threadHistoryLimited = true;
       w.highlightedMessageId = 'm1';
-      w.syncCoreMessagesEnabled = true;
+      w.messageSync.consumeNew({'id': 'm1', 'channelId': 'c1', 'seq': 1});
       w.resourceSnapshots.write(
         'saved',
         FieldSnapshot(identity: 'old', fields: {'value': 1}),
@@ -534,7 +534,7 @@ void main() {
         expect(w.newFlags, isEmpty);
         expect(w.historyLimited || w.threadHistoryLimited, isFalse);
         expect(w.highlightedMessageId, isNull);
-        expect(w.syncCoreMessagesEnabled, isFalse);
+        expect(w.messageSync.messages('c1'), isEmpty);
         expect(w.resourceSnapshots.read<FieldSnapshot>('saved', 'old'), isNull);
         expect(w.channelGeneration, generation + 1);
       };

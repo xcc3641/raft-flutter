@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -412,7 +414,7 @@ class _RaftHoverCardState extends State<RaftHoverCard>
       child: TapRegion(
         groupId: this,
         onTapOutside: (_) => _hide(immediate: true),
-        child: MouseRegion(
+        child: RaftHoverRegion(
           onEnter: (_) {
             cardHovered = true;
             closeTimer?.cancel();
@@ -462,7 +464,7 @@ class _RaftHoverCardState extends State<RaftHoverCard>
         canRequestFocus: false,
         skipTraversal: true,
         onFocusChange: _focusChanged,
-        child: MouseRegion(
+        child: RaftHoverRegion(
           onEnter: _enter,
           onHover: _hover,
           onExit: _exit,
@@ -572,7 +574,7 @@ class _RaftHoverRevealState extends State<RaftHoverReveal> {
     canRequestFocus: false,
     skipTraversal: true,
     onFocusChange: (value) => setState(() => focused = value),
-    child: MouseRegion(
+    child: RaftHoverRegion(
       onEnter: (event) {
         if (event.kind == PointerDeviceKind.mouse ||
             event.kind == PointerDeviceKind.stylus) {

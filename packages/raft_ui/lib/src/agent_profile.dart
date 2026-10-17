@@ -4,6 +4,7 @@
 // components/member/HumanDetailPanel.tsx). Data loading stays in the app; the
 // widgets here take plain view data and callbacks. Values cite the Tailwind
 // classes / raft-ui recipes they come from.
+import 'hover_region.dart';
 import 'css_pixel_snap.dart';
 import 'anchored_popup.dart';
 import 'dismiss_scope.dart';
@@ -406,7 +407,7 @@ class _RaftRecipeTextButtonState extends State<RaftRecipeTextButton> {
       button: true,
       label: widget.label,
       excludeSemantics: true,
-      child: MouseRegion(
+      child: RaftHoverRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => hovered = true),
         onExit: (_) => setState(() => hovered = false),
@@ -550,9 +551,9 @@ abstract final class RaftPanelText {
     fontStyle: FontStyle.italic,
     color: raftPanelInk(t, .4, t.colors['foreground-muted']!),
   );
-  static TextStyle muted(RaftTokens t) => value(
-    t,
-  ).copyWith(color: raftPanelInk(t, .5, t.colors['foreground-muted']!));
+  static TextStyle muted(RaftTokens t) =>
+      value(t)
+          .copyWith(color: raftPanelInk(t, .5, t.colors['foreground-muted']!));
   static TextStyle mono(RaftTokens t) =>
       value(t).copyWith(fontFamily: t.monoFont);
   static TextStyle monoSemibold(RaftTokens t) =>
@@ -1179,7 +1180,7 @@ class _RaftActivityRowState extends State<_RaftActivityRow> {
         ? 0.0
         : math.max(0.0, badgeTop + badgeH - 20);
     final title = e.expandable
-        ? MouseRegion(
+        ? RaftHoverRegion(
             cursor: SystemMouseCursors.click,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -1413,9 +1414,8 @@ class RaftSkillsSection extends StatelessWidget {
             Flexible(
               child: RaftCssText(
                 s.displayName,
-                style: RaftPanelText.value(
-                  t,
-                ).copyWith(fontWeight: FontWeight.w700),
+                style: RaftPanelText.value(t)
+                    .copyWith(fontWeight: FontWeight.w700),
               ),
             ),
             if (s.userInvocable) ...[
@@ -1558,9 +1558,8 @@ class RaftReminderListView extends StatelessWidget {
                   const SizedBox(height: 12),
                   RaftCssText(
                     raftText(context, 'No reminders'),
-                    style: RaftPanelText.value(
-                      t,
-                    ).copyWith(fontWeight: FontWeight.w700),
+                    style: RaftPanelText.value(t)
+                        .copyWith(fontWeight: FontWeight.w700),
                   ),
                 ],
               ),
@@ -2670,7 +2669,7 @@ class _RaftOverflowMenuButtonState extends State<RaftOverflowMenuButton> {
       enabled: menu.isShowing,
       consumeOutsideTaps: true,
       onTapOutside: (_) => close(),
-      child: MouseRegion(
+      child: RaftHoverRegion(
         onEnter: (_) {
           if (menu.isShowing) setState(() {});
         },
@@ -2721,7 +2720,7 @@ class _ProfileAvatarActionState extends State<_ProfileAvatarAction> {
       child: Semantics(
         button: true,
         label: raftText(context, 'Choose Avatar'),
-        child: MouseRegion(
+        child: RaftHoverRegion(
           onEnter: (_) => setState(() => hovered = true),
           onExit: (_) => setState(() => hovered = false),
           child: GestureDetector(

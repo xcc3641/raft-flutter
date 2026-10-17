@@ -33,7 +33,7 @@ void main() {
     (RaftFamily.elegant, true),
   ])) {
     testWidgets(
-      '[K08b] $family/$dark actual four footer entries retain Source slot geometry and unseen Help lifecycle',
+      '[K08b] $family/$dark actual three footer entries retain Source slot geometry and unseen Help lifecycle',
       (t) async {
         final (w, api) = await pageFixture(t, section: 'chat');
         api.routes['GET /agents'] = (_) => [];
@@ -41,18 +41,12 @@ void main() {
         await shellFonts(t);
         await mountShell(t, w, family, dark);
         final help = find.byKey(const Key('rail-help'));
-        final mode = find.byKey(const Key('workspace-mode-toggle'));
         final settings = find.byKey(const Key('rail-settings'));
         final bell = find.byType(RaftMobileNotificationButton);
-        expect(t.getRect(bell).top, 592);
-        expect(t.getRect(help).top, 642);
-        expect(t.getRect(mode).top, 692);
+        expect(t.getRect(bell).top, 642);
+        expect(t.getRect(help).top, 692);
         expect(t.getRect(settings).top, 742);
         expect(t.getSize(bell), const Size(40, 40));
-        final glyphs = t.widgetList<RaftIcon>(
-          find.descendant(of: mode, matching: find.byType(RaftIcon)),
-        );
-        expect(glyphs.first.size, family == RaftFamily.brutal ? 18 : 16);
         expect(t.widget<RaftWorkspaceHelpMenu>(help).attention, true);
         final attention = find.descendant(
           of: help,

@@ -156,6 +156,117 @@ void main() {
     );
   });
 
+  for (final (label, response) in <(String, Object?)>[
+    (
+      'partial',
+      {
+        'ok': false,
+        'started': 1,
+        'total': 3,
+        'results': [
+          {'agentId': 'a', 'ok': true},
+          {'agentId': 'b', 'ok': false, 'reason': 'start_in_flight'},
+          {'agentId': 'c', 'ok': false, 'error': 'Computer offline'},
+        ],
+      },
+    ),
+    ('legacy failure', {'ok': false}),
+    ('missing response', null),
+    (
+      'incomplete results',
+      {
+        'ok': true,
+        'started': 1,
+        'total': 2,
+        'results': [
+          {'agentId': 'a', 'ok': true},
+        ],
+      },
+    ),
+  ]) {
+    testWidgets('$label resume retains guidance until retry resolves it', (
+      tester,
+    ) async {
+      final (w, api) = (await tester.runAsync(() => fixture('member')))!;
+      addTearDown(w.dispose);
+      _routes(api);
+      api.routes['GET /channels/c1/members'] = (_) => {
+        'humans': [],
+        'agents': [
+          {'id': 'b', 'name': 'Birch'},
+          {'id': 'c', 'name': 'Cedar'},
+        ],
+      };
+      api.routes['POST /channels/c1/stop-all-agents'] = (_) => {'ok': true};
+      final resumeBodies = <Map>[];
+      api.routes['POST /channels/c1/resume-all-agents'] = (request) {
+        resumeBodies.add(Map.from(request.data as Map));
+        return resumeBodies.length == 1
+            ? response
+            : {
+                'ok': true,
+                'started': 2,
+                'total': 2,
+                'results': [
+                  {'agentId': 'b', 'ok': true},
+                  {'agentId': 'c', 'ok': true},
+                ],
+              };
+      };
+      await _open(
+        tester,
+        w,
+        RaftChannel({'id': 'c1', 'name': 'release', 'joined': true}),
+      );
+      await tester.tap(_stopAgents);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('sos-stop')));
+      await _settle(
+        tester,
+        () => find.text('AGENTS STOPPED').evaluate().isNotEmpty,
+      );
+      final field = find.descendant(
+        of: find.byKey(const ValueKey('sos-guidance')),
+        matching: find.byType(EditableText),
+      );
+      await tester.enterText(field, 'Keep the schema.');
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('sos-resume')));
+      await _settle(
+        tester,
+        () =>
+            resumeBodies.isNotEmpty &&
+            find.byKey(const ValueKey('sos-error')).evaluate().isNotEmpty,
+      );
+      expect(find.byKey(const ValueKey('channel-sos-dialog')), findsOneWidget);
+      expect(
+        tester.widget<EditableText>(field).controller.text,
+        'Keep the schema.',
+      );
+      expect(find.byKey(const ValueKey('sos-error')), findsOneWidget);
+      expect(resumeBodies.single.containsKey('agentIds'), false);
+      if (label == 'partial') {
+        expect(
+          find.textContaining('Birch: Still starting. Try again shortly.'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('Cedar: Computer offline'), findsOneWidget);
+      }
+      await tester.tap(find.byKey(const ValueKey('sos-resume')));
+      await _settle(
+        tester,
+        () =>
+            find.byKey(const ValueKey('channel-sos-dialog')).evaluate().isEmpty,
+      );
+      expect(resumeBodies, hasLength(2));
+      if (label == 'partial') expect(resumeBodies.last['agentIds'], ['b', 'c']);
+      expect(resumeBodies.last['prompt'], resumeBodies.first['prompt']);
+      expect(find.byKey(const ValueKey('channel-sos-dialog')), findsNothing);
+      expect(find.byKey(const ValueKey('sos-error')), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   for (final (name, role, json) in [
     ('guest', 'guest', <String, dynamic>{'joined': true}),
     ('not joined', 'member', <String, dynamic>{'joined': false}),

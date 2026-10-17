@@ -32,7 +32,7 @@ Future<Map<String, dynamic>?> showManagedAgentForm(
   // directory's copy (revalidated in place); only a directory that cannot
   // provide it is fetched, behind the already-open dialog.
   Map<String, dynamic>? created;
-  await showRaftAgentModal<bool>(
+  await showRaftForm<bool>(
     context,
     builder: (_) => _ManagedAgentFormHost(
       controller: w,

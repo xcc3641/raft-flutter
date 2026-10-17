@@ -4,6 +4,7 @@ import 'package:raft_client/raft_client.dart';
 import 'package:raft_sync/raft_sync.dart';
 
 import 'user_activity.dart';
+import 'source_read_all_transport.dart';
 
 /// Read cursors and unread projections for one workspace receiver.
 ///
@@ -66,7 +67,55 @@ class ConversationReadRepository {
   static int _zeroWindowGeneration(bool thread) => 0;
   static bool _notDisposed() => false;
 
-  Future<void> _reconcileUnread() => _refreshUnread?.call() ?? refreshUnread();
+  /// Reconciles unread counts through the receiver's existing refresh hook.
+  Future<void> reconcileUnread() => _refreshUnread?.call() ?? refreshUnread();
+
+  /// Marks every message in [id] read from an explicit Activity action.
+  ///
+  /// Unlike visible-window receipts, this covers the conversation. Request
+  /// coalescing and the captured [identity] remain bound to the client.
+  Future<void> markAllRead(String id, {SourceReadAllIdentity? identity}) async {
+    final captured = identity ?? SourceReadAllIdentity.capture(client);
+    if (_isDisposed() ||
+        _revokedChannels().contains(id) ||
+        !captured.current(client)) {
+      return;
+    }
+    final receipt = await SourceReadAllTransport.of(client)
+        .readAll(id, identity: captured);
+    if (_isDisposed() ||
+        _revokedChannels().contains(id) ||
+        !captured.current(client)) {
+      return;
+    }
+    acceptReadAllAck(
+      id,
+      receipt,
+      serverId: captured.serverId!,
+      principalId: captured.principalId!,
+    );
+  }
+
+  /// Marks [id] unread and reconciles the receiver, even if the write fails.
+  ///
+  /// The injected refresh preserves source dispatch and receiver overrides.
+  Future<void> markUnread(String id) async {
+    final identity = SourceReadAllIdentity.capture(client);
+    if (_isDisposed() ||
+        _revokedChannels().contains(id) ||
+        !identity.current(client)) {
+      return;
+    }
+    try {
+      await client.post('/channels/$id/unread');
+    } finally {
+      if (!_isDisposed() &&
+          !_revokedChannels().contains(id) &&
+          identity.current(client)) {
+        await reconcileUnread();
+      }
+    }
+  }
 
   final localReadState = ReadStateLedger();
   Map<String, int> unread = {};
@@ -323,7 +372,7 @@ class ConversationReadRepository {
           client.origin == origin &&
           client.user?.id == principal &&
           client.serverId == serverId) {
-        unawaited(_reconcileUnread());
+        unawaited(reconcileUnread());
       }
     }
   }
@@ -349,7 +398,7 @@ class ConversationReadRepository {
       persistReadState();
       _changed();
     }
-    if ((unread[id] ?? 0) != 0) unawaited(_reconcileUnread());
+    if ((unread[id] ?? 0) != 0) unawaited(reconcileUnread());
   }
 
   /// Source acceptActivityReadAllAck: an Activity row's persisted read-all

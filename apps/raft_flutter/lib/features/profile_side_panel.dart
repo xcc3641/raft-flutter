@@ -11,6 +11,18 @@ import 'external_identity.dart';
 import 'fleet_views.dart';
 import 'member_profile_view.dart';
 
+final _profilePanelKeys = Expando<GlobalKey>('profile panel');
+
+/// One panel element for every shell of this workspace.
+///
+/// Below 768 the profile is a page of the phone navigator; above it the same
+/// profile is a column of the desktop workspace. Those shells are different
+/// widget trees, and each used to mint its own key, so a resize disposed the
+/// panel and the edit window it had pushed. The shared key lets the framework
+/// move that panel into the new tree in the same frame.
+GlobalKey profilePanelKeyFor(WorkspaceController controller) =>
+    _profilePanelKeys[controller] ??= GlobalKey(debugLabel: 'profile-panel');
+
 /// Web `ConnectedProfilePanel`: the profile slot of the URL (`profile=`) as a
 /// side panel (desktop column / phone page) for an agent, a member or an
 /// external message author. Closing returns to the surface underneath.
@@ -44,7 +56,8 @@ class ProfileSidePanel extends StatelessWidget {
         key: key,
         controller: w,
         computers: false,
-        initial: w.services.entityDirectory.agent(profile.id) ?? {'id': profile.id},
+        initial:
+            w.services.entityDirectory.agent(profile.id) ?? {'id': profile.id},
         initialTab: AgentDetailTab.values.firstWhere(
           (tab) => tab.name == agentTab,
           orElse: () => AgentDetailTab.profile,

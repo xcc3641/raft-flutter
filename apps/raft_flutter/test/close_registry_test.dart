@@ -18,7 +18,8 @@ final _openers = RegExp(
   r'OverlayEntry\(|OverlayPortalController\(|MaterialPageRoute|'
   r'PageRouteBuilder|DialogRoute|PopupRoute|RaftPanelHeaderBar\(|'
   r'RaftPageHeader\(|RaftDialogCard\(|RaftDialogShell\(|'
-  r'RaftAgentDialogCard\(',
+  r'RaftAgentDialogCard\(|showRaftForm[<(]|raftFormRoute[<(]|'
+  r'showRaftPresented[<(]|raftPresentedRoute[<(]',
 );
 
 Iterable<File> _dartFiles(String dir) =>

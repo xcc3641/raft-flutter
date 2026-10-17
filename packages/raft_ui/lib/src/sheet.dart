@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'settings_layout.dart' show RaftSpace;
@@ -86,16 +88,51 @@ class RaftSheetScope extends InheritedWidget {
   const RaftSheetScope({
     super.key,
     required this.scrollController,
+    this.pointerDrag,
     required super.child,
   });
   final ScrollController? scrollController;
+
+  /// Moves the sheet for a drag on the handle or the header, which the scroll
+  /// view cannot be trusted with: it ignores a mouse on desktop, and turns a
+  /// finger into scrolling once the body is scrolled. Null when the sheet
+  /// moves another way.
+  final RaftSheetPointerDrag? pointerDrag;
 
   static RaftSheetScope? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<RaftSheetScope>();
 
   @override
   bool updateShouldNotify(RaftSheetScope oldWidget) =>
-      scrollController != oldWidget.scrollController;
+      scrollController != oldWidget.scrollController ||
+      pointerDrag != oldWidget.pointerDrag;
+}
+
+/// A drag on the handle or the header, in logical pixels down the screen.
+abstract interface class RaftSheetPointerDrag {
+  void update(double dy);
+  void end(double velocityDy);
+}
+
+/// The handle and the header move the sheet with any pointer, whatever the
+/// body's scroll offset.
+class _PointerDragArea extends StatelessWidget {
+  const _PointerDragArea({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final drag = RaftSheetScope.maybeOf(context)?.pointerDrag;
+    if (drag == null) return child;
+    return GestureDetector(
+      // Every device: the handle sits in the body's scroll view, and once
+      // the body is scrolled a finger there would scroll the text instead.
+      behavior: HitTestBehavior.translucent,
+      onVerticalDragUpdate: (d) => drag.update(d.delta.dy),
+      onVerticalDragEnd: (d) => drag.end(d.velocity.pixelsPerSecond.dy),
+      child: RaftHoverRegion(cursor: SystemMouseCursors.grab, child: child),
+    );
+  }
 }
 
 /// The drag handle: the same mark in every theme (brutal black, elegant a
@@ -199,12 +236,14 @@ class RaftSheet extends StatelessWidget {
                 delegate: _PinnedHeader(
                   extent: RaftSheetMetrics.handleArea + headerExtent,
                   color: RaftTokens.of(context).panel,
-                  child: Column(
-                    children: [
-                      const RaftSheetHandle(),
-                      if (header != null)
-                        SizedBox(height: headerExtent, child: header),
-                    ],
+                  child: _PointerDragArea(
+                    child: Column(
+                      children: [
+                        const RaftSheetHandle(),
+                        if (header != null)
+                          SizedBox(height: headerExtent, child: header),
+                      ],
+                    ),
                   ),
                 ),
               ),

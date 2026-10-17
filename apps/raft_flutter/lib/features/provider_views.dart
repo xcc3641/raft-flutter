@@ -167,6 +167,7 @@ class _ProviderConnectionsState
           p['id'] == connection['providerId'] && p['providerKind'] == 'gateway',
     );
     await scopedRaftModal<bool>(
+      form: true,
       (dialogContext) => EditProviderConnectionDialog(
         controller: w,
         connection: connection,
@@ -331,6 +332,7 @@ class _ProviderConnectionsState
     // inputs are read.
     final submitted =
         await scopedDialog<bool>(
+          form: true,
           (
             dialog,
           ) => _LoadedDialog<({List<Map<String, dynamic>> candidates, List<String> models})>(

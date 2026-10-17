@@ -65,19 +65,28 @@ Future<T?> _fleetDialog<T>(
   bool Function() authorized,
   WidgetBuilder builder, {
   bool dismissible = false,
+  bool form = false,
+  bool guardUnsaved = true,
 }) async {
   if (!context.mounted || !authorized()) return null;
   // Web `Dialog` layer: the recipe overlay (Brutal black/65, Elegant backdrop + blur).
   final navigator = Navigator.of(context, rootNavigator: true);
-  final route = RaftDialogRoute<T>(
-    builder: builder,
-    // Web `DialogCard` / `ConfirmDialog`: no scrim close, Escape closes.
-    dismissible: dismissible,
-    capturedThemes: InheritedTheme.capture(
-      from: context,
-      to: navigator.context,
-    ),
-  );
+  final Route<T> route = form
+      // A form with inputs: a bottom sheet on a phone, a dialog from 768.
+      ? raftFormRoute<T>(
+          context,
+          builder: builder,
+          guardUnsaved: guardUnsaved,
+        )
+      : RaftDialogRoute<T>(
+          builder: builder,
+          // Web `DialogCard` / `ConfirmDialog`: no scrim close, Escape closes.
+          dismissible: dismissible,
+          capturedThemes: InheritedTheme.capture(
+            from: context,
+            to: navigator.context,
+          ),
+        );
   void changed() {
     if (!authorized() && route.isActive) route.navigator?.removeRoute(route);
   }
@@ -171,6 +180,7 @@ Future<void> showFleetRegistration(
     context,
     w,
     valid,
+    form: true,
     (_) => RaftFormDialog(
       title: computers ? 'Register computer' : 'Create external agent',
       submitLabel: computers ? 'Register' : 'Create',
@@ -967,6 +977,9 @@ class _FleetDetailState extends State<FleetDetail> {
       ),
       // Web `Dialog`: an outside press runs `requestClose`.
       dismissible: true,
+      form: true,
+      // The dialog asks about its own dirty draft (requestClose).
+      guardUnsaved: false,
     );
   }
 
@@ -977,6 +990,7 @@ class _FleetDetailState extends State<FleetDetail> {
       context,
       w,
       () => allowed(cap),
+      form: true,
       (_) => RaftFormDialog(
         title: widget.computers ? 'Edit computer' : 'Edit agent',
         fields: [

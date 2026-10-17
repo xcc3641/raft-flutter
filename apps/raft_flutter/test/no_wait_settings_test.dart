@@ -54,14 +54,15 @@ Future<void> _revisit(
   WidgetTester t,
   MessageAdapter api,
   Widget Function() page,
-  void Function() seen,
-) async {
-  await t.pumpWidget(_host(page()));
+  void Function() seen, {
+  Widget Function(Widget) host = _host,
+}) async {
+  await t.pumpWidget(host(page()));
   await frames(t, 20);
-  await t.pumpWidget(_host(const SizedBox()));
+  await t.pumpWidget(host(const SizedBox()));
   await frames(t, 2);
   api.hangAll = true;
-  await t.pumpWidget(_host(page()));
+  await t.pumpWidget(host(page()));
   await frames(t, 3);
   seen();
   api.hangAll = false;
@@ -135,6 +136,8 @@ void main() {
       api,
       () => ReleaseNotesView(controller: w, source: source),
       () => expect(find.text('Instant settings'), findsOneWidget),
+      // The view scrolls itself (pull to refresh).
+      host: _fullPage,
     );
   });
 

@@ -7,6 +7,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'form_presentation.dart';
+
 import 'dialog_card.dart';
 import 'icons.dart';
 import 'error_presentation.dart';
@@ -114,37 +116,36 @@ class RaftCreateTaskDialogView extends StatelessWidget {
                 ),
               ],
             ),
-            gap,
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                RaftRecipeButton(
-                  key: const ValueKey('create-task-cancel'),
-                  label: 'Cancel',
-                  variant: RaftButtonRecipeVariant.outline,
-                  size: RaftButtonRecipeSize.sm,
-                  padding: padding, // px-4 py-2 text-sm
-                  textStep: RaftTextSteps.sm,
-                  onPressed: onClose,
-                ),
-                const SizedBox(width: 12), // gap-3
-                RaftRecipeButton(
-                  key: const ValueKey('create-task-submit'),
-                  label: submitting
-                      ? 'Creating…'
-                      : (batch ? filledCount : 1) == 1
-                      ? 'Create Task'
-                      : raftFormat(context, 'Create {count} Tasks', {
-                          'count': filledCount,
-                        }),
-                  variant: RaftButtonRecipeVariant.accent,
-                  size: RaftButtonRecipeSize.sm,
-                  padding: padding,
-                  textStep: RaftTextSteps.sm,
-                  disabled: submitting,
-                  onPressed: onSubmit,
-                ),
-              ],
+          ],
+        ),
+        footer: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            RaftRecipeButton(
+              key: const ValueKey('create-task-cancel'),
+              label: 'Cancel',
+              variant: RaftButtonRecipeVariant.outline,
+              size: RaftButtonRecipeSize.sm,
+              padding: padding, // px-4 py-2 text-sm
+              textStep: RaftTextSteps.sm,
+              onPressed: raftExplicitClose(context, onClose),
+            ),
+            const SizedBox(width: 12), // gap-3
+            RaftRecipeButton(
+              key: const ValueKey('create-task-submit'),
+              label: submitting
+                  ? 'Creating…'
+                  : (batch ? filledCount : 1) == 1
+                  ? 'Create Task'
+                  : raftFormat(context, 'Create {count} Tasks', {
+                      'count': filledCount,
+                    }),
+              variant: RaftButtonRecipeVariant.accent,
+              size: RaftButtonRecipeSize.sm,
+              padding: padding,
+              textStep: RaftTextSteps.sm,
+              disabled: submitting,
+              onPressed: onSubmit,
             ),
           ],
         ),

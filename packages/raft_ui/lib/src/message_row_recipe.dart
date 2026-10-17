@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -451,7 +453,8 @@ class _RaftMessageRowState extends State<RaftMessageRow> {
   @override
   void didUpdateWidget(covariant RaftMessageRow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.coarsePointer || widget.toolbar == null) toolbarHovered = false;
+    if (widget.coarsePointer) hovered = toolbarHovered = false;
+    if (widget.toolbar == null) toolbarHovered = false;
     if (widget.popupOpen && !oldWidget.popupOpen) scrollSuppressed = false;
     syncPortal();
   }
@@ -532,7 +535,7 @@ class _RaftMessageRowState extends State<RaftMessageRow> {
             Positioned(
               top: row.top + recipe.toolbarTop,
               right: info.overlaySize.width - row.right + recipe.toolbarRight,
-              child: MouseRegion(
+              child: RaftHoverRegion(
                 onEnter: (_) {
                   if (!toolbarHovered)
                     attentionChanged(() => toolbarHovered = true);
@@ -630,7 +633,7 @@ class _RaftMessageRowState extends State<RaftMessageRow> {
       rowContext: widget.rowContext,
       continuation: widget.continuation,
       nextContinuation: widget.nextContinuation,
-      hovered: hovered || toolbarHovered,
+      hovered: !widget.coarsePointer && (hovered || toolbarHovered),
       focused: focused,
       popupOpen: widget.popupOpen,
       highlighted: widget.highlighted,
@@ -738,9 +741,11 @@ class _RaftMessageRowState extends State<RaftMessageRow> {
             });
           }
         },
-        child: MouseRegion(
+        child: RaftHoverRegion(
           onEnter: (_) {
-            if (!hovered && RaftPointerIntent.movedSinceScroll) {
+            if (!widget.coarsePointer &&
+                !hovered &&
+                RaftPointerIntent.movedSinceScroll) {
               attentionChanged(() {
                 hovered = true;
                 scrollSuppressed = false;
@@ -748,7 +753,9 @@ class _RaftMessageRowState extends State<RaftMessageRow> {
             }
           },
           onHover: (event) {
-            if (!hovered && event.delta != Offset.zero) {
+            if (!widget.coarsePointer &&
+                !hovered &&
+                event.delta != Offset.zero) {
               attentionChanged(() {
                 hovered = true;
                 scrollSuppressed = false;

@@ -7,59 +7,68 @@ import 'history_capacity.dart';
 import 'history_read_policy.dart';
 import 'message_history_pages.dart';
 import 'message_history_verification.dart';
-import 'workspace_controller.dart';
+import 'workspace_message_host.dart';
 import 'workspace_message_windows.dart';
 
 /// The receiver queue preserves socket order while a previously unseen thread
 /// resolves its parent through existing, authorized read routes.
 class MessageHistoryEvents {
-  static void _saveFailed(WorkspaceController w, Object cause) {
-    if (w.error != null || cause is HistoryCapacityExceeded) return;
-    w.error = MessageHistoryPages.saveError(cause);
-    w.notifyListeners();
+  static void _saveFailed(WorkspaceMessageHost host, Object cause) {
+    final w = host.messageDomain;
+    if (w.presentation.error != null || cause is HistoryCapacityExceeded) {
+      return;
+    }
+    w.presentation.assignError(MessageHistoryPages.saveError(cause));
+    w.context.changed();
   }
 
   static bool Function() _current(
-    WorkspaceController w, {
+    WorkspaceMessageHost host, {
     Iterable<String> channels = const [],
   }) {
+    final w = host.messageDomain;
     final seal = w.messageHistoryTicket('');
     final tickets = {for (final id in channels) id: w.messageHistoryTicket(id)};
     final generation = w.ledger.generation,
-        origin = w.client.origin,
-        principal = w.client.user?.id,
-        server = w.client.serverId,
-        role = w.server?.string('role');
+        origin = w.transport.client.origin,
+        principal = w.transport.client.user?.id,
+        server = w.transport.client.serverId,
+        role = w.context.server?.string('role');
     return () =>
-        w.deviceStore.writable &&
+        w.device.writable &&
         seal == w.messageHistoryTicket('') &&
         tickets.entries.every(
           (e) => e.value == w.messageHistoryTicket(e.key),
         ) &&
         generation == w.ledger.generation &&
-        origin == w.client.origin &&
-        principal == w.client.user?.id &&
-        server == w.client.serverId &&
-        role == w.server?.string('role');
+        origin == w.transport.client.origin &&
+        principal == w.transport.client.user?.id &&
+        server == w.transport.client.serverId &&
+        role == w.context.server?.string('role');
   }
 
-  static MessageHistoryScope _probe(WorkspaceController w) =>
-      MessageHistoryScope(
-        origin: w.client.origin,
-        principal: w.client.user!.id,
-        server: w.client.serverId!,
-        channel: '',
-        parentChannel: '',
-        authority: '',
-      );
+  static MessageHistoryScope _probe(WorkspaceMessageHost host) {
+    final w = host.messageDomain;
+    return MessageHistoryScope(
+      origin: w.transport.client.origin,
+      principal: w.transport.client.user!.id,
+      server: w.transport.client.serverId!,
+      channel: '',
+      parentChannel: '',
+      authority: '',
+    );
+  }
 
   static void store(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     Map<String, dynamic> row, {
     bool updateOnly = false,
   }) {
-    final db = MessageHistoryPages.storage(w.deviceStore.cache);
-    if (db == null || w.client.user == null || w.client.serverId == null) {
+    final w = host.messageDomain;
+    final db = MessageHistoryPages.storage(w.device.cache);
+    if (db == null ||
+        w.transport.client.user == null ||
+        w.transport.client.serverId == null) {
       return;
     }
     final anchor = row['conversationContext'];
@@ -70,7 +79,7 @@ class MessageHistoryEvents {
     final probe = _probe(w);
     final channel = '${row['channelId']}', id = '${row['id']}';
     final unheld = !w.ledger.contains(channel, id);
-    final live = !updateOnly && w.connected;
+    final live = !updateOnly && w.session.connected;
     final rowReceipt = db.receiver.beginRow(probe, channel, id);
     final receipt = updateOnly ? null : db.receiver.begin(probe, [row]);
     Future<void> apply(Map<String, dynamic> value, int revision) async {
@@ -119,8 +128,8 @@ class MessageHistoryEvents {
                   expectedGeneration: w.ledger.generation,
                   complete: true,
                 );
-                w.messageSync.replaceBodies(channel, [body]);
-                w.notifyListeners();
+                w.state.messageSync.replaceBodies(channel, [body]);
+                w.context.changed();
               }
             }
           }
@@ -136,10 +145,10 @@ class MessageHistoryEvents {
     late final Future<void> pending;
     if (updateOnly) {
       pending = db.receiver.coalesceUpdate(
-        w,
+        w.context.receiverKey,
         probe,
         (
-          w,
+          w.context.receiverKey,
           probe.origin,
           probe.principal,
           probe.server,
@@ -150,7 +159,7 @@ class MessageHistoryEvents {
           w.messageHistoryTicket(channel),
           parent,
           w.messageHistoryTicket(parent ?? channel),
-          w.server?.string('role'),
+          w.context.server?.string('role'),
         ),
         row,
         () => db.receiverRevision(probe),
@@ -169,27 +178,28 @@ class MessageHistoryEvents {
   }
 
   static Future<MessageHistoryScope?> _scope(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageHistoryStorage db,
     String id,
     bool Function() current, {
     required Map<String, dynamic> row,
     bool updateOnly = false,
   }) async {
+    final w = host.messageDomain;
     if (!current() || !w.messageWindows.notRevoked(id)) return null;
     final direct = MessageHistoryPages.scope(
       w,
       id,
-      parent: id == w.threadChannelId ? w.threadParentChannelId : id,
-      parentMessage: id == w.threadChannelId
+      parent: id == w.state.threadChannelId ? w.threadParentChannelId : id,
+      parentMessage: id == w.state.threadChannelId
           ? w.threadIdentity?.parentMessageId
           : null,
     );
     if (direct != null) return direct;
     final saved = await db.knownScope(
-      w.client.origin,
-      w.client.user!.id,
-      w.client.serverId!,
+      w.transport.client.origin,
+      w.transport.client.user!.id,
+      w.transport.client.serverId!,
       id,
     );
     String? parent = saved?.parentChannel, parentMessage = saved?.parentMessage;
@@ -210,18 +220,18 @@ class MessageHistoryEvents {
       if (updateOnly) {
         return null; // A partial edit never invents an unseen row.
       }
-      final raw = await w.client.get('/channels/$id');
+      final raw = await w.transport.client.get('/channels/$id');
       if (!current() || raw is! Map || raw['id'] != id) return null;
       if (raw['type'] != 'thread') {
         final resolved = RaftChannel(Map<String, dynamic>.from(raw));
-        return w.can('viewChannel', resource: resolved)
+        return w.context.can('viewChannel', resource: resolved)
             ? MessageHistoryPages.scope(w, id, resolved: resolved)
             : null;
       }
       parentMessage = raw['parentMessageId'] as String?;
       if (parentMessage == null) return null;
       // The mounted context endpoint allows a zero-neighbour parent lookup.
-      final context = await w.client.get(
+      final context = await w.transport.client.get(
         '/messages/context/$parentMessage',
         query: {'before': 0, 'after': 0},
       );
@@ -236,10 +246,10 @@ class MessageHistoryEvents {
       parentMessage: parentMessage,
     );
     if (scope == null) {
-      final raw = await w.client.get('/channels/$parent');
+      final raw = await w.transport.client.get('/channels/$parent');
       if (!current() || raw is! Map || raw['id'] != parent) return null;
       final resolved = RaftChannel(Map<String, dynamic>.from(raw));
-      if (!w.can('viewChannel', resource: resolved)) return null;
+      if (!w.context.can('viewChannel', resource: resolved)) return null;
       scope = MessageHistoryPages.scope(
         w,
         id,
@@ -252,7 +262,7 @@ class MessageHistoryEvents {
   }
 
   static Future<bool> _persist(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageHistoryStorage db,
     List<Map<String, dynamic>> rows,
     bool Function() current, {
@@ -263,6 +273,7 @@ class MessageHistoryEvents {
     required void Function() written,
     void Function()? unresolved,
   }) async {
+    final w = host.messageDomain;
     final grouped = <String, List<Map<String, dynamic>>>{};
     for (final row in rows) {
       final id = row['channelId'];
@@ -318,12 +329,19 @@ class MessageHistoryEvents {
 
   /// Resume uses committed progress, so a device write failure cannot cause a
   /// later reconnect to skip messages that exist only in memory.
-  static Future<void> resume(WorkspaceController w) async {
+  static Future<void> resume(WorkspaceMessageHost host) async {
+    final w = host.messageDomain;
     MessageHistoryVerification.reconnect(w);
-    if (w.client.user == null || w.client.serverId == null) return;
-    final db = MessageHistoryPages.storage(w.deviceStore.cache), current = _current(w);
+    if (w.transport.client.user == null ||
+        w.transport.client.serverId == null) {
+      return;
+    }
+    final db = MessageHistoryPages.storage(w.device.cache),
+        current = _current(w);
     if (db == null) {
-      if (w.ledger.watermark > BigInt.zero) w.client.resume(w.ledger.watermark);
+      if (w.ledger.watermark > BigInt.zero) {
+        w.transport.client.resume(w.ledger.watermark);
+      }
       return;
     }
     try {
@@ -336,7 +354,7 @@ class MessageHistoryEvents {
       final seq = committed > BigInt.zero
           ? committed
           : db.receiver.checkpointLimit(scope, w.ledger.watermark);
-      if (current() && seq > BigInt.zero) w.client.resume(seq);
+      if (current() && seq > BigInt.zero) w.transport.client.resume(seq);
     } catch (cause) {
       if (current()) {
         _saveFailed(w, cause);
@@ -345,12 +363,16 @@ class MessageHistoryEvents {
   }
 
   static Future<void> resumeResponse(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     Map payload, {
     required void Function() refreshUnread,
   }) async {
-    if (w.client.user == null || w.client.serverId == null) return;
-    final db = MessageHistoryPages.storage(w.deviceStore.cache);
+    final w = host.messageDomain;
+    if (w.transport.client.user == null ||
+        w.transport.client.serverId == null) {
+      return;
+    }
+    final db = MessageHistoryPages.storage(w.device.cache);
     final rows = (payload['messages'] as List? ?? const [])
         .whereType<Map>()
         .map((m) => Map<String, dynamic>.from(m))
@@ -416,25 +438,27 @@ class MessageHistoryEvents {
       w.ledger.ingest(accepted, expectedGeneration: w.ledger.generation);
       for (final row in accepted) {
         final id = row['channelId'];
-        if (id == w.channel?.id && !w.hasNewer ||
-            id == w.threadChannelId &&
+        if (id == w.presentation.channel?.id && !w.state.hasNewer ||
+            id == w.state.threadChannelId &&
                 !w.messageWindows.contextHasNewer(id as String) ||
             id is String && w.messageWindows.retainsLiveTail(id)) {
           w.messageWindows.reveal(liveWindowWrite, id, [row['id']]);
         }
       }
-      if (w.channel != null && !w.hasNewer) {
-        unawaited(w.markRead(w.channel!.id));
+      if (w.presentation.channel != null && !w.state.hasNewer) {
+        unawaited(w.entries.markRead(w.presentation.channel!.id));
       }
-      if (w.threadChannelId != null) unawaited(w.markRead(w.threadChannelId!));
+      if (w.state.threadChannelId != null) {
+        unawaited(w.entries.markRead(w.state.threadChannelId!));
+      }
       if (committed &&
           payload['hasMore'] == true &&
           cursor != null &&
           cursor > BigInt.zero) {
-        w.client.resume(cursor);
+        w.transport.client.resume(cursor);
       }
       refreshUnread();
-      w.notifyListeners();
+      w.context.changed();
     }
 
     if (db == null) return apply();

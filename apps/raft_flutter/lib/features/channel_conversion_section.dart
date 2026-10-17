@@ -140,9 +140,12 @@ class _ConversionSectionState
   }
 
   @override
-  Future<V?> scopedDialog<V>(Widget Function(BuildContext) builder) async {
+  Future<V?> scopedDialog<V>(
+    Widget Function(BuildContext) builder, {
+    bool form = false,
+  }) async {
     try {
-      return await super.scopedDialog<V>((context) {
+      return await super.scopedDialog<V>(form: form, (context) {
         modal = context;
         return builder(context);
       });

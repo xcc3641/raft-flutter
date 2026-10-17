@@ -475,9 +475,8 @@ void main() {
       await revisit(
         t,
         a,
-        () => SingleChildScrollView(
-          child: ReleaseNotesView(controller: w, source: source),
-        ),
+        // The view scrolls itself (pull to refresh).
+        () => ReleaseNotesView(controller: w, source: source),
         find.text('Faster revisits'),
         // ReleaseNotesPanel's loading state is a status line, not a spinner.
         loading: find.text('Loading release notes…'),

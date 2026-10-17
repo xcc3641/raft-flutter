@@ -1,6 +1,8 @@
 // Small Web-parity parts of the list pages (Search home, SelectionPopover,
 // Tasks loading, Search load more) so the product pages compose them instead of
 // restyling Material widgets.
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'components.dart' show RaftAvatar, RaftAvatarKind;
@@ -74,7 +76,7 @@ class RaftSearchHomeAction extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onPressed,
-        child: MouseRegion(
+        child: RaftHoverRegion(
           cursor: SystemMouseCursors.click,
           child: Text(
             raftText(context, label),
@@ -218,7 +220,11 @@ class RaftSearchLoadMore extends StatelessWidget {
 /// SelectionPopover row leading slot (`size-5`): a 20px avatar, or the empty
 /// reserved slot of the sentinel rows ("Assigned to me", "Unassigned").
 class RaftSelectionPopoverAvatarSlot extends StatelessWidget {
-  const RaftSelectionPopoverAvatarSlot({super.key, this.name, this.agent = false});
+  const RaftSelectionPopoverAvatarSlot({
+    super.key,
+    this.name,
+    this.agent = false,
+  });
   final String? name;
   final bool agent;
 

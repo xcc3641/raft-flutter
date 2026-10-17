@@ -17,6 +17,9 @@ using flutter::EncodableMap;
 using flutter::EncodableValue;
 constexpr UINT kTrayCallback = WM_APP + 0x56;
 constexpr UINT kOpen = 1, kHide = 2, kQuit = 3, kIcon = 1;
+// Application system-menu commands must be below 0xF000; the low four bits
+// are reserved by WM_SYSCOMMAND.
+constexpr UINT kCheckUpdates = 0x1850, kUpdateSeparator = 0x1851;
 constexpr wchar_t kProductPrefs[] = L"Software\\Raft\\Desktop";
 constexpr wchar_t kLabPrefs[] = L"Software\\Raft\\WindowsTrayLab";
 constexpr wchar_t kTrayOwner[] = L"Raft.TrayOwner";
@@ -124,6 +127,10 @@ WindowsTray::WindowsTray(flutter::BinaryMessenger* messenger, HWND window)
       result->Success();
       RequestRaftQuit(window_);
     } else if (call.method_name() == "dispose") {
+      *alive_ = false;
+      commands_ready_ = false;
+      update_pending_ = false;
+      RemoveUpdateMenu();
       RemoveIcon();
       // A retired optional bridge must never leave a live process unreachable.
       if (!quitting_ && !IsWindowVisible(window_)) Present();
@@ -135,7 +142,9 @@ WindowsTray::WindowsTray(flutter::BinaryMessenger* messenger, HWND window)
 }
 
 WindowsTray::~WindowsTray() {
+  *alive_ = false;
   channel_->SetMethodCallHandler(nullptr);
+  RemoveUpdateMenu();
   RemoveIcon();
 }
 
@@ -179,6 +188,11 @@ void WindowsTray::Configure(const EncodableMap& args) {
   hide_label_ = Text(args, "hide", hide_label_);
   quit_label_ = Text(args, "quit", quit_label_);
   unread_label_ = Text(args, "unread", unread_label_);
+  update_label_ = Text(args, "checkUpdates", update_label_);
+  update_failed_label_ = Text(args, "updateFailed", update_failed_label_);
+  if (!commands_ready_) alive_ = std::make_shared<bool>(true);
+  commands_ready_ = true;
+  UpdateSystemMenu();
   if (available_) UpdateIcon(); else AddIcon();
 }
 
@@ -313,6 +327,8 @@ void WindowsTray::ShowMenu(POINT point) {
   AppendMenuW(menu, MF_STRING, kOpen, open_label_.c_str());
   SetMenuDefaultItem(menu, kOpen, FALSE);
   if (IsWindowVisible(window_)) AppendMenuW(menu, MF_STRING, kHide, hide_label_.c_str());
+  AppendMenuW(menu, MF_STRING | (update_pending_ ? MF_GRAYED : MF_ENABLED),
+      kCheckUpdates, update_label_.c_str());
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kQuit, quit_label_.c_str());
   SetForegroundWindow(window_);
@@ -322,8 +338,61 @@ void WindowsTray::ShowMenu(POINT point) {
   PostMessageW(window_, WM_NULL, 0, 0);
   if (selected == kOpen) Present();
   else if (selected == kHide) Hide();
+  else if (selected == kCheckUpdates) CheckForUpdates();
   else if (selected == kQuit) RequestRaftQuit(window_);
   else { auto data = Data(window_); Shell_NotifyIconW(NIM_SETFOCUS, &data); }
+}
+
+void WindowsTray::UpdateSystemMenu() {
+  if (!commands_ready_) return;
+  HMENU menu = GetSystemMenu(window_, FALSE);
+  if (!menu) return;
+  const UINT flags = MF_BYCOMMAND | MF_STRING |
+      (update_pending_ ? MF_GRAYED : MF_ENABLED);
+  if (GetMenuState(menu, kCheckUpdates, MF_BYCOMMAND) == static_cast<UINT>(-1)) {
+    InsertMenuW(menu, SC_CLOSE, MF_BYCOMMAND | MF_SEPARATOR,
+        kUpdateSeparator, nullptr);
+    InsertMenuW(menu, kUpdateSeparator, flags, kCheckUpdates, update_label_.c_str());
+  } else {
+    ModifyMenuW(menu, kCheckUpdates, flags, kCheckUpdates, update_label_.c_str());
+  }
+  DrawMenuBar(window_);
+}
+
+void WindowsTray::RemoveUpdateMenu() {
+  if (HMENU menu = GetSystemMenu(window_, FALSE)) {
+    DeleteMenu(menu, kCheckUpdates, MF_BYCOMMAND);
+    DeleteMenu(menu, kUpdateSeparator, MF_BYCOMMAND);
+    DrawMenuBar(window_);
+  }
+}
+
+void WindowsTray::CheckForUpdates() {
+  if (!commands_ready_ || update_pending_ || quitting_) return;
+  update_pending_ = true;
+  UpdateSystemMenu();
+  Present();
+  const auto alive = alive_;
+  const auto finish = [this, alive](bool started) {
+    // A method reply can arrive after this window's bridge has been retired.
+    if (!*alive || !commands_ready_) return;
+    update_pending_ = false;
+    UpdateSystemMenu();
+    if (started || quitting_) return;
+    const int choice = MessageBoxW(window_, update_failed_label_.c_str(),
+        update_label_.c_str(), MB_RETRYCANCEL | MB_ICONERROR);
+    if (*alive && commands_ready_ && !quitting_ && choice == IDRETRY) {
+      PostMessageW(window_, WM_SYSCOMMAND, kCheckUpdates, 0);
+    }
+  };
+  auto result = std::make_unique<flutter::MethodResultFunctions<EncodableValue>>(
+      [finish](const EncodableValue* value) {
+        const auto outcome = value ? std::get_if<std::string>(value) : nullptr;
+        finish(outcome && (*outcome == "started" || *outcome == "openedReleasePage"));
+      },
+      [finish](const std::string&, const std::string&, const EncodableValue*) { finish(false); },
+      [finish]() { finish(false); });
+  channel_->InvokeMethod("checkForUpdates", nullptr, std::move(result));
 }
 
 EncodableMap WindowsTray::State() const {
@@ -334,6 +403,9 @@ EncodableMap WindowsTray::State() const {
 }
 
 std::optional<LRESULT> WindowsTray::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
+  if (message == WM_SYSCOMMAND && (wparam & 0xFFF0) == kCheckUpdates) {
+    CheckForUpdates(); return 0;
+  }
   if (present_message_ && message == present_message_ && initialized_ && !quitting_) {
     Present(); return 0;
   }

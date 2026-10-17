@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -152,6 +153,7 @@ class RaftPresentedRoute<T> extends ModalBottomSheetRoute<T> {
     required ShapeBorder sheetShape,
     String? label,
     RouteSettings? settings,
+    bool dismissible = true,
     double dialogMaxWidth = 560,
     double? dialogMaxHeight,
     bool dialogFillsHeight = false,
@@ -168,6 +170,7 @@ class RaftPresentedRoute<T> extends ModalBottomSheetRoute<T> {
          sheetShape: sheetShape,
          label: label,
          settings: settings,
+         dismissible: dismissible,
          dialogMaxWidth: dialogMaxWidth,
          dialogMaxHeight: dialogMaxHeight,
          dialogFillsHeight: dialogFillsHeight,
@@ -186,6 +189,7 @@ class RaftPresentedRoute<T> extends ModalBottomSheetRoute<T> {
     required ShapeBorder sheetShape,
     String? label,
     super.settings,
+    required bool dismissible,
     required this.dialogMaxWidth,
     required this.dialogMaxHeight,
     required this.dialogFillsHeight,
@@ -196,6 +200,7 @@ class RaftPresentedRoute<T> extends ModalBottomSheetRoute<T> {
          builder: _sheetBuilder.call,
          capturedThemes: capturedThemes,
          barrierLabel: label ?? 'Dismiss',
+         isDismissible: dismissible,
          isScrollControlled: true,
          useSafeArea: true,
          // A fixed sheet (an editor) is dragged as a whole by the framework's
@@ -270,20 +275,13 @@ class RaftPresentedRoute<T> extends ModalBottomSheetRoute<T> {
                 child: RaftSheetScope(scrollController: null, child: body),
               ),
             )
-          // ignore: raft_lints/avoid_raw_bottom_sheet -- the sheet's detents and nested-scroll coordination come from the framework
-          : DraggableScrollableSheet(
-              expand: false,
-              initialChildSize: sheetInitialSize,
-              minChildSize: .25,
-              maxChildSize: RaftSheetMetrics.largeDetent,
-              snap: true,
-              snapSizes: [
-                if (sheetInitialSize < RaftSheetMetrics.largeDetent)
-                  sheetInitialSize,
-                RaftSheetMetrics.largeDetent,
-              ],
-              builder: (context, controller) =>
-                  RaftSheetScope(scrollController: controller, child: body),
+          : _DetentSheet(
+              initialSize: sheetInitialSize,
+              builder: (controller, drag) => RaftSheetScope(
+                scrollController: controller,
+                pointerDrag: drag,
+                child: body,
+              ),
             ),
     );
   }
@@ -357,6 +355,135 @@ class RaftPresentedRoute<T> extends ModalBottomSheetRoute<T> {
   }
 }
 
+/// The scrolling sheet: draggable detents (the opening size and the large
+/// one) with one rule for closing it. A drag down to the bottom is a request
+/// to close, answered the way Back and Esc are: [Navigator.maybePop]. A route
+/// that vetoes the pop (`PopScope(canPop: false)`, a form with unsaved input)
+/// hears `didPop: false` and the sheet slides back to its detent; the framework
+/// would close it with a raw `Navigator.pop` instead.
+class _DetentSheet extends StatefulWidget {
+  const _DetentSheet({required this.initialSize, required this.builder});
+  final double initialSize;
+  final Widget Function(ScrollController controller, RaftSheetPointerDrag drag)
+  builder;
+
+  @override
+  State<_DetentSheet> createState() => _DetentSheetState();
+}
+
+class _DetentSheetState extends State<_DetentSheet>
+    implements RaftSheetPointerDrag {
+  final controller = DraggableScrollableController();
+  bool asking = false;
+
+  /// The height the sheet's sizes are fractions of.
+  double extentHeight = 0;
+  static const _minSize = .25;
+
+  List<double> get snapSizes => [
+    if (widget.initialSize < RaftSheetMetrics.largeDetent) widget.initialSize,
+    RaftSheetMetrics.largeDetent,
+  ];
+
+  @override
+  void update(double dy) {
+    if (!controller.isAttached || extentHeight <= 0) return;
+    // Held just above the bottom: reaching it is a request to close, and
+    // that is asked once, when the drag ends.
+    controller.jumpTo(
+      (controller.size - dy / extentHeight).clamp(
+        _minSize + .01,
+        RaftSheetMetrics.largeDetent,
+      ),
+    );
+  }
+
+  @override
+  void end(double velocityDy) {
+    if (!controller.isAttached) return;
+    final size = controller.size;
+    // Flung down, or let go below half the opening size: a request to close,
+    // answered the way a finger's drag to the bottom is.
+    if (velocityDy > 700 || size < widget.initialSize / 2) {
+      // Reaching the bottom asks the route (see [onExtent]).
+      unawaited(
+        controller.animateTo(
+          _minSize,
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+        ),
+      );
+      return;
+    }
+    final target = velocityDy < -700
+        ? RaftSheetMetrics.largeDetent
+        : snapSizes.reduce(
+            (a, b) => (a - size).abs() <= (b - size).abs() ? a : b,
+          );
+    unawaited(
+      controller.animateTo(
+        target,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  bool onExtent(DraggableScrollableNotification n) {
+    if (n.extent > n.minExtent + .001) return false;
+    close();
+    return false;
+  }
+
+  void close() {
+    if (asking || !mounted) return;
+    asking = true;
+    final route = ModalRoute.of(context);
+    Navigator.of(context).maybePop().then((_) {
+      asking = false;
+      // Still open: the route said no. Back to the detent it was opened at.
+      if (mounted && route != null && route.isActive && controller.isAttached) {
+        unawaited(
+          controller.animateTo(
+            widget.initialSize,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          ),
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) {
+      extentHeight = box.maxHeight;
+      return NotificationListener<DraggableScrollableNotification>(
+        onNotification: onExtent,
+        // ignore: raft_lints/avoid_raw_bottom_sheet -- the sheet's detents and nested-scroll coordination come from the framework
+        child: DraggableScrollableSheet(
+          controller: controller,
+          expand: false,
+          initialChildSize: widget.initialSize,
+          minChildSize: _minSize,
+          maxChildSize: RaftSheetMetrics.largeDetent,
+          snap: true,
+          snapSizes: snapSizes,
+          // The framework closes at the bottom with a raw pop; this sheet asks.
+          shouldCloseOnMinExtent: false,
+          builder: (context, scroll) => widget.builder(scroll, this),
+        ),
+      );
+    },
+  );
+}
+
 /// Lets the route's super constructor take a builder that needs the route.
 class _SheetBuilder {
   Widget Function(BuildContext)? target;
@@ -369,6 +496,8 @@ Future<T?> showRaftPresented<T>(
   required RaftPresentationPolicy policy,
   required Widget Function(BuildContext context, RaftSurfaceForm form) content,
   String? label,
+  RouteSettings? routeSettings,
+  bool dismissible = true,
   double dialogMaxWidth = 560,
   double? dialogMaxHeight,
   bool dialogFillsHeight = false,
@@ -382,6 +511,8 @@ Future<T?> showRaftPresented<T>(
       policy: policy,
       content: content,
       label: label,
+      routeSettings: routeSettings,
+      dismissible: dismissible,
       dialogMaxWidth: dialogMaxWidth,
       dialogMaxHeight: dialogMaxHeight,
       dialogFillsHeight: dialogFillsHeight,
@@ -398,6 +529,8 @@ RaftPresentedRoute<T> raftPresentedRoute<T>(
   required RaftPresentationPolicy policy,
   required Widget Function(BuildContext context, RaftSurfaceForm form) content,
   String? label,
+  RouteSettings? routeSettings,
+  bool dismissible = true,
   double dialogMaxWidth = 560,
   double? dialogMaxHeight,
   bool dialogFillsHeight = false,
@@ -417,6 +550,8 @@ RaftPresentedRoute<T> raftPresentedRoute<T>(
     panelColor: t.panel,
     sheetShape: RaftSheetMetrics.shape(t),
     label: label,
+    settings: routeSettings,
+    dismissible: dismissible,
     dialogMaxWidth: dialogMaxWidth,
     dialogMaxHeight: dialogMaxHeight,
     dialogFillsHeight: dialogFillsHeight,

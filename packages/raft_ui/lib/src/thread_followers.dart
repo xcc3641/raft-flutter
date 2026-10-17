@@ -2,6 +2,8 @@
 // variant: the "N agents following" trigger and its popover with the follower
 // rows (remove / retry / loading / empty). The app adapter owns the roster,
 // removal, undo and profile opening.
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'anchored_popup.dart';
@@ -351,7 +353,7 @@ class _FollowerRowState extends State<_FollowerRow> {
     final t = RaftTokens.of(context);
     final r = widget.row;
     final remove = r.removeLabel;
-    return MouseRegion(
+    return RaftHoverRegion(
       onEnter: (_) => setState(() => hovered = true),
       onExit: (_) => setState(() => hovered = false),
       child: Container(

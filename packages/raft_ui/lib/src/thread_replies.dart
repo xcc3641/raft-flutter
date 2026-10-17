@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'control_typography.dart';
@@ -307,7 +309,7 @@ class _RaftThreadRepliesBadgeState extends State<RaftThreadRepliesBadge> {
     }
     return Semantics(
       button: true,
-      child: MouseRegion(
+      child: RaftHoverRegion(
         cursor: widget.onPressed == null
             ? MouseCursor.defer
             : SystemMouseCursors.click,

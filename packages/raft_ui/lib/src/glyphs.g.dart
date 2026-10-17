@@ -359,6 +359,9 @@ enum RaftGlyph {
   /// lucide `menu` 0.575.0.
   /// Legacy Flutter name; no Web import uses it.
   menu(_menuV0_575_0, 'menu', '0.575.0'),
+  /// lucide `message-circle` 0.575.0.
+  /// Web: components/thread/ThreadsInbox.tsx:17.
+  messageCircle(_messageCircleV0_575_0, 'message-circle', '0.575.0'),
   /// lucide `message-circle-off` 0.575.0.
   /// Web: components/message/MessageItem.tsx:7 (+1 more).
   messageCircleOff(_messageCircleOffV0_575_0, 'message-circle-off', '0.575.0'),
@@ -1244,6 +1247,10 @@ const _messageCirclePlusV0_575_0 = <_LucideNode>[
   _LucideNode.path('M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719'),
   _LucideNode.path('M8 12h8'),
   _LucideNode.path('M12 8v8'),
+];
+// message-circle.js lucide-react 0.575.0 sha256 a302f35aa811d912
+const _messageCircleV0_575_0 = <_LucideNode>[
+  _LucideNode.path('M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719'),
 ];
 // message-square-check.js lucide-react 0.575.0 sha256 eaf2570a97382302
 const _messageSquareCheckV0_575_0 = <_LucideNode>[

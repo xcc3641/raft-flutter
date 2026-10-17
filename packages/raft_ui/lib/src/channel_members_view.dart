@@ -5,6 +5,8 @@
 // AvatarSlot compact-list + description tooltip, pinned "Create a New Agent"
 // entry, "Add selected (N)"). The app adapter owns roster data, selection and
 // commands.
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'create_channel_view.dart';
@@ -516,7 +518,7 @@ class _CandidateRowState extends State<_CandidateRow> {
     return Semantics(
       button: true,
       toggled: widget.checked,
-      child: MouseRegion(
+      child: RaftHoverRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => hovered = true),
         onExit: (_) => setState(() => hovered = false),
@@ -1156,7 +1158,7 @@ class _MemberSectionState extends State<_MemberSection> {
             height: brutal ? 24 : 32,
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: brutal ? 8 : 0),
-              child: MouseRegion(
+              child: RaftHoverRegion(
                 cursor: SystemMouseCursors.click,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
@@ -1312,7 +1314,7 @@ class _MemberPageRowState extends State<_MemberPageRow> {
     final grows = RaftScaled.grows(context);
     final stacked = grows ? trailing : null;
     if (grows) trailing = null;
-    return MouseRegion(
+    return RaftHoverRegion(
       key: r.testId == null ? null : ValueKey<String>(r.testId!),
       onEnter: (_) => setState(() => hovered = true),
       onExit: (_) => setState(() => hovered = false),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../data/phone_stack.dart';
@@ -123,6 +125,29 @@ class _MobileWorkspacePagesState extends State<MobileWorkspacePages> {
   late List<_MobilePageEntry> entries = reconcile(const []);
   bool rootChanged = false;
 
+  /// Set while the first frames of a workspace that mounted behind another
+  /// route settle (the window was narrowed behind the expanded composer
+  /// editor). A Navigator takes the focus when it mounts; excluding its
+  /// subtree makes that a no-op so the route in front keeps its focus, and
+  /// the exclusion lifts once the mount-time requests are over.
+  bool mountedCovered = false, mountChecked = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (mountChecked) return;
+    mountChecked = true;
+    if (!(ModalRoute.isCurrentOf(context) ?? true)) {
+      mountedCovered = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        // ignore: raft_lints/avoid_unreviewed_idle_work -- Runs once per mount, only when the workspace mounted behind another route; it lifts the exclusion and schedules nothing else.
+        scheduleMicrotask(() {
+          if (mounted) setState(() => mountedCovered = false);
+        });
+      });
+    }
+  }
+
   List<_MobilePageEntry> reconcile(List<_MobilePageEntry> previous) {
     final stack = mobilePageStack(widget.navigation);
     final root = widget.navigation.mobileRootTabOf(stack.first) != null;
@@ -172,25 +197,31 @@ class _MobileWorkspacePagesState extends State<MobileWorkspacePages> {
     final parentCurrent = ModalRoute.isCurrentOf(context) ?? true;
     return NavigatorPopHandler<void>(
       onPopWithResult: (_) => navigator.currentState?.maybePop(),
-      child: Navigator(
-        key: navigator,
-        transitionDelegate: _MobileTransitionDelegate(
-          skip: rootChanged || MediaQuery.disableAnimationsOf(context),
-        ),
-        pages: [
-          for (final entry in entries)
-            MaterialPage<void>(
-              key: ValueKey(entry.id),
-              canPop: parentCurrent,
-              allowSnapshotting: false,
-              child: Builder(
-                builder: (context) => page(context, entry.location),
+      child: ExcludeFocus(
+        excluding: mountedCovered,
+        child: Navigator(
+          key: navigator,
+          // Pages pushed while a route covers the whole workspace must not take
+          // the focus from that route.
+          requestFocus: parentCurrent,
+          transitionDelegate: _MobileTransitionDelegate(
+            skip: rootChanged || MediaQuery.disableAnimationsOf(context),
+          ),
+          pages: [
+            for (final entry in entries)
+              MaterialPage<void>(
+                key: ValueKey(entry.id),
+                canPop: parentCurrent,
+                allowSnapshotting: false,
+                child: Builder(
+                  builder: (context) => page(context, entry.location),
+                ),
               ),
-            ),
-        ],
-        onDidRemovePage: (page) {
-          if (page.key == ValueKey(entries.last.id)) widget.onBack();
-        },
+          ],
+          onDidRemovePage: (page) {
+            if (page.key == ValueKey(entries.last.id)) widget.onBack();
+          },
+        ),
       ),
     );
   }

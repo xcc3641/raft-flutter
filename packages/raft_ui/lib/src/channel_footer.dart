@@ -2,6 +2,8 @@
 // `ConversationPanelFooter` chain): the bordered footer frame shared by the
 // archived notice, the read-only banners and the Join CTA, and the joint
 // over-limit grace banner above the composer. The app decides which one shows.
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'raft_underline.dart';
@@ -109,7 +111,7 @@ class RaftChannelArchivedFooter extends StatelessWidget {
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: onLink,
-              child: MouseRegion(
+              child: RaftHoverRegion(
                 cursor: SystemMouseCursors.click,
                 child: RaftUnderlinedText(
                   raftText(context, linkLabel!),
@@ -163,7 +165,9 @@ class RaftChannelJoinFooter extends StatelessWidget {
             fontWeight: FontWeight.w700,
             label:
                 label ??
-                raftFormat(context, 'Join #{channel}', {'channel': channelName}),
+                raftFormat(context, 'Join #{channel}', {
+                  'channel': channelName,
+                }),
             onPressed: onJoin,
           ),
           if (explanation != null)

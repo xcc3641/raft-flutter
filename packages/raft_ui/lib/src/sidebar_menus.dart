@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'dart:math' as math;
 import 'dart:ui' show SemanticsRole;
 
@@ -214,7 +216,7 @@ class _RaftSidebarContextMenuState extends State<RaftSidebarContextMenu> {
                   ),
             ),
           ),
-          RaftSidebarMenuItem() => MouseRegion(
+          RaftSidebarMenuItem() => RaftHoverRegion(
             onEnter: (_) {
               if (primary) setOpen(entry.submenu);
               entry.onHover?.call();

@@ -8,6 +8,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import 'form_presentation.dart';
+
 import 'package:flutter/foundation.dart';
 
 import 'banner.dart';
@@ -292,6 +295,7 @@ class _RaftReportIssueDialogState extends State<RaftReportIssueDialog> {
     return RaftDialogCard(
       key: const ValueKey('report-issue-dialog'),
       title: 'Report Issue',
+      footerGap: 0,
       titleGlyph: RaftGlyph.bug,
       maxWidth: 384,
       onClose: widget.onClose,
@@ -529,40 +533,34 @@ class _RaftReportIssueDialogState extends State<RaftReportIssueDialog> {
                 bold: true,
               ),
             ),
-          Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 12,
-            runSpacing: 8,
-            children: [
-              RaftRecipeButton(
-                key: const ValueKey('report-issue-cancel'),
-                label: tr('Cancel'),
-                variant: RaftButtonRecipeVariant.outline,
-                size: RaftButtonRecipeSize.sm,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                textStep: RaftTextSteps.sm,
-                disabled: loading,
-                disabledOpacity: .5,
-                onPressed: widget.onClose,
-              ),
-              RaftRecipeButton(
-                key: const ValueKey('report-issue-submit'),
-                label: tr(loading ? 'Submitting…' : 'Report Issue'),
-                variant: RaftButtonRecipeVariant.accent,
-                size: RaftButtonRecipeSize.sm,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                textStep: RaftTextSteps.sm,
-                disabled: loading || !consented,
-                disabledOpacity: .5,
-                onPressed: submit,
-              ),
-            ],
+        ],
+      ),
+      footer: Wrap(
+        alignment: WrapAlignment.end,
+        spacing: 12,
+        runSpacing: 8,
+        children: [
+          RaftRecipeButton(
+            key: const ValueKey('report-issue-cancel'),
+            label: tr('Cancel'),
+            variant: RaftButtonRecipeVariant.outline,
+            size: RaftButtonRecipeSize.sm,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            textStep: RaftTextSteps.sm,
+            disabled: loading,
+            disabledOpacity: .5,
+            onPressed: raftExplicitClose(context, widget.onClose),
+          ),
+          RaftRecipeButton(
+            key: const ValueKey('report-issue-submit'),
+            label: tr(loading ? 'Submitting…' : 'Report Issue'),
+            variant: RaftButtonRecipeVariant.accent,
+            size: RaftButtonRecipeSize.sm,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            textStep: RaftTextSteps.sm,
+            disabled: loading || !consented,
+            disabledOpacity: .5,
+            onPressed: submit,
           ),
         ],
       ),

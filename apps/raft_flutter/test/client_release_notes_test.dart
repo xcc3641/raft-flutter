@@ -166,4 +166,283 @@ void main() {
       expect(requests, hasLength(1));
     });
   });
+
+  group('refresh points', () {
+    late MemoryStorage storage;
+    late DateTime now;
+    late List<Uri> requests;
+    var body = _page([_item('v0.1.0+6'), _item('v0.1.0+5')]);
+    Future<String?> Function() respond = () async => body;
+
+    ClientReleaseNotes make({int? appBuild = 21}) => ClientReleaseNotes(
+      storage: storage,
+      clock: () => now,
+      appBuild: appBuild,
+      fetch: (url) {
+        requests.add(url);
+        return respond();
+      },
+    );
+
+    setUp(() {
+      storage = MemoryStorage();
+      now = DateTime(2026, 10, 13, 9);
+      requests = [];
+      body = _page([_item('v0.1.0+6'), _item('v0.1.0+5')]);
+      respond = () async => body;
+    });
+
+    test('a copy fetched by an older app build is refreshed even when '
+        'young', () async {
+      await make(appBuild: 20).load();
+      expect(requests, hasLength(1));
+      now = now.add(const Duration(minutes: 5));
+      await make(appBuild: 20).load();
+      expect(requests, hasLength(1));
+      // The app was updated: same copy, new build.
+      await make(appBuild: 21).load();
+      expect(requests, hasLength(2));
+      await make(appBuild: 21).load();
+      expect(requests, hasLength(2));
+    });
+
+    test('a copy without a recorded build is refreshed once', () async {
+      storage.values[ClientReleaseNotes.storageKey] = jsonEncode({
+        'fetchedAt': now.millisecondsSinceEpoch,
+        'body': body,
+      });
+      await make().load();
+      expect(requests, hasLength(1));
+      await make().load();
+      expect(requests, hasLength(1));
+    });
+
+    test('a copy without the required release is refetched', () async {
+      body = _page([_item('v0.1.0+5')]);
+      await make().load();
+      body = _page([_item('v0.1.0+6'), _item('v0.1.0+5')]);
+      final notes = await make().load(requireTag: 'v0.1.0+6');
+      expect(notes.map((n) => n.id), ['v0.1.0+6', 'v0.1.0+5']);
+      expect(requests, hasLength(2));
+      await make().load(requireTag: 'v0.1.0+6');
+      expect(requests, hasLength(2));
+    });
+
+    test('offline, a copy without the required release is an error', () async {
+      body = _page([_item('v0.1.0+5')]);
+      await make().load();
+      respond = () async => throw StateError('offline');
+      await expectLater(make().load(requireTag: 'v0.1.0+6'), throwsStateError);
+      // Without a requirement the old copy still serves.
+      expect((await make().load(force: true)).single.id, 'v0.1.0+5');
+    });
+
+    test('cached() reads the copy without a request', () async {
+      expect(await make().cached(), isNull);
+      await make().load();
+      requests.clear();
+      expect((await make().cached())!.map((n) => n.id), [
+        'v0.1.0+6',
+        'v0.1.0+5',
+      ]);
+      expect(requests, isEmpty);
+    });
+
+    test('refresh() always fetches and reports a failure', () async {
+      await make().load();
+      requests.clear();
+      body = _page([_item('v0.1.0+7'), _item('v0.1.0+6')]);
+      expect((await make().refresh()).first.id, 'v0.1.0+7');
+      expect(requests, hasLength(1));
+      respond = () async => throw StateError('offline');
+      await expectLater(make().refresh(), throwsStateError);
+      // The stored copy is untouched by the failure.
+      expect((await make().cached())!.first.id, 'v0.1.0+7');
+    });
+
+    test('refresh(minAge) reuses a download made moments ago', () async {
+      final notes = make();
+      await notes.refresh();
+      now = now.add(const Duration(seconds: 10));
+      await notes.refresh(minAge: const Duration(seconds: 30));
+      expect(requests, hasLength(1));
+      now = now.add(const Duration(seconds: 30));
+      await notes.refresh(minAge: const Duration(seconds: 30));
+      expect(requests, hasLength(2));
+    });
+
+    test('concurrent refreshes share one request', () async {
+      final notes = make();
+      await Future.wait([notes.refresh(), notes.refresh()]);
+      expect(requests, hasLength(1));
+    });
+  });
+
+  group('releasesBetween', () {
+    List<RaftReleaseNote> notes(Iterable<String> tags) => [
+      for (final tag in tags)
+        RaftReleaseNote(
+          id: tag,
+          date: '2026-10-13',
+          version: tag.substring(1).split('+').first,
+        ),
+    ];
+
+    test('is the offered release down to, not including, the installed '
+        'one', () {
+      final all = notes([
+        'v0.1.0+9',
+        'v0.1.0+8',
+        'v0.1.0+7',
+        'v0.1.0+6',
+        'v0.1.0+5',
+      ]);
+      expect(
+        releasesBetween(
+          all,
+          offeredTag: 'v0.1.0+8',
+          installedTag: 'v0.1.0+6',
+          installedVersion: '0.1.0',
+        ).map((n) => n.id),
+        ['v0.1.0+8', 'v0.1.0+7'],
+      );
+    });
+
+    test('without the installed tag it is the offered release and any '
+        'higher app version', () {
+      final all = notes(['v0.2.0+1', 'v0.1.1+1', 'v0.1.0+9', 'v0.1.0+8']);
+      expect(
+        releasesBetween(
+          all,
+          offeredTag: 'v0.2.0+1',
+          installedTag: null,
+          installedVersion: '0.1.0',
+        ).map((n) => n.id),
+        ['v0.2.0+1', 'v0.1.1+1'],
+      );
+      expect(
+        releasesBetween(
+          all,
+          offeredTag: 'v0.1.0+9',
+          installedTag: '',
+          installedVersion: '0.1.0',
+        ).map((n) => n.id),
+        ['v0.1.0+9'],
+      );
+    });
+
+    test('is empty when the offered release has no notes, and skips '
+        'retracted ones', () {
+      final all = [
+        ...notes(['v0.1.0+9']),
+        const RaftReleaseNote(
+          id: 'v0.1.0+8',
+          date: '2026-10-13',
+          version: '0.1.0',
+          retracted: true,
+        ),
+        ...notes(['v0.1.0+7']),
+      ];
+      expect(
+        releasesBetween(
+          all,
+          offeredTag: 'v0.1.0+10',
+          installedTag: 'v0.1.0+7',
+          installedVersion: '0.1.0',
+        ),
+        isEmpty,
+      );
+      expect(
+        releasesBetween(
+          all,
+          offeredTag: 'v0.1.0+9',
+          installedTag: 'v0.1.0+7',
+          installedVersion: '0.1.0',
+        ).map((n) => n.id),
+        ['v0.1.0+9'],
+      );
+    });
+  });
+
+  group('markInstalled', () {
+    List<RaftReleaseNote> notes(List<(String, String)> rows) => [
+      for (final (tag, version) in rows)
+        RaftReleaseNote(id: tag, date: '2026-10-13', version: version),
+    ];
+    List<String> flags(List<RaftReleaseNote> list) => [
+      for (final n in list)
+        n.current
+            ? 'current'
+            : n.isNew
+            ? 'new'
+            : '-',
+    ];
+
+    test('the installed tag is Current and newer releases are New', () {
+      final all = notes([
+        ('v0.2.0+1', '0.2.0'),
+        ('v0.1.0+9', '0.1.0'),
+        ('v0.1.0+8', '0.1.0'),
+        ('v0.1.0+7', '0.1.0'),
+      ]);
+      expect(
+        flags(
+          markInstalled(
+            all,
+            installedTag: 'v0.1.0+8',
+            installedVersion: '0.1.0',
+          ),
+        ),
+        ['new', 'new', 'current', '-'],
+      );
+    });
+
+    test('a retracted newer release is not New', () {
+      final all = [
+        const RaftReleaseNote(
+          id: 'v1+2',
+          date: 'd',
+          version: '1',
+          retracted: true,
+        ),
+        ...notes([('v1+1', '1')]),
+      ];
+      expect(
+        flags(markInstalled(all, installedTag: 'v1+1', installedVersion: '1')),
+        ['-', 'current'],
+      );
+    });
+
+    test('without the tag, the only release of the app version is the '
+        'installed one', () {
+      final all = notes([
+        ('v0.2.0+1', '0.2.0'),
+        ('v0.1.0+9', '0.1.0'),
+        ('v0.1.0-rc+1', '0.1.0-rc'),
+      ]);
+      expect(
+        flags(markInstalled(all, installedTag: '', installedVersion: '0.1.0')),
+        ['new', 'current', '-'],
+      );
+    });
+
+    test('when the installed release cannot be found the list is unchanged '
+        '(the newest stays Current)', () {
+      final all = parseClientReleaseNotes(
+        _page([_item('v0.1.0+9'), _item('v0.1.0+8')]),
+      );
+      for (final (tag, version) in [
+        (null, '0.1.0'),
+        ('', '0.1.0'),
+        ('v9+1', '9.0.0'),
+        ('', ''),
+      ]) {
+        expect(
+          markInstalled(all, installedTag: tag, installedVersion: version),
+          same(all),
+        );
+      }
+      expect(all.map((n) => n.current), [true, false]);
+    });
+  });
 }

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../data/channel_activity_scope.dart';
+
 /// Mounted Web request contracts, pinned to source 26f77ef.
 class ResourceSender {
   const ResourceSender(this.id, this.type, this.label, {this.handle = ''});
@@ -126,14 +128,20 @@ class ResourceFilters {
     int offset = 0,
     int limit = 30,
     String? filter,
-  }) => {
-    'limit': limit,
-    'offset': offset,
-    'sort': direction,
-    if (text.trim().isNotEmpty) 'q': text.trim(),
-    if (channelId != null) 'channelId': channelId,
-    'filter': ?filter,
-  };
+    String? activityView,
+  }) {
+    final base = <String, dynamic>{
+      'limit': limit,
+      'offset': offset,
+      'sort': direction,
+      if (text.trim().isNotEmpty) 'q': text.trim(),
+      if (channelId != null) 'channelId': channelId,
+      'filter': ?filter,
+    };
+    return activityView == null
+        ? base
+        : ChannelActivityScope(activityView).parameters(base);
+  }
 }
 
 ({String path, Map<String, dynamic> data})? activityMutation(

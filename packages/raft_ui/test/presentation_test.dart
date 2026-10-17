@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -477,6 +478,199 @@ void main() {
         tester.getRect(find.byKey(const ValueKey('sheet-footer'))).bottom,
         lessThanOrEqualTo(phone.height - keyboard),
       );
+    });
+
+    // A desktop window narrowed to phone width: scroll views ignore mouse
+    // drags on desktop, so the handle and the header move the sheet
+    // themselves (Kevin, a mouse drag on the handle did nothing).
+    testWidgets(
+      'a mouse drag on the handle moves the sheet and lets it settle',
+      (tester) async {
+        _size(tester, phone);
+        await tester.pumpWidget(
+          _app(
+            policy: RaftPresentationPolicy.form,
+            content: tall,
+            initialSize: .6,
+          ),
+        );
+        await _open(tester);
+        final opened = tester.getTopLeft(_sheet).dy;
+        final mouse = await tester.startGesture(
+          tester.getCenter(_handle),
+          kind: PointerDeviceKind.mouse,
+        );
+        for (var i = 0; i < 10; i++) {
+          await mouse.moveBy(const Offset(0, -20));
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        expect(tester.getTopLeft(_sheet).dy, lessThan(opened - 100));
+        await mouse.up();
+        await tester.pumpAndSettle();
+        // Let go near the top: it settles at the large detent.
+        expect(
+          tester.getSize(_sheet).height,
+          closeTo(phone.height * RaftSheetMetrics.largeDetent, 2),
+        );
+        // The header is a handle too.
+        final header = await tester.startGesture(
+          tester.getCenter(find.byKey(const ValueKey('sheet-header'))),
+          kind: PointerDeviceKind.mouse,
+        );
+        for (var i = 0; i < 10; i++) {
+          await header.moveBy(const Offset(0, 20));
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        await header.up();
+        await tester.pumpAndSettle();
+        expect(
+          tester.getSize(_sheet).height,
+          lessThan(phone.height * RaftSheetMetrics.largeDetent - 100),
+        );
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    );
+
+    // The handle sits in the body's scroll view: once the body was scrolled
+    // (a chat transcript that follows its newest line), a finger on the
+    // handle scrolled the text and the sheet never grew (the Agent orb on
+    // the G100).
+    testWidgets('a finger drag on the handle moves the sheet even when the '
+        'body is scrolled', (tester) async {
+      _size(tester, phone);
+      await tester.pumpWidget(
+        _app(policy: RaftPresentationPolicy.form, content: tall, initialSize: .6),
+      );
+      await _open(tester);
+      scroll(tester).position.jumpTo(200);
+      await tester.pump();
+      final opened = tester.getTopLeft(_sheet).dy;
+      final finger = await tester.startGesture(tester.getCenter(_handle));
+      for (var i = 0; i < 10; i++) {
+        await finger.moveBy(const Offset(0, -20));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(tester.getTopLeft(_sheet).dy, lessThan(opened - 100));
+      await finger.up();
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(_sheet).height,
+        closeTo(phone.height * RaftSheetMetrics.largeDetent, 2),
+      );
+      expect(scroll(tester).position.pixels, 200);
+    });
+
+    group('closing asks the route (Back, drag and scrim alike)', () {
+      final popped = <bool>[];
+      // The same tall sheet, optionally vetoing every pop.
+      Widget guarded(BuildContext context, RaftSurfaceForm form) => PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) => popped.add(didPop),
+        child: tall(context, form),
+      );
+
+      setUp(popped.clear);
+
+      testWidgets('a drag down on a guarded sheet snaps back, says '
+          'didPop: false and stays open', (tester) async {
+        _size(tester, phone);
+        await tester.pumpWidget(
+          _app(policy: RaftPresentationPolicy.form, content: guarded),
+        );
+        await _open(tester);
+        final opened = tester.getSize(_sheet).height;
+        await tester.fling(_handle, const Offset(0, 700), 2500);
+        await tester.pumpAndSettle();
+        expect(popped, [false]);
+        expect(_sheet, findsOneWidget);
+        expect(tester.getSize(_sheet).height, closeTo(opened, 2));
+        // Asked again, answered again: the sheet keeps coming back.
+        await tester.fling(
+          find.byKey(const ValueKey('sheet-header')),
+          const Offset(0, 700),
+          2500,
+        );
+        await tester.pumpAndSettle();
+        expect(popped, [false, false]);
+        expect(_sheet, findsOneWidget);
+      });
+
+      testWidgets('a mouse drag to the bottom asks the route too', (
+        tester,
+      ) async {
+        _size(tester, phone);
+        await tester.pumpWidget(
+          _app(policy: RaftPresentationPolicy.form, content: guarded),
+        );
+        await _open(tester);
+        final opened = tester.getSize(_sheet).height;
+        final mouse = await tester.startGesture(
+          tester.getCenter(_handle),
+          kind: PointerDeviceKind.mouse,
+        );
+        for (var i = 0; i < 30; i++) {
+          await mouse.moveBy(const Offset(0, 25));
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        await mouse.up();
+        await tester.pumpAndSettle();
+        expect(popped, [false]);
+        expect(_sheet, findsOneWidget);
+        expect(tester.getSize(_sheet).height, closeTo(opened, 2));
+      }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+      testWidgets('a drag down on a sheet that allows the pop closes it, '
+          'through the same check', (tester) async {
+        _size(tester, phone);
+        final asked = <bool>[];
+        await tester.pumpWidget(
+          _app(
+            policy: RaftPresentationPolicy.form,
+            content: (context, form) => PopScope(
+              canPop: true,
+              onPopInvokedWithResult: (didPop, _) => asked.add(didPop),
+              child: tall(context, form),
+            ),
+          ),
+        );
+        await _open(tester);
+        await tester.fling(_handle, const Offset(0, 700), 2500);
+        await tester.pumpAndSettle();
+        expect(_sheet, findsNothing);
+        expect(asked, [true]);
+      });
+
+      testWidgets('a scrim tap is answered like the drag', (tester) async {
+        _size(tester, phone);
+        await tester.pumpWidget(
+          _app(policy: RaftPresentationPolicy.form, content: guarded),
+        );
+        await _open(tester);
+        await tester.tapAt(const Offset(200, 20));
+        await tester.pumpAndSettle();
+        expect(popped, [false]);
+        expect(_sheet, findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpWidget(
+          _app(policy: RaftPresentationPolicy.form, content: tall),
+        );
+        await _open(tester);
+        await tester.tapAt(const Offset(200, 20));
+        await tester.pumpAndSettle();
+        expect(_sheet, findsNothing);
+      });
+
+      testWidgets('Back is answered the same way', (tester) async {
+        _size(tester, phone);
+        await tester.pumpWidget(
+          _app(policy: RaftPresentationPolicy.form, content: guarded),
+        );
+        await _open(tester);
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+        expect(popped, [false]);
+        expect(_sheet, findsOneWidget);
+      });
     });
 
     testWidgets('brutal and elegant dark draw a handle and stay in the '

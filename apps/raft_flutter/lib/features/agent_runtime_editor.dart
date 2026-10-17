@@ -50,8 +50,9 @@ Future<RuntimeEditorConfirm?> showAgentRuntimeEditor(
 }) async {
   if (!context.mounted || !(authorized?.call() ?? true)) return null;
   final navigator = Navigator.of(context, rootNavigator: true);
-  late final RawDialogRoute<RuntimeEditorConfirm> route;
-  route = raftModalRoute<RuntimeEditorConfirm>(
+  // A form: a bottom sheet below 768, a centered dialog from 768.
+  final route = raftFormRoute<RuntimeEditorConfirm>(
+    context,
     builder: (dialogContext) => RaftModalBackdrop(
       child: AgentRuntimeEditor(
         controller: controller,
@@ -662,6 +663,22 @@ class _AgentRuntimeEditorState extends State<AgentRuntimeEditor> {
               f.definition == null ||
               !f.valuesChanged
         : saveDisabled;
+    final footer = RaftAgentDialogFooter(
+      children: [
+        RaftAgentDialogButton(
+          label: tr('Cancel'),
+          size: RaftButtonRecipeSize.md,
+          onPressed: saving ? null : () => widget.onClose(),
+        ),
+        RaftAgentDialogButton(
+          key: const ValueKey('runtime-editor-save'),
+          label: tr('Save runtime config'),
+          primary: true,
+          size: RaftButtonRecipeSize.md,
+          onPressed: disabled && !(v2Active && !v2Ready) ? null : submit,
+        ),
+      ],
+    );
     return RaftAgentDialogCard(
       key: const ValueKey('agent-runtime-editor'),
       surfaceKey: const ValueKey('agent-runtime-editor-surface'),
@@ -669,6 +686,8 @@ class _AgentRuntimeEditorState extends State<AgentRuntimeEditor> {
       plainCard: true,
       title: 'Edit runtime config',
       onClose: saving ? null : () => widget.onClose(),
+      footerGap: raftAgentSectionGap,
+      footer: footer,
       children: [
         fields,
         if (saveError != null) ...[
@@ -681,23 +700,6 @@ class _AgentRuntimeEditorState extends State<AgentRuntimeEditor> {
             bold: true,
           ),
         ],
-        const SizedBox(height: raftAgentSectionGap),
-        RaftAgentDialogFooter(
-          children: [
-            RaftAgentDialogButton(
-              label: tr('Cancel'),
-              size: RaftButtonRecipeSize.md,
-              onPressed: saving ? null : () => widget.onClose(),
-            ),
-            RaftAgentDialogButton(
-              key: const ValueKey('runtime-editor-save'),
-              label: tr('Save runtime config'),
-              primary: true,
-              size: RaftButtonRecipeSize.md,
-              onPressed: disabled && !(v2Active && !v2Ready) ? null : submit,
-            ),
-          ],
-        ),
       ],
     );
   }

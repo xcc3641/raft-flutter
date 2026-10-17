@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -522,7 +524,7 @@ class _ResizeHandleState extends State<RaftPanelResizeHandle> {
           }
           return KeyEventResult.ignored;
         },
-        child: MouseRegion(
+        child: RaftHoverRegion(
           cursor: SystemMouseCursors.resizeColumn,
           onEnter: (_) => setState(() => hovering = true),
           onExit: (_) => setState(() => hovering = false),
@@ -645,9 +647,8 @@ class RaftWorkspaceRail extends StatelessWidget {
     );
     final visualSize = recipe.itemSize;
     final footerScrolls = phone && MediaQuery.sizeOf(context).height <= 600;
-    // AppRailRoot is a CSS border box: Container reserves its border width
-    // before centering children. Explicit zero padding keeps the same padding
-    // wrapper in Elegant, preserving child state when the theme changes.
+    // Reserve the regular divider's inset on every route. Painting Activity's
+    // thinner divider must not resize the rail or recenter any of its slots.
     final divider = thinDivider
         ? recipe.border.copyWith(width: 1)
         : recipe.border;
@@ -662,8 +663,15 @@ class RaftWorkspaceRail extends StatelessWidget {
       color: recipe.background,
       border: railBorder,
       child: Container(
-        padding: EdgeInsets.zero,
-        decoration: BoxDecoration(color: recipe.background, border: railBorder),
+        width: recipe.width,
+        padding: t.brutal
+            ? EdgeInsets.only(
+                left: onRight ? recipe.border.width : 0,
+                right: onRight ? 0 : recipe.border.width,
+              )
+            : EdgeInsets.zero,
+        decoration: BoxDecoration(color: recipe.background),
+        foregroundDecoration: BoxDecoration(border: railBorder),
         child: SafeArea(
           child: Column(
             children: [

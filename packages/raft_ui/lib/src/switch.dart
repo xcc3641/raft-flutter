@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'design_primitives.dart';
+import 'hover_region.dart';
 import 'primitive_tokens.dart';
 import 'theme.dart';
 
@@ -147,7 +148,8 @@ class _RaftSwitchState extends State<RaftSwitch> {
         enabled: enabled,
         onFocusChange: (v) => setState(() => focused = v),
         onShowFocusHighlight: (v) => setState(() => showFocus = v),
-        onShowHoverHighlight: (v) => setState(() => hovered = v),
+        onShowHoverHighlight: (v) =>
+            setState(() => hovered = v && RaftHoverScope.of(context)),
         mouseCursor: enabled
             ? SystemMouseCursors.click
             : SystemMouseCursors.forbidden,
@@ -201,7 +203,7 @@ class _RaftSwitchState extends State<RaftSwitch> {
                       progress,
                       widget.value,
                       !enabled,
-                      hovered,
+                      hovered && RaftHoverScope.of(context),
                       enabled && showFocus,
                     ),
                   ),

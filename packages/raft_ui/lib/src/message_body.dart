@@ -1,3 +1,4 @@
+import 'hover_region.dart';
 import 'mermaid_toolbar_recipe.dart';
 import 'markdown_autolink.dart';
 import 'message_reference_chip.dart';
@@ -1976,7 +1977,7 @@ class _RaftCodeBlockState extends State<RaftCodeBlock> {
     final t = RaftTokens.of(context);
     final block = Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: MouseRegion(
+      child: RaftHoverRegion(
         onEnter: (_) => setState(() => hovered = true),
         onExit: (_) => setState(() => hovered = false),
         child: Focus(
@@ -1994,7 +1995,7 @@ class _RaftCodeBlockState extends State<RaftCodeBlock> {
                       // index.css `.r-code-copy`: hidden; row hover or
                       // focus-visible .55; its own hover or copied 1;
                       // `@media (hover: none)` (touch) always .55.
-                      child: MouseRegion(
+                      child: RaftHoverRegion(
                         onEnter: (_) => setState(() => buttonHovered = true),
                         onExit: (_) => setState(() => buttonHovered = false),
                         child: Opacity(

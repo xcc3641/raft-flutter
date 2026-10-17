@@ -1296,6 +1296,48 @@
    "states": [
     {
      "state": "loading",
+     "variant": "DMs scoped first read / background refresh",
+     "web": "yes",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "gap",
+     "justification": "Web 1.21.12 ThreadsInbox loads scope=dms lazily and retains rows during refresh. Phone/desktop widget tests cover this contract; a matched React/Flutter DMs capture has not been added.",
+     "size": "S",
+     "gapKind": "case-missing"
+    },
+    {
+     "state": "empty",
+     "variant": "DMs and selected source",
+     "web": "yes",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "gap",
+     "justification": "The Web 1.21.12 DMs empty copy and selected-source override are ported and widget-tested in English/Chinese. No matched DMs visual case is available yet.",
+     "size": "S",
+     "gapKind": "case-missing"
+    },
+    {
+     "state": "error",
+     "variant": "DMs first read failure",
+     "web": "no",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "intentional",
+     "justification": "DMs uses the shared Activity first-read failure presentation; Web keeps the empty list. No new error surface is introduced."
+    },
+    {
+     "state": "partial",
+     "variant": "DMs next page",
+     "web": "yes",
+     "flutter": "partial",
+     "parityCase": [],
+     "status": "gap",
+     "justification": "The shared Activity pagination keeps its existing explicit Load more action instead of Web automatic paging. Widget tests verify scoped offsets and removal of the action after the last page; the existing presentation gap remains.",
+     "size": "S",
+     "gapKind": "impl-diff"
+    },
+    {
+     "state": "loading",
      "variant": "ConversationCardSkeleton",
      "web": "yes",
      "flutter": "yes",
@@ -2832,6 +2874,58 @@
      "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, quiet loading/offline states, terminal-error retry and three themes at phone width; history_quiet_gap_view_test.dart verifies recovery and reopening."
     }
    ]
+  },
+  {
+   "id": "settings.mcp-editor",
+   "title": "Settings managed MCP connection editor",
+   "webEntry": "packages/web/src/components/agent/AgentMcpTab.tsx (server scope)",
+   "flutterEntry": "apps/raft_flutter/lib/features/mcp_server_editor.dart",
+   "states": [
+    {
+     "state": "loading",
+     "variant": "inline test and save pending",
+     "web": "yes",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "gap",
+     "justification": "Fields remain mounted while draft testing or saving runs; the relevant action is disabled and shows Testing/Saving. Web 1.21.12 behavior is widget-tested on phone/desktop; no matched React/Flutter editor parity capture is registered.",
+     "size": "S",
+     "gapKind": "case-missing"
+    },
+    {
+     "state": "empty",
+     "variant": "credential header list",
+     "web": "yes",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "gap",
+     "justification": "Removing every credential row shows the same No credential headers copy and Add Header action. Web 1.21.12 behavior is widget-tested on phone/desktop; no matched React/Flutter editor parity capture is registered.",
+     "size": "S",
+     "gapKind": "case-missing"
+    },
+    {
+     "state": "error",
+     "variant": "validation, connection and save failure",
+     "web": "yes",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "gap",
+     "justification": "Validation and failed requests preserve the draft, show the error and allow correction/retry; stale test results and authority changes are fenced. Web 1.21.12 behavior is widget-tested on phone/desktop; no matched React/Flutter editor parity capture is registered.",
+     "size": "S",
+     "gapKind": "case-missing"
+    },
+    {
+     "state": "partial",
+     "variant": "stored credentials and OAuth provider",
+     "web": "yes",
+     "flutter": "yes",
+     "parityCase": [],
+     "status": "gap",
+     "justification": "Catalogs expose header names only. Blank unchanged rows retain stored values, renamed/new rows need a value; OAuth providers keep their fixed URL/auth and hide draft testing. Web 1.21.12 behavior is widget-tested on phone/desktop; no matched React/Flutter editor parity capture is registered.",
+     "size": "S",
+     "gapKind": "case-missing"
+    }
+   ]
   }
  ],
  "navigationCoverage": {
@@ -2934,7 +3028,8 @@
     "settings.labs"
    ],
    "mcp": [
-    "agent.mcp"
+    "agent.mcp",
+    "settings.mcp-editor"
    ],
    "providers": [
     "settings.providers"

@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'agent_profile.dart' show RaftRecipeBadge, RaftRecipeTextButton;
@@ -581,7 +583,7 @@ class _RaftRuntimeUsageChipState extends State<RaftRuntimeUsageChip> {
             card.open(pinned: true);
           }
         },
-        builder: (context, state) => MouseRegion(
+        builder: (context, state) => RaftHoverRegion(
           cursor: SystemMouseCursors.help,
           child: DecoratedBox(
             position: DecorationPosition.foreground,

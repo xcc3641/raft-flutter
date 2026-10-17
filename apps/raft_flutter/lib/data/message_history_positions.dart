@@ -1,3 +1,5 @@
+import 'workspace_messages.dart';
+
 import 'package:raft_client/raft_client.dart';
 
 import 'message_history.dart';
@@ -8,58 +10,61 @@ import 'message_history_verification.dart';
 import 'message_history_summaries.dart';
 import 'message_window_snapshot.dart';
 import 'reading_positions.dart';
-import 'workspace_controller.dart';
+import 'workspace_message_host.dart';
 import 'workspace_message_windows.dart';
 
 /// Device positions are presentation metadata under the live receiver's scope.
 class MessageHistoryPositions {
   static void save(
-    WorkspaceController receiver,
+    WorkspaceMessageHost receiver,
     String id,
     ReadingAnchor? anchor,
   ) {
-    var w = receiver;
-    while (w.presentationSource != null) {
-      w = w.presentationSource!;
+    var w = receiver.messageDomain;
+    while (w.source != null) {
+      w = w.source!;
     }
-    if (!w.deviceStore.writable) return;
-    if (id == w.channel?.id && w.channelLoading ||
-        id == w.threadChannelId && w.threadLoading) {
+    if (!w.device.writable) return;
+    if (id == w.presentation.channel?.id && w.state.channelLoading ||
+        id == w.state.threadChannelId && w.state.threadLoading) {
       return;
     }
-    final storage = MessageHistoryPages.storage(w.deviceStore.cache),
+    final storage = MessageHistoryPages.storage(w.device.cache),
         scope = MessageHistoryPages.scope(
           w,
           id,
-          parent: id == w.threadChannelId ? w.threadParentChannelId : id,
-          parentMessage: id == w.threadChannelId
+          parent: id == w.state.threadChannelId ? w.threadParentChannelId : id,
+          parentMessage: id == w.state.threadChannelId
               ? w.threadParentMessageId
               : null,
         );
     if (storage == null || scope == null) return;
     // A null viewport anchor reports the latest end, including a manual drag.
     // A previous older-page hint must not retain the opposite end afterward.
-    if (anchor == null) storage.memory.direction(w, id, older: false);
+    if (anchor == null) {
+      storage.memory.direction(w.context.receiverKey, id, older: false);
+    }
     SavedReadingPosition? position;
     if (anchor != null) {
       final row = w.messageWindows
           .rows(id)
           .where((row) => w.messageKey(row) == anchor.messageKey)
           .firstOrNull;
-      if (row == null || WorkspaceController.isPendingSend(row)) return;
+      if (row == null || WorkspaceMessages.isPendingSend(row)) return;
       position = SavedReadingPosition(row.id, row.seq, anchor.top);
     }
     storage.savePosition(scope, position).ignore();
   }
 
   static Future<void> clear(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     String id, {
     required bool thread,
     MessageHistoryScope? boundScope,
     bool Function()? current,
   }) async {
-    final storage = MessageHistoryPages.storage(w.deviceStore.cache),
+    final w = host.messageDomain;
+    final storage = MessageHistoryPages.storage(w.device.cache),
         scope =
             boundScope ??
             MessageHistoryPages.scope(
@@ -75,15 +80,16 @@ class MessageHistoryPositions {
   }
 
   static Future<MessageHistoryPage?> restore(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     String id, {
     bool thread = false,
     dynamic cached,
   }) async {
+    final w = host.messageDomain;
     MessageHistoryPages.opened(w, id).ignore();
     if (!request.current) return null;
-    final storage = MessageHistoryPages.storage(w.deviceStore.cache),
+    final storage = MessageHistoryPages.storage(w.device.cache),
         scope = MessageHistoryPages.scope(
           w,
           id,
@@ -93,7 +99,7 @@ class MessageHistoryPositions {
     if (storage == null ||
         scope == null ||
         !request.current ||
-        !w.deviceStore.writable) {
+        !w.device.writable) {
       return null;
     }
     if (cached is CachedHistoryWindow && cached.provesNoPosition(scope)) {
@@ -106,7 +112,7 @@ class MessageHistoryPositions {
         for (final row in w.ledger.messages(id)) row['id'] as String: row,
       };
       final local = await storage.readContext(scope, position.messageId);
-      if (local == null || !request.current || !w.deviceStore.writable) return null;
+      if (local == null || !request.current || !w.device.writable) return null;
       final target = (local['messages'] as List)
           .whereType<Map>()
           .where((row) => row['id'] == position.messageId)
@@ -123,52 +129,54 @@ class MessageHistoryPositions {
   }
 
   static Future<bool> restoreMain(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     String id, {
     dynamic cached,
   }) async {
+    final w = host.messageDomain;
     final page = await restore(w, request, id, cached: cached);
     if (page == null || !request.current) return false;
     final rows = acceptedWindowRows(page['messages'], id);
-    w.hasMore = page['hasOlder'] == true;
-    w.hasNewer = page['hasNewer'] == true;
-    w.historyLimited = page['historyLimited'] == true;
+    w.state.hasMore = page['hasOlder'] == true;
+    w.state.hasNewer = page['hasNewer'] == true;
+    w.state.historyLimited = page['historyLimited'] == true;
     w.messageWindows.rememberWindow(
       request,
       id,
       page.scope.authority,
-      w.hasMore,
+      w.state.hasMore,
       w.messageHistoryTicket(id) as String,
-      historyLimited: w.historyLimited,
+      historyLimited: w.state.historyLimited,
       rows: rows,
       replace: true,
     );
-    w.messageWindows.setContextMode(request, id, w.hasNewer);
+    w.messageWindows.setContextMode(request, id, w.state.hasNewer);
     w.messageWindows.setDiskOnly(request, id, true);
     MessageHistorySummaries.restore(w, id, page);
-    w.client.joinChannel(id);
-    w.channelLoading = false;
-    w.notifyListeners();
+    w.transport.client.joinChannel(id);
+    w.state.channelLoading = false;
+    w.context.changed();
     await MessageHistoryPages.record(w, request, page);
     return true;
   }
 
   static Future<MessageHistoryPage?> restoreThread(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     String id,
     Map legacy,
   ) async {
+    final w = host.messageDomain;
     final page = await restore(w, request, id, thread: true, cached: legacy);
     if (page == null || !request.current) return null;
-    w.threadChannelId = id;
+    w.state.threadChannelId = id;
     final parent = legacy['parent'];
-    if (w.threadParent == null &&
+    if (w.state.threadParent == null &&
         parent is Map &&
         parent['id'] == w.threadParentMessageId &&
         parent['channelId'] == w.threadParentChannelId) {
-      w.threadParent = RaftMessage(Map<String, dynamic>.from(parent));
+      w.state.threadParent = RaftMessage(Map<String, dynamic>.from(parent));
     }
     final boundary = w.messageWindows.acceptThreadPage(
       request,
@@ -178,9 +186,9 @@ class MessageHistoryPositions {
       retainOlder: false,
       retainedHasMore: false,
     );
-    w.threadHasMore = boundary.more;
-    w.threadHistoryLimited = boundary.limited;
-    w.threadLoading = false;
+    w.state.threadHasMore = boundary.more;
+    w.state.threadHistoryLimited = boundary.limited;
+    w.state.threadLoading = false;
     w.messageWindows.rememberWindow(
       request,
       id,
@@ -191,7 +199,7 @@ class MessageHistoryPositions {
     );
     w.messageWindows.setContextMode(request, id, page['hasNewer'] == true);
     w.messageWindows.setDiskOnly(request, id, true);
-    w.notifyListeners();
+    w.context.changed();
     return page;
   }
 }

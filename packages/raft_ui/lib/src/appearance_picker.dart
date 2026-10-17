@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'design_primitives.dart';
@@ -200,7 +202,7 @@ class _ThemeChoiceState extends State<_ThemeChoice> {
         button: true,
         selected: selected,
         label: '${family.name} ${widget.dark ? 'dark' : 'light'}',
-        child: MouseRegion(
+        child: RaftHoverRegion(
           cursor: SystemMouseCursors.click,
           onEnter: (_) => setState(() => hovered = true),
           onExit: (_) => setState(() => hovered = false),

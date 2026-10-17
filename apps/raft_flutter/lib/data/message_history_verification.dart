@@ -8,7 +8,7 @@ import 'message_history_reconciliation.dart';
 import 'history_gap_recovery.dart';
 import 'message_history.dart';
 import 'message_history_pages.dart';
-import 'workspace_controller.dart';
+import 'workspace_message_host.dart';
 import 'workspace_message_windows.dart';
 
 /// Reconciles authorized saved ranges while preserving accepted projections.
@@ -18,22 +18,25 @@ class MessageHistoryVerification {
   /// One event-driven pass over saved ranges, including hidden conversations.
   /// Existing authorized pages supply the digest; no unsupported endpoint or
   /// wall-clock freshness can make a missed old edit appear verified.
-  static void reconnect(WorkspaceController w) {
-    HistoryRangeReads.of(w).restart();
+  static void reconnect(WorkspaceMessageHost host) {
+    final w = host.messageDomain;
+    HistoryRangeReads.of(w.context.receiverKey).restart();
     HistoryGapRecovery.reconnect(w);
     _resume(w);
   }
 
-  static void _resume(WorkspaceController w) {
-    final db = MessageHistoryPages.storage(w.deviceStore.cache);
+  static void _resume(WorkspaceMessageHost host) {
+    final w = host.messageDomain;
+    final db = MessageHistoryPages.storage(w.device.cache);
     if (db == null ||
-        !w.foreground ||
-        !w.deviceStore.writable ||
-        w.client.user == null ||
-        w.client.serverId == null) {
+        !w.presentation.foreground ||
+        !w.device.writable ||
+        w.transport.client.user == null ||
+        w.transport.client.serverId == null) {
       return;
     }
-    final job = _jobs[w] ??= _HistoryVerificationJob();
+    final receiver = w.context.receiverKey;
+    final job = _jobs[receiver] ??= _HistoryVerificationJob();
     if (job.running) {
       job.again = true;
       return;
@@ -47,16 +50,16 @@ class MessageHistoryVerification {
           job.again = false;
           complete = await _saved(w);
         } while (job.again &&
-            w.deviceStore.writable &&
-            w.foreground &&
+            w.device.writable &&
+            w.presentation.foreground &&
             !db.reads.closed);
       } finally {
         job.running = false;
-        if (identical(_jobs[w], job)) {
-          if (complete || !w.deviceStore.writable || db.reads.closed) {
+        if (identical(_jobs[w.context.receiverKey], job)) {
+          if (complete || !w.device.writable || db.reads.closed) {
             job.retry.cancel();
-            _jobs[w] = null;
-          } else if (w.connected && w.foreground) {
+            _jobs[w.context.receiverKey] = null;
+          } else if (w.session.connected && w.presentation.foreground) {
             final seconds = 2 << job.attempt.clamp(0, 5);
             job.attempt++;
             job.zone.run(
@@ -69,34 +72,39 @@ class MessageHistoryVerification {
     });
   }
 
-  static void cancel(WorkspaceController w) {
-    _jobs[w]?.retry.cancel();
-    _jobs[w] = null;
-    HistoryRangeReads.of(w).restart();
+  static void cancel(WorkspaceMessageHost host) {
+    final w = host.messageDomain;
+    _jobs[w.context.receiverKey]?.retry.cancel();
+    _jobs[w.context.receiverKey] = null;
+    HistoryRangeReads.of(w.context.receiverKey).restart();
   }
 
-  static Object _context(WorkspaceController w, MessageHistoryStorage db) => (
-    w.client.origin,
-    w.client.user?.id,
-    w.client.serverId,
-    w.ledger.generation,
-    w.messageHistoryTicket(''),
-    w.navigationRevision,
-    w.channelGeneration,
-    w.threadGeneration,
-    w.foreground,
-    db.gaps.retirement,
-  );
+  static Object _context(WorkspaceMessageHost host, MessageHistoryStorage db) {
+    final w = host.messageDomain;
+    return (
+      w.transport.client.origin,
+      w.transport.client.user?.id,
+      w.transport.client.serverId,
+      w.ledger.generation,
+      w.messageHistoryTicket(''),
+      w.presentation.navigationRevision,
+      w.channelGeneration,
+      w.threadGeneration,
+      w.presentation.foreground,
+      db.gaps.retirement,
+    );
+  }
 
   /// Both automatic consumers use the same full acceptance and its metadata.
   /// Navigating away retires even disk-backed proof; online-only acceptance
   /// can never be mistaken for durable coverage on a later window visit.
   static HistoryRangeRead ranges(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageHistoryScope scope,
   ) {
-    final db = MessageHistoryPages.storage(w.deviceStore.cache)!;
-    return HistoryRangeReads.of(w).scope(_context(w, db), (
+    final w = host.messageDomain;
+    final db = MessageHistoryPages.storage(w.device.cache)!;
+    return HistoryRangeReads.of(w.context.receiverKey).scope(_context(w, db), (
       scope.origin,
       scope.principal,
       scope.server,
@@ -109,14 +117,15 @@ class MessageHistoryVerification {
   }
 
   static Future<HistoryRangeProof?> readRange(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     MessageHistoryScope scope, {
     BigInt? before,
     required HistoryReadReason reason,
     void Function(Object cause)? failed,
   }) {
-    final db = MessageHistoryPages.storage(w.deviceStore.cache)!;
+    final w = host.messageDomain;
+    final db = MessageHistoryPages.storage(w.device.cache)!;
     final context = _context(w, db), range = ranges(w, scope);
     final ticket = w.messageHistoryTicket(scope.parentChannel);
     final guarded = w.messageWindows.request(
@@ -143,22 +152,24 @@ class MessageHistoryVerification {
     });
   }
 
-  static Future<bool> _saved(WorkspaceController w) async {
-    final db = MessageHistoryPages.storage(w.deviceStore.cache)!;
-    final user = w.client.user!.id,
-        server = w.client.serverId!,
-        origin = w.client.origin;
-    final context = _context(w, db), reads = HistoryRangeReads.of(w);
+  static Future<bool> _saved(WorkspaceMessageHost host) async {
+    final w = host.messageDomain;
+    final db = MessageHistoryPages.storage(w.device.cache)!;
+    final user = w.transport.client.user!.id,
+        server = w.transport.client.serverId!,
+        origin = w.transport.client.origin;
+    final receiver = w.context.receiverKey;
+    final context = _context(w, db), reads = HistoryRangeReads.of(receiver);
     reads.bind(context);
     final pass = reads.generation;
     final ticket = w.messageHistoryTicket(''), generation = w.ledger.generation;
     bool current() =>
-        w.deviceStore.writable &&
+        w.device.writable &&
         !db.reads.closed &&
-        w.foreground &&
-        w.client.user?.id == user &&
-        w.client.serverId == server &&
-        w.client.origin == origin &&
+        w.presentation.foreground &&
+        w.transport.client.user?.id == user &&
+        w.transport.client.serverId == server &&
+        w.transport.client.origin == origin &&
         context == _context(w, db) &&
         pass == reads.generation &&
         w.ledger.generation == generation &&
@@ -205,11 +216,12 @@ class MessageHistoryVerification {
   }
 
   static void tail(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     MessageHistoryScope scope,
   ) {
-    final storage = MessageHistoryPages.storage(w.deviceStore.cache);
+    final w = host.messageDomain;
+    final storage = MessageHistoryPages.storage(w.device.cache);
     if (storage == null) return;
     final ticket = w.messageHistoryTicket(scope.parentChannel);
     storage.reads.background(
@@ -218,17 +230,28 @@ class MessageHistoryVerification {
   }
 
   static void schedule(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     MessageHistoryPage page,
   ) {
-    final db = MessageHistoryPages.storage(w.deviceStore.cache);
-    if (db == null || !request.current || !w.foreground || !w.deviceStore.writable) {
+    final w = host.messageDomain;
+    final db = MessageHistoryPages.storage(w.device.cache);
+    if (db == null ||
+        !request.current ||
+        !w.presentation.foreground ||
+        !w.device.writable) {
       return;
     }
     final ticket = w.messageHistoryTicket(page.scope.parentChannel);
     final key = historyReadKey(page.scope, ticket, page.queryKey);
-    if (!db.reads.claim(w, w.resumes.value, key, page.verifiedAt)) return;
+    if (!db.reads.claim(
+      w.context.receiverKey,
+      w.session.resumes.value,
+      key,
+      page.verifiedAt,
+    )) {
+      return;
+    }
     db.reads.background(() async {
       await _verify(
         w,
@@ -245,12 +268,13 @@ class MessageHistoryVerification {
   }
 
   static void retained(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     MessageHistoryPage fresh,
   ) {
-    final db = MessageHistoryPages.storage(w.deviceStore.cache);
-    if (db == null || !request.current || !w.foreground) return;
+    final w = host.messageDomain;
+    final db = MessageHistoryPages.storage(w.device.cache);
+    if (db == null || !request.current || !w.presentation.foreground) return;
     final raw = (fresh.remotePage?['messages'] as List? ?? const []);
     if (raw.isEmpty || fresh['historyLimited'] == true) return;
     final first = raw
@@ -288,12 +312,13 @@ class MessageHistoryVerification {
   }
 
   static void recheckContext(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     String id,
     String target,
   ) {
-    final db = MessageHistoryPages.storage(w.deviceStore.cache);
+    final w = host.messageDomain;
+    final db = MessageHistoryPages.storage(w.device.cache);
     final scope = MessageHistoryPages.scope(w, id);
     if (db == null || scope == null || !request.current) return;
     db.reads.background(() async {
@@ -325,13 +350,14 @@ class MessageHistoryVerification {
 
   /// Refreshes the visible saved rows and the latest page while preserving
   /// the existing timeline and context. Gap repair keeps its existing route.
-  static Future<bool> refresh(WorkspaceController w) async {
-    final db = MessageHistoryPages.storage(w.deviceStore.cache);
-    if (db == null || !w.deviceStore.writable) return false;
-    await w.syncVisibleScopes();
+  static Future<bool> refresh(WorkspaceMessageHost host) async {
+    final w = host.messageDomain;
+    final db = MessageHistoryPages.storage(w.device.cache);
+    if (db == null || !w.device.writable) return false;
+    await w.entries.syncVisibleScopes();
     var complete = true;
     for (final thread in [false, true]) {
-      final id = thread ? w.threadChannelId : w.channel?.id;
+      final id = thread ? w.state.threadChannelId : w.presentation.channel?.id;
       if (id == null) continue;
       final scope = MessageHistoryPages.scope(
         w,
@@ -344,11 +370,13 @@ class MessageHistoryVerification {
       final request = w.messageWindows.request(
         thread: thread,
         allowed: () =>
-            w.deviceStore.writable &&
+            w.device.writable &&
             ticket == w.messageHistoryTicket(scope.parentChannel) &&
             w.messageWindows.notRevoked(id) &&
             w.messageWindows.notRevoked(scope.parentChannel) &&
-            (thread ? w.threadChannelId == id : w.channel?.id == id),
+            (thread
+                ? w.state.threadChannelId == id
+                : w.presentation.channel?.id == id),
       );
       final visible = w.messageWindows.rows(id);
       if (!await _verify(
@@ -379,7 +407,7 @@ class MessageHistoryVerification {
   }
 
   static Future<bool> _verify(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageWindowRequest request,
     MessageHistoryScope scope,
     Object ticket, {
@@ -388,17 +416,20 @@ class MessageHistoryVerification {
     String? target,
     int limit = 50,
     required HistoryReadReason reason,
-  }) => MessageHistoryReconciliation.read(
-    w,
-    request,
-    scope,
-    ticket,
-    before: before,
-    after: after,
-    target: target,
-    limit: limit,
-    reason: reason,
-  );
+  }) {
+    final w = host.messageDomain;
+    return MessageHistoryReconciliation.read(
+      w,
+      request,
+      scope,
+      ticket,
+      before: before,
+      after: after,
+      target: target,
+      limit: limit,
+      reason: reason,
+    );
+  }
 }
 
 class _HistoryVerificationJob {

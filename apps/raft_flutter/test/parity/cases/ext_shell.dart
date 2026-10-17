@@ -13,7 +13,6 @@ import 'package:flutter/material.dart';
 import 'package:raft_client/raft_client.dart';
 import 'package:raft_flutter/data/personal_presentation.dart';
 import 'package:raft_flutter/data/workspace_controller.dart';
-import 'package:raft_flutter/data/workspace_mode_store.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -163,16 +162,8 @@ class _HostState extends State<_Host> {
   final presentation = PersonalPresentationStore();
 
   @override
-  void dispose() {
-    workspaceModeDevOverride = null;
-    super.dispose();
-  }
-
-  @override
   void initState() {
     super.initState();
-    // Release availability: the Enter Workspace rail action needs the flag.
-    workspaceModeDevOverride = false;
     WidgetsBinding.instance.addPostFrameCallback((_) => _open());
   }
 

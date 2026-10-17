@@ -2,14 +2,14 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/repo_root.dart';
+
 /// Every network path must follow the shared proxy decision (system / manual /
 /// direct): see docs/system-proxy.md. Creating a client that bypasses it is the
 /// `avoid_unproxied_network_client` lint (tool/raft_lints); the tests below pin
 /// the wiring of the hook itself.
 void main() {
-  final root = Directory.current.path.endsWith('apps/raft_flutter')
-      ? Directory('../..')
-      : Directory('.');
+  final root = repoRoot();
   String read(String path) => File('${root.path}/$path').readAsStringSync();
 
   test('the API client builds its Dio and socket through the hook', () {
@@ -44,7 +44,9 @@ void main() {
     );
     expect(
       player,
-      contains("protocolWhitelist: ['file', 'http', 'https', 'tcp', 'tls', 'crypto']"),
+      contains(
+        "protocolWhitelist: ['file', 'http', 'https', 'tcp', 'tls', 'crypto']",
+      ),
     );
     expect(player, contains("setProperty('http-proxy', httpProxyFor("));
     // An empty http-proxy lets FFmpeg read the http_proxy environment variable.

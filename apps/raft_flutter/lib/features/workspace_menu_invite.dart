@@ -40,7 +40,7 @@ Future<bool> showWorkspaceMenuInvite(
       role == workspace.server?.string('role') &&
       workspace.can('inviteMembers');
   if (!current()) return false;
-  final sent = await showRaftModal<bool>(
+  final sent = await showRaftForm<bool>(
     context,
     builder: (_) => _InviteDialog(
       workspace: workspace,

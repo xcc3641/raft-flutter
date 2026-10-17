@@ -16,12 +16,13 @@ import 'text_scaling.dart' show RaftScaled;
 import 'theme.dart';
 import 'recipe_surface.dart' show RaftCssBoxDecoration;
 
-/// Mounted ThreadsInbox views; Saved and Done are independent result sources.
+/// Mounted ThreadsInbox views; the application owns each accepted result scope.
 enum RaftActivityView {
   all('All', RaftGlyph.inbox),
   unread('Unread', RaftGlyph.mail),
   mentions('Mentions', RaftGlyph.atSign),
   saved('Saved', RaftGlyph.bookmark),
+  dms('DMs', RaftGlyph.messageCircle),
   done('Done', RaftGlyph.checkCircle2);
 
   const RaftActivityView(this.label, this.glyph);
@@ -403,8 +404,11 @@ class RaftActivityScopePicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RaftTokens.of(context);
-    final hiddenCounts =
-        view == RaftActivityView.saved || view == RaftActivityView.done;
+    final hiddenCounts = [
+      RaftActivityView.saved,
+      RaftActivityView.dms,
+      RaftActivityView.done,
+    ].contains(view);
     return ConstrainedBox(
       constraints: BoxConstraints(
         maxHeight: MediaQuery.sizeOf(context).height * .68,

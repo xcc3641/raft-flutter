@@ -617,7 +617,8 @@ class _FileRowState extends State<SourceChannelFileRow> {
         foregroundColor: WidgetStatePropertyAll(recipe.foreground),
         backgroundColor: WidgetStateProperty.resolveWith(
           (states) =>
-              states.contains(WidgetState.hovered) ||
+              states.contains(WidgetState.hovered) &&
+                      RaftHoverScope.of(context) ||
                   states.contains(WidgetState.focused)
               ? recipe.highlightedBackground
               : Colors.transparent,
@@ -678,7 +679,7 @@ class _FileRowState extends State<SourceChannelFileRow> {
       ),
     );
     return LayoutBuilder(
-      builder: (context, constraints) => MouseRegion(
+      builder: (context, constraints) => RaftHoverRegion(
         onEnter: (_) => setState(() => hovered = true),
         onExit: (_) => setState(() => hovered = false),
         child: AnimatedContainer(

@@ -189,7 +189,7 @@ class CreateChannelDialog extends StatefulWidget {
     BuildContext context, {
     required WorkspaceController controller,
     Future<void> Function(RaftChannel channel)? onCreated,
-  }) => showRaftModal<void>(
+  }) => showRaftForm<void>(
     context,
     builder: (_) =>
         CreateChannelDialog(controller: controller, onCreated: onCreated),

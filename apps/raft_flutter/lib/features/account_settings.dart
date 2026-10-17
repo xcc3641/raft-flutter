@@ -13,14 +13,8 @@ import 'usage_data_card.dart';
 import 'sign_in_diagnostics_card.dart';
 
 class AccountSettings extends StatefulWidget {
-  const AccountSettings({
-    super.key,
-    required this.controller,
-    this.onLogout,
-    this.workspaceModeCard,
-  });
+  const AccountSettings({super.key, required this.controller, this.onLogout});
   final WorkspaceController controller;
-  final Widget? workspaceModeCard;
 
   /// AccountSignOutSection; the host owns the session teardown.
   final Future<void> Function()? onLogout;
@@ -191,6 +185,7 @@ class _AccountSettingsState extends ManagementState<AccountSettings> {
     final sourceScope = authority;
     final user = controller.client.user!;
     await scopedDialog<void>(
+      form: true,
       (_) => RaftFormDialog(
         title: raftText(context, 'Edit profile'),
         fields: [
@@ -223,6 +218,7 @@ class _AccountSettingsState extends ManagementState<AccountSettings> {
     final sourceScope = authority;
     final user = controller.client.user!;
     await scopedDialog<void>(
+      form: true,
       (_) => RaftFormDialog(
         title: raftText(context, 'Reading preferences'),
         fields: [
@@ -271,6 +267,7 @@ class _AccountSettingsState extends ManagementState<AccountSettings> {
     final sourceScope = authority;
     final user = controller.client.user!;
     await scopedDialog<void>(
+      form: true,
       (_) => RaftFormDialog(
         title: raftText(context, 'Display language'),
         fields: [
@@ -315,6 +312,7 @@ class _AccountSettingsState extends ManagementState<AccountSettings> {
       avatar: RaftTooltip(
         message: raftText(context, 'Change profile image'),
         child: InkWell(
+          hoverColor: RaftHoverScope.materialHoverColor(context),
           key: const Key('account-profile-image'),
           onTap: mediaBusy ? null : () => image(),
           child: Opacity(
@@ -494,7 +492,6 @@ class _AccountSettingsState extends ManagementState<AccountSettings> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (widget.workspaceModeCard != null) widget.workspaceModeCard!,
         const RaftSettingsSectionHeader(
           label: 'Account',
           glyph: RaftGlyph.user,

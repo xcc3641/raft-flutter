@@ -1,3 +1,4 @@
+import 'hover_region.dart';
 import 'control_typography.dart';
 import 'recipe_surface.dart';
 
@@ -125,7 +126,7 @@ class _RaftSavedToggleState extends State<RaftSavedToggle> {
       label: raftText(context, widget.label ?? 'Remove saved message'),
       excludeSemantics: true,
       onTap: widget.onPressed,
-      child: MouseRegion(
+      child: RaftHoverRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => hovered = true),
         onExit: (_) => setState(() => hovered = false),

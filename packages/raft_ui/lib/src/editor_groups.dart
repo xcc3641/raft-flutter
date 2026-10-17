@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'dart:ui' show SemanticsRole;
 
 import 'package:flutter/material.dart';
@@ -291,7 +293,7 @@ class _RaftEditorGroupsState extends State<RaftEditorGroups> {
               ),
             ),
             if (i < count - 1)
-              MouseRegion(
+              RaftHoverRegion(
                 cursor: SystemMouseCursors.resizeLeftRight,
                 child: RaftTouchTargetExpander(
                   minSize: const Size(8, 0),

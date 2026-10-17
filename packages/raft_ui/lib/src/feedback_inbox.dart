@@ -5,6 +5,8 @@
 // class list (hands-feedback CSS and the raft-ui Tabs / TaskCard / Badge /
 // MessageReferenceChip / EmptyState / Skeleton / Banner recipes it composes)
 // is resolved here.
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'control_typography.dart';
@@ -435,7 +437,7 @@ class _RaftFeedbackFilterTabsState extends State<RaftFeedbackFilterTabs> {
           ],
         );
       }
-      return MouseRegion(
+      return RaftHoverRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => hovered = value),
         onExit: (_) => setState(() => hovered = null),
@@ -574,7 +576,7 @@ class _RaftFeedbackTicketCardState extends State<RaftFeedbackTicketCard> {
         ],
       ),
     );
-    return MouseRegion(
+    return RaftHoverRegion(
       cursor: widget.onOpen == null
           ? MouseCursor.defer
           : SystemMouseCursors.click,

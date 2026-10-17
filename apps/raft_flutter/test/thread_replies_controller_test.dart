@@ -169,23 +169,25 @@ Map<String, dynamic> _prefs(
   'prefs': {'activityMuted': muted, 'muteFromSeq': '42'},
 };
 void main() {
-  test('actual controller eligible threads use sparse adapter even message flag off', () async {
-    final t = _Transport(), w = await _fixture(t);
-    addTearDown(w.dispose);
-    await w.refreshMessageSyncFlag();
-    expect(w.syncCoreMessagesEnabled, false);
-    _emit(w, _frame(3));
-    _emit(w, _frame(10));
-    _emit(w, _frame(4));
-    expect(w.threadSummaries['parent']['replyCount'], 10);
-    expect(
-      (w.threadSummaries['parent']['latestReplies'] as List).map(
-        (dynamic r) => r['seq'],
-      ),
-      [3, 10],
-    );
-    expect(t.snapshotReads, 0);
-  });
+  test(
+    'actual controller eligible threads keep their independent sparse adapter',
+    () async {
+      final t = _Transport(), w = await _fixture(t);
+      addTearDown(w.dispose);
+      await w.refreshMessageSyncFlag();
+      _emit(w, _frame(3));
+      _emit(w, _frame(10));
+      _emit(w, _frame(4));
+      expect(w.threadSummaries['parent']['replyCount'], 10);
+      expect(
+        (w.threadSummaries['parent']['latestReplies'] as List).map(
+          (dynamic r) => r['seq'],
+        ),
+        [3, 10],
+      );
+      expect(t.snapshotReads, 0);
+    },
+  );
   test(
     'accepted thread summaries update locally without an unread snapshot',
     () async {
@@ -326,7 +328,6 @@ void main() {
     await w.refreshMessageSyncFlag();
     expect(w.syncCoreNotificationPrefsEnabled, true);
     expect(t.requests.last.data['keys'], [
-      'sync_core_messages_v0',
       notificationPrefsFlag,
       WorkspaceController.remoteComputerUpgradeFlag,
       WorkspaceController.agentMigrationFlag,

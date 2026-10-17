@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -189,7 +191,7 @@ class _RaftInlineThreadSurfaceState extends State<RaftInlineThreadSurface> {
               },
             ),
           },
-          child: MouseRegion(
+          child: RaftHoverRegion(
             cursor: enabled
                 ? SystemMouseCursors.click
                 : SystemMouseCursors.basic,

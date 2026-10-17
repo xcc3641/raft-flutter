@@ -245,7 +245,7 @@ class _AvatarChoiceState extends State<_AvatarChoice> {
           button: true,
           selected: widget.selected,
           label: widget.label,
-          child: MouseRegion(
+          child: RaftHoverRegion(
             onEnter: (_) => setState(() => hovered = true),
             onExit: (_) => setState(() => hovered = false),
             child: GestureDetector(

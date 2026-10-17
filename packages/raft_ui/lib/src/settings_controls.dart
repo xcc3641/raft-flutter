@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import 'design_primitives.dart' hide RaftPanelHeaderRecipe;
 import 'error_presentation.dart';
+import 'form_presentation.dart';
 import 'icons.dart';
 import 'localization.dart';
 import 'overlays/dialog.dart' show showRaftDialog;
@@ -808,7 +809,11 @@ class _RaftConfirmDialogState extends State<RaftConfirmDialog> {
 /// unpadded header `px-6 py-3`, body `px-6 py-5`, footer `px-6 py-3`), the
 /// uppercase title with its close button, the scrolling [body] and the right
 /// aligned [footer] actions. [onClose] null disables the close button.
-class RaftDialogShell extends StatelessWidget {
+///
+/// In a presented form window on a phone ([showRaftForm], below 768) the shell
+/// is the sheet: the title and close button pin to the top, [body] scrolls and
+/// the [footer] actions pin to the bottom, above the keyboard.
+class RaftDialogShell extends StatefulWidget {
   const RaftDialogShell({
     super.key,
     required this.title,
@@ -831,9 +836,38 @@ class RaftDialogShell extends StatelessWidget {
   final bool outlineClose;
 
   @override
+  State<RaftDialogShell> createState() => _RaftDialogShellState();
+}
+
+class _RaftDialogShellState extends State<RaftDialogShell> {
+  final _body = GlobalKey(debugLabel: 'dialog shell body');
+  final _footer = GlobalKey(debugLabel: 'dialog shell footer');
+
+  @override
   Widget build(BuildContext context) {
+    final title = widget.title,
+        onClose = widget.onClose,
+        maxWidth = widget.maxWidth,
+        footer = widget.footer;
+    final body = KeyedSubtree(key: _body, child: widget.body);
     final t = RaftTokens.of(context), tokens = RaftRecipeTokens(t);
     final size = MediaQuery.sizeOf(context);
+    if (RaftFormFrame.sheetOf(context)) {
+      return RaftFormSheet(
+        title: raftText(context, title),
+        onClose: onClose,
+        body: body,
+        footer: KeyedSubtree(
+          key: _footer,
+          child: Wrap(
+            alignment: WrapAlignment.end,
+            spacing: RaftSpace.x3,
+            runSpacing: RaftSpace.x3,
+            children: footer,
+          ),
+        ),
+      );
+    }
     final d = RaftDialogRecipe.resolve(
       theme: raftRecipeTheme(t),
       states: RaftRecipeStates(
@@ -852,7 +886,7 @@ class RaftDialogShell extends StatelessWidget {
       child: Material(
         type: MaterialType.transparency,
         child: Container(
-          key: surfaceKey,
+          key: widget.surfaceKey,
           width: (size.width - 32).clamp(0, maxWidth).toDouble(),
           constraints: BoxConstraints(maxHeight: size.height - 32),
           padding: d.content.padding,
@@ -877,17 +911,17 @@ class RaftDialogShell extends StatelessWidget {
                       label: '',
                       glyph: RaftGlyph.x,
                       // DialogClose: brutal `outline` / `icon-md`, X `size-5`.
-                      variant: t.brutal || outlineClose
+                      variant: t.brutal || widget.outlineClose
                           ? RaftButtonRecipeVariant.outline
                           : RaftButtonRecipeVariant.ghost,
-                      size: t.brutal || outlineClose
+                      size: t.brutal || widget.outlineClose
                           ? RaftButtonRecipeSize.iconMd
                           : RaftButtonRecipeSize.iconSm,
-                      glyphSize: t.brutal || outlineClose ? 20 : 16,
-                      restColor: t.brutal || outlineClose
+                      glyphSize: t.brutal || widget.outlineClose ? 20 : 16,
+                      restColor: t.brutal || widget.outlineClose
                           ? null
                           : t.colors['foreground-placeholder'],
-                      onPressed: onClose,
+                      onPressed: raftGuardedClose(context, onClose),
                     ),
                   ],
                 ),
@@ -902,11 +936,14 @@ class RaftDialogShell extends StatelessWidget {
               SizedBox(height: gap),
               Padding(
                 padding: d.footer.padding,
-                child: Wrap(
-                  alignment: WrapAlignment.end,
-                  spacing: d.footer.columnGap ?? 12,
-                  runSpacing: d.footer.rowGap ?? 12,
-                  children: footer,
+                child: KeyedSubtree(
+                  key: _footer,
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: d.footer.columnGap ?? 12,
+                    runSpacing: d.footer.rowGap ?? 12,
+                    children: footer,
+                  ),
                 ),
               ),
             ],

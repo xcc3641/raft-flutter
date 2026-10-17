@@ -14,6 +14,14 @@
   "raftUiLucide": {
    "version": "1.48.0",
    "package": "node_modules/.pnpm/lucide-react@1.48.0_react@19.2.4/node_modules/lucide-react"
+  },
+  "activityDmSource": {
+   "raftSourceCommit": "a98ae003246a0360872a77d76dec2fccd0347ef7",
+   "webVersion": "1.21.12",
+   "imports": [
+    "packages/web/src/components/thread/ThreadsInbox.tsx:17"
+   ],
+   "npmTarballSha256": "b53d76a053b7295f332d65405ccdccdf013acda067d46345be82105b1da94ee3"
   }
  },
  "usages": {
@@ -966,6 +974,9 @@
    ],
    "Lightbulb": [
     "@botiverse/hands-feedback-react@0.4.1/src/components.tsx:25"
+   ],
+   "MessageCircle": [
+    "packages/web/src/components/thread/ThreadsInbox.tsx:17"
    ]
   },
   "raftUi": {
@@ -1185,7 +1196,8 @@
    "X": "x@0.575.0",
    "XCircle": "circle-x@0.575.0",
    "ZoomIn": "zoom-in@0.575.0",
-   "ZoomOut": "zoom-out@0.575.0"
+   "ZoomOut": "zoom-out@0.575.0",
+   "MessageCircle": "message-circle@0.575.0"
   },
   "raftUi": {
    "AlertTriangle": "triangle-alert@1.48.0",
@@ -4415,6 +4427,19 @@
      "tag": "path",
      "attrs": {
       "d": "M12 8v8"
+     }
+    }
+   ]
+  },
+  "message-circle@0.575.0": {
+   "icon": "message-circle",
+   "version": "0.575.0",
+   "sha256": "a302f35aa811d912f251206cf34eb3a3dc313342e735a80cd86d5468f1086971",
+   "nodes": [
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"
      }
     }
    ]

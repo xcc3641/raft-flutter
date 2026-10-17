@@ -8,7 +8,9 @@ import 'package:raft_flutter/platform/native_notifications.dart';
 
 import 'native_notifications_test.dart' show NotificationPluginFixture;
 
-class _LinuxServer extends LinuxFlutterLocalNotificationsPlugin {
+// Implement the plugin contract without invoking its real Linux constructor,
+// which eagerly opens libc and creates a desktop notification manager.
+class _LinuxServer implements LinuxFlutterLocalNotificationsPlugin {
   _LinuxServer({this.markup = false, this.offline = false});
   final bool markup, offline;
   @override

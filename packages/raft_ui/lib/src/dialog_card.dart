@@ -8,11 +8,15 @@
 //
 // Values come from the generated recipes (package:raft_ui/recipes.dart) and
 // tokens; Tailwind classes written in the Web JSX are resolved in comments.
+import 'hover_region.dart';
+
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
+import 'form_presentation.dart';
+import 'presentation.dart' show RaftSurfaceForm;
 import 'system_inset.dart';
 
 import 'package:flutter/rendering.dart';
@@ -292,14 +296,35 @@ abstract final class RaftShadowSet {
 /// Web `Modal`: `fixed inset-0 overflow-y-auto bg-layer-backdrop
 /// backdrop-blur-[2px] theme-brutal:bg-black/60`, then `flex min-h-full p-4`
 /// and a `m-auto flex w-full justify-center` column holding [child].
-class RaftModalBackdrop extends StatelessWidget {
+///
+/// Inside a presented form window ([showRaftForm]) the route draws the scrim,
+/// the centering and the sheet, so the backdrop only passes [child] through
+/// (scrolling when it is taller than the window); [child] keeps its state when
+/// the window crosses the sheet / dialog breakpoint.
+class RaftModalBackdrop extends StatefulWidget {
   const RaftModalBackdrop({super.key, required this.child, this.onBackdrop});
   final Widget child;
 
   /// `closeOnBackdrop`: a press on the backdrop itself (not on [child]).
   final VoidCallback? onBackdrop;
+
+  @override
+  State<RaftModalBackdrop> createState() => _RaftModalBackdropState();
+}
+
+class _RaftModalBackdropState extends State<RaftModalBackdrop> {
+  final _slot = GlobalKey(debugLabel: 'modal backdrop child');
+
   @override
   Widget build(BuildContext context) {
+    final form = RaftFormFrame.maybeOf(context);
+    if (form != null) {
+      final content = KeyedSubtree(key: _slot, child: widget.child);
+      return form == RaftSurfaceForm.sheet
+          ? content
+          : SingleChildScrollView(child: content);
+    }
+    final child = widget.child, onBackdrop = widget.onBackdrop;
     final t = RaftTokens.of(context);
     // backdrop-blur-[2px]: CSS blur radius is the Gaussian standard deviation.
     final scrim = t.brutal
@@ -484,7 +509,11 @@ class RaftRecipeCard extends StatelessWidget {
 /// Web `DialogCard`: `Card w-full max-w-md p-6`; header `mb-4 flex
 /// items-center justify-between border-b-0 p-0` with a `CardTitle`
 /// `text-lg font-bold uppercase` and a [RaftCloseButton] (`X` 20).
-class RaftDialogCard extends StatelessWidget {
+///
+/// In a presented form window on a phone ([showRaftForm], below 768) the card
+/// is the sheet: the title and close button pin to the top, [child] scrolls
+/// and [actions] pin to the bottom, above the keyboard.
+class RaftDialogCard extends StatefulWidget {
   const RaftDialogCard({
     super.key,
     required this.title,
@@ -493,8 +522,18 @@ class RaftDialogCard extends StatelessWidget {
     this.maxWidth = 448, // max-w-md = 28rem
     this.titleGlyph,
     this.actions,
+    this.footer,
+    this.footerGap = 16,
   });
   final String title;
+
+  /// The submit row of a form. In a dialog it follows [child] after a 16px
+  /// gap, as part of the body; in a bottom sheet ([showRaftForm] below 768)
+  /// it pins to the bottom while [child] scrolls.
+  final Widget? footer;
+
+  /// The space between [child] and [footer] in a dialog.
+  final double footerGap;
 
   /// The action row (buttons) under [child]. Above the default text size the
   /// card is capped to the viewport and only [child] scrolls, so these stay on
@@ -507,10 +546,62 @@ class RaftDialogCard extends StatelessWidget {
   final VoidCallback onClose;
   final Widget child;
   final double maxWidth;
+
+  @override
+  State<RaftDialogCard> createState() => _RaftDialogCardState();
+}
+
+class _RaftDialogCardState extends State<RaftDialogCard> {
+  final _body = GlobalKey(debugLabel: 'dialog card body');
+  final _actions = GlobalKey(debugLabel: 'dialog card actions');
+  final _footer = GlobalKey(debugLabel: 'dialog card footer');
+
   @override
   Widget build(BuildContext context) {
+    final title = widget.title,
+        onClose = widget.onClose,
+        maxWidth = widget.maxWidth,
+        titleGlyph = widget.titleGlyph;
+    final body = KeyedSubtree(key: _body, child: widget.child);
+    final footerRow = widget.footer;
+    final footer = footerRow == null
+        ? null
+        : KeyedSubtree(key: _footer, child: footerRow);
+    // A dialog keeps the form's own layout: the submit row ends the body.
+    final child = footer == null
+        ? body
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              body,
+              SizedBox(height: widget.footerGap),
+              footer,
+            ],
+          );
+    final actionRow = widget.actions;
+    final actions = actionRow == null
+        ? null
+        : KeyedSubtree(key: _actions, child: actionRow);
     final t = RaftTokens.of(context);
     final tokens = RaftRecipeTokens(t);
+    if (RaftFormFrame.sheetOf(context)) {
+      final root = RaftCardRecipe.resolve(
+        theme: raftRecipeThemeOf(t),
+        states: RaftRecipeStates({if (t.dark) RaftRecipeStates.dark}),
+        tokens: tokens,
+      ).root;
+      return DefaultTextStyle(
+        style: root.text(tokens, base: DefaultTextStyle.of(context).style),
+        child: RaftFormSheet(
+          title: raftText(context, title),
+          onClose: onClose,
+          titleGlyph: titleGlyph,
+          body: body,
+          footer: footer ?? actions,
+        ),
+      );
+    }
     final titleSlot = RaftCardRecipe.resolve(
       theme: raftRecipeThemeOf(t),
       tokens: tokens,
@@ -540,7 +631,7 @@ class RaftDialogCard extends StatelessWidget {
                   : Row(
                       spacing: 8,
                       children: [
-                        RaftIcon(titleGlyph!, size: 18, color: t.ink),
+                        RaftIcon(titleGlyph, size: 18, color: t.ink),
                         Expanded(
                           child: Text(
                             raftText(context, title).toUpperCase(),
@@ -556,7 +647,7 @@ class RaftDialogCard extends StatelessWidget {
                     ),
             ),
           ),
-          RaftCloseButton(onPressed: onClose),
+          RaftCloseButton(onPressed: raftGuardedClose(context, onClose)),
         ],
       ),
     );
@@ -889,7 +980,7 @@ class _RecipeSegmentState extends State<_RecipeSegment> {
       selected: widget.checked,
       label: widget.label,
       excludeSemantics: true,
-      child: MouseRegion(
+      child: RaftHoverRegion(
         cursor: widget.onTap == null
             ? MouseCursor.defer
             : SystemMouseCursors.click,

@@ -4,7 +4,7 @@ import CFNetwork
 import AVFoundation
 import ImageIO
 
-class MainFlutterWindow: NSWindow, RaftPreferencesWindow {
+class MainFlutterWindow: NSWindow, RaftPreferencesWindow, RaftPasteWindow, RaftUpdatesWindow {
   private var interactionChannel: FlutterMethodChannel?
   private var memoryChannel: FlutterMethodChannel?
   private var titleBar: RaftTitleBar?
@@ -12,6 +12,8 @@ class MainFlutterWindow: NSWindow, RaftPreferencesWindow {
   private var windowChannel: FlutterMethodChannel?
   private var windowCommandsReady = false
   private(set) var canOpenPreferences = false
+  private(set) var canPasteIntoFlutter = false
+  private(set) var canCheckForUpdates = false
   private var videoFrameChannel: FlutterMethodChannel?
   private let videoFrame = RaftVideoFrame()
 
@@ -38,6 +40,18 @@ class MainFlutterWindow: NSWindow, RaftPreferencesWindow {
 
   private func closeWindowFromCommand() {
     super.performClose(nil)
+  }
+
+  func checkForUpdates() {
+    guard windowCommandsReady && canCheckForUpdates else { return }
+    windowChannel?.invokeMethod("checkForUpdatesRequested", arguments: nil)
+  }
+
+  func pasteFromMenu() {
+    guard windowCommandsReady, canPasteIntoFlutter else { return }
+    // Native menu/synthetic Cmd+V must reach the Dart editor, rather than
+    // changing only Flutter's hidden AppKit accessibility field editor.
+    windowChannel?.invokeMethod("pasteRequested", arguments: nil)
   }
 
   func openPreferences() {
@@ -98,6 +112,10 @@ class MainFlutterWindow: NSWindow, RaftPreferencesWindow {
       } else if call.method == "setWindowCommandsState" {
         let state = call.arguments as? [String: Any]
         self?.windowCommandsReady = state?["ready"] as? Bool == true
+        self?.canCheckForUpdates = self?.windowCommandsReady == true
+          && state?["updates"] as? Bool == true
+        self?.canPasteIntoFlutter = self?.windowCommandsReady == true
+          && state?["paste"] as? Bool == true
         self?.canOpenPreferences = self?.windowCommandsReady == true
           && state?["preferences"] as? Bool == true
         result(nil)

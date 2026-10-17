@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_client/raft_client.dart';
 import 'package:raft_flutter/data/workspace_controller.dart';
-import 'package:raft_flutter/data/workspace_grid_sessions.dart';
 
 typedef _Receipt = ({RaftMessage message, Map<String, dynamic> receipt});
 
@@ -270,21 +269,6 @@ void main() {
       expect(alpha.visible, isFalse);
     },
   );
-
-  test('grid windows remain independent while sharing the composer', () async {
-    final grid = WorkspaceGridSessions(w);
-    addTearDown(grid.dispose);
-    final child = grid.open('alpha')!;
-    await _until(() => !child.channelLoading && child.messages.isNotEmpty);
-    expect(identical(child.composer, w.composer), isTrue);
-    expect(identical(child.messageWindows, w.messageWindows), isFalse);
-    expect(identical(child.messageWindow, w.messageWindow), isFalse);
-    expect(child.messageWindow!.rows, child.messages);
-    final before = List.of(client.calls);
-    child.messageWindow!.timeline;
-    w.messageWindow!.timeline;
-    expect(client.calls, before);
-  });
 
   test(
     'thread identity survives resolution and reopening without sending reads',

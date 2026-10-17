@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
@@ -323,7 +325,7 @@ class _RaftConversationCardState extends State<RaftConversationCard> {
         skipTraversal: true,
         // Source group-focus-within includes the row's nested action button.
         onFocusChange: (value) => setState(() => focused = value),
-        child: MouseRegion(
+        child: RaftHoverRegion(
           onEnter: (_) => setState(() => hovered = true),
           onExit: (_) => setState(() => hovered = false),
           child: Listener(

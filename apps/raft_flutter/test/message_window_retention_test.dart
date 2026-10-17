@@ -8,7 +8,6 @@ import 'package:raft_flutter/data/message_window_snapshot.dart';
 import 'package:raft_flutter/data/message_history_pages.dart';
 import 'package:raft_flutter/data/workspace_composer.dart';
 import 'package:raft_flutter/data/workspace_controller.dart';
-import 'package:raft_flutter/data/workspace_grid_sessions.dart';
 import 'package:raft_flutter/data/workspace_cache.dart';
 import 'package:raft_flutter/platform/workspace_cache.dart';
 
@@ -989,122 +988,74 @@ void main() {
     await dir.delete(recursive: true);
   });
   for (final status in [403, 404]) {
-    for (final grid in [false, true]) {
-      test(
-        'denial $status grid=$grid retains authored text and purges private state',
-        () async {
-          final db = DriftWorkspaceCache(NativeDatabase.memory());
-          final client = _Client();
-          final w = _controller(client, db);
-          final sessions = grid ? WorkspaceGridSessions(w) : null;
-          addTearDown(() async {
-            sessions?.dispose();
-            await w.flushCache();
-            w.dispose();
-            await client.eventsController.close();
-            await client.dispose();
-            await db.close();
-          });
-          final channel = w.channels.last;
-          await w.selectChannel(channel, autoRead: false);
-          w.saveDraft('My unsent words 草稿');
-          w.composer.attempts[channel.id] = ComposerSendAttempt(
-            'old',
-            'retry-id',
-          );
-          await db.write(
-            client.origin,
-            'alice',
-            'server',
-            'attempt',
-            channel.id,
-            {
-              'fingerprint': 'old',
-              'randomId': 'retry-id',
-              'channelId': channel.id,
-            },
-          );
-          final editor = sessions?.open(channel.id) ?? w;
-          if (grid) {
-            final loaded = Completer<void>();
-            void changed() {
-              if (editor.messages.isNotEmpty && !loaded.isCompleted) {
-                loaded.complete();
-              }
-            }
+    test('denial $status retains authored text and purges private state', () async {
+      final db = DriftWorkspaceCache(NativeDatabase.memory());
+      final client = _Client();
+      final w = _controller(client, db);
+      addTearDown(() async {
+        await w.flushCache();
+        w.dispose();
+        await client.eventsController.close();
+        await client.dispose();
+        await db.close();
+      });
+      final channel = w.channels.last;
+      await w.selectChannel(channel, autoRead: false);
+      w.saveDraft('My unsent words 草稿');
+      w.composer.attempts[channel.id] = ComposerSendAttempt('old', 'retry-id');
+      await db.write(client.origin, 'alice', 'server', 'attempt', channel.id, {
+        'fingerprint': 'old',
+        'randomId': 'retry-id',
+        'channelId': channel.id,
+      });
+      final editor = w;
+      await w.flushCache();
+      expect(identical(editor.composer, w.composer), isTrue);
+      expect(editor.messages, isNotEmpty);
 
-            editor.addListener(changed);
-            try {
-              await loaded.future.timeout(const Duration(seconds: 3));
-            } finally {
-              editor.removeListener(changed);
-            }
-          }
-          await w.flushCache();
-          expect(identical(editor.composer, w.composer), isTrue);
-          expect(editor.messages, isNotEmpty);
-
-          client.failure = RaftApiException(
-            'No channel access',
-            status: status,
-          );
-          await editor.selectChannel(channel, autoRead: false);
-          await editor.flushCache();
-          await w.flushCache();
-          expect(editor.channel, isNull);
-          expect(editor.messages, isEmpty);
-          expect(editor.ledger.messages(channel.id), isEmpty);
-          expect(w.composer.attempts.containsKey(channel.id), isFalse);
-          expect(w.drafts[channel.id], 'My unsent words 草稿');
-          expect(
-            await db.read(
-              client.origin,
-              'alice',
-              'server',
-              'window',
-              channel.id,
-            ),
-            isNull,
-          );
-          expect(
-            await db.read(
-              client.origin,
-              'alice',
-              'server',
-              'attempt',
-              channel.id,
-            ),
-            isNull,
-          );
-          final stored = await db.read(
-            client.origin,
-            'alice',
-            'server',
-            'draft',
-            channel.id,
-          ) as Map;
-          expect(stored['text'], 'My unsent words 草稿');
-          expect(stored['files'], isEmpty);
-          expect(stored['shareTokens'], isNull);
-
-          // A fresh controller restores only the user's words after access returns.
-          client.failure = null;
-          final restored =
-              WorkspaceController(client, cache: db, ownsClient: false)
-                ..server = w.server
-                ..channels = w.channels;
-          restored.ledger.switchServer('server');
-          try {
-            await restored.selectChannel(channel, autoRead: false);
-            expect(restored.drafts[channel.id], 'My unsent words 草稿');
-            expect(restored.composer.attempts, isEmpty);
-          } finally {
-            await restored.flushCache();
-            restored.dispose();
-          }
-        },
+      client.failure = RaftApiException('No channel access', status: status);
+      await editor.selectChannel(channel, autoRead: false);
+      await editor.flushCache();
+      await w.flushCache();
+      expect(editor.channel, isNull);
+      expect(editor.messages, isEmpty);
+      expect(editor.ledger.messages(channel.id), isEmpty);
+      expect(w.composer.attempts.containsKey(channel.id), isFalse);
+      expect(w.drafts[channel.id], 'My unsent words 草稿');
+      expect(
+        await db.read(client.origin, 'alice', 'server', 'window', channel.id),
+        isNull,
       );
-    }
+      expect(
+        await db.read(client.origin, 'alice', 'server', 'attempt', channel.id),
+        isNull,
+      );
+      final stored = await db.read(
+        client.origin,
+        'alice',
+        'server',
+        'draft',
+        channel.id,
+      ) as Map;
+      expect(stored['text'], 'My unsent words 草稿');
+      expect(stored['files'], isEmpty);
+      expect(stored['shareTokens'], isNull);
+
+      // A fresh controller restores only the user's words after access returns.
+      client.failure = null;
+      final restored = WorkspaceController(client, cache: db, ownsClient: false)
+        ..server = w.server
+        ..channels = w.channels;
+      restored.ledger.switchServer('server');
+      try {
+        await restored.selectChannel(channel, autoRead: false);
+        expect(restored.drafts[channel.id], 'My unsent words 草稿');
+        expect(restored.composer.attempts, isEmpty);
+      } finally {
+        await restored.flushCache();
+        restored.dispose();
+      }
+    });
   }
 
   test('accepted history survives transient refresh but denial revokes persisted and visible rows', () async {

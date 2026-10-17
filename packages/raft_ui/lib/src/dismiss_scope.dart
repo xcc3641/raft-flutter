@@ -43,6 +43,35 @@ class RaftDismissScope extends StatefulWidget {
 class _RaftDismissScopeState extends State<RaftDismissScope> {
   final node = FocusScopeNode(debugLabel: 'RaftDismissScope');
 
+  /// Whether the scope takes the initial focus. Decided once, when it mounts.
+  /// A scope that mounts inside a route that is already covered (the shell was
+  /// rebuilt behind the expanded composer editor when the window crossed the
+  /// phone / desktop breakpoint) must not pull the focus out of the route in
+  /// front of it: autofocus moves the primary focus even from a scope that is
+  /// not in the focus path.
+  bool? autofocus;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    autofocus ??= !_covered(context);
+  }
+
+  /// Route scopes only take part in focus traversal while their route is the
+  /// topmost one, so a covered route has `skipTraversal` set.
+  static bool _covered(BuildContext context) {
+    final parent = Focus.maybeOf(
+      context,
+      scopeOk: true,
+      createDependency: false,
+    );
+    if (parent == null) return false;
+    return [
+      parent,
+      ...parent.ancestors,
+    ].any((node) => node is FocusScopeNode && node.skipTraversal);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -75,7 +104,11 @@ class _RaftDismissScopeState extends State<RaftDismissScope> {
           },
         ),
       },
-      child: FocusScope(node: node, autofocus: true, child: widget.child),
+      child: FocusScope(
+        node: node,
+        autofocus: autofocus ?? true,
+        child: widget.child,
+      ),
     );
   }
 }

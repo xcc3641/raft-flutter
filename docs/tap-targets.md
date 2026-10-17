@@ -40,7 +40,7 @@ the content routes.
 2. Hosts must state their handlers. `RaftChatView` (`onTask`, `onViewBilling`),
    `ConversationPanel` (`onMessageTask`, `onViewBilling`,
    `onOpenChannelSettings`), `SourceTaskSurface` / `WorkspaceTaskHost`
-   (`onTask`, `onViewBilling`) and `WorkspaceGridView` (`onViewBilling`) keep
+   (`onTask`, `onViewBilling`) keep
    optional parameters (previews and unit tests build bare timelines), but
    `test/tap_target_registry_test.dart` fails when any call in `lib/` omits one.
    `null` is an explicit decision and always renders the affordance inert or
@@ -98,7 +98,7 @@ same way (including "inert").
 | Chat main | Linked task chip | Task slot | task modal | OK (matrix); FIXED for hosts without a task slot (opened the thread, wrong target; now painted disabled) |
 | Chat main | Reaction chip | Toggles the reaction | same | OK (matrix) |
 | Chat main | Attachment chip | Preview dialog / lightbox | same | OK (matrix) |
-| Chat main | Plan / archived / joint-locked banner links | Billing page / channel settings | same | FIXED where the host passed nothing (grid, task discussion: `() {}`); hidden now |
+| Chat main | Plan / archived / joint-locked banner links | Billing page / channel settings | same | FIXED where the host passed nothing (task discussion: `() {}`); hidden now |
 | Chat main, touch | Tap on the row body | Nothing (SelectionArea owns the tap) | Opens the thread (`handleMobileTap`) | GAP (see below) |
 | Thread panel (chat route) | Avatar, `@mention` | Profile panel | `openProfile(..., "thread")` | OK (matrix) |
 | Thread panel | Reply actions, badge, inline card | Absent | `hideThreadActions` | SAME |
@@ -117,19 +117,16 @@ same way (including "inert").
 | Public server (read-only) | Replies badge | Read-only thread panel | `onOpenThread` -> `openPublicThread` | OK (`public_server_view_test`) |
 | Public server | `#channel` link | Selects the public channel | `selectPublicChannel` | OK |
 | Public server | Avatar, name, `@mention`, thread / message / task refs, reactions | Inert | inert (`readOnlyProjection`) | SAME |
-| Workspace grid | Thread card, replies badge | Grid thread panel (`WorkspaceGridSessions.openThread`) | `openPanelRef` | OK (`workspace_grid_*` tests) |
-| Workspace grid | Avatar, `@mention` | `?profile=` written, the grid has no profile panel | Profile as a grid panel (`onOpenProfile`) | GAP (see below) |
-| Workspace grid | Task chip | Disabled (replies are never tasks) | n/a | SAME |
 | Forward composer preview | Content, "View all" | Expands in place | same (source label inert without `onOpenSource`) | OK |
 | Forwarded bundle in a message | Source label | Not rendered | Clickable when the source is public | GAP (missing element, not a dead tap) |
 | Agent profile, activity tab | `#channel` / thread / `dm:` tokens | Plain text | RefText chips navigate | GAP (missing element, not a dead tap) |
 | Appearance sample, exported image | all | Inert | n/a | SAME (inert by design) |
 | Phone pages | Thread, profile | Pages over the chat (`chat-390` host) | mobile detail routes | OK (matrix) |
 
-Counts: 37 rows. FIXED 10 (every Activity and Search preview
+Counts: 34 rows. FIXED 10 (every Activity and Search preview
 reply entry point and profile entry point, the inline `#N` reference, the task
 chip fallback, the dead banner links, and the task discussion's `#N` and billing
-link); GAP 4 (touch row tap, grid profile, forwarded-bundle source label,
+link); GAP 3 (touch row tap, forwarded-bundle source label,
 agent activity ref chips); the rest OK or SAME.
 
 ## Left unfixed
@@ -141,9 +138,6 @@ agent activity ref chips); the rest OK or SAME.
   a design decision (selection vs tap) and device proof (AGENTS.md: device fixes
   need device proof); phone routing is also being changed on
   `cindy/fold-routing`.
-* Workspace grid profile. Needs a grid panel type for profiles (Web
-  `WorkspaceGridRealPanel` `onOpenProfile`); the classic layout's profile column
-  is not part of the grid.
 * Forwarded-bundle source label and agent activity ref chips are elements Flutter
   does not draw. They are feature gaps, not taps that do nothing.
 
@@ -181,7 +175,6 @@ agent activity ref chips); the rest OK or SAME.
 | message-timeline | `lib/features/chat_view.dart` | RaftMessageTile, RaftInlineThreadSurface, RaftThreadRepliesBadge | tap_target_matrix_test.dart (every host) |
 | workspace-hosts | `lib/features/workspace_view.dart` | RaftChatView | tap_target_matrix_test.dart (thread panel, Activity / Search detail) |
 | channel-panel | `lib/features/conversation_panel.dart` | RaftChatView | tap_target_matrix_test.dart (chat, Activity, Search hosts) |
-| workspace-grid | `lib/features/workspace_grid_view.dart` | RaftChatView | workspace_grid_view_test.dart, workspace_grid_task_thread_test.dart (thread); profile column is a recorded gap |
 | task-discussion | `lib/features/task_surface.dart` | RaftChatView | tap_target_matrix_test.dart (task discussion carries onTask / onViewBilling) |
 | public-server | `lib/features/public_server_view.dart` | RaftMessageTile, RaftThreadRepliesBadge | public_server_view_test.dart (reply badge opens the thread) |
 | activity-saved-rows | `lib/features/resource_view.dart` | RaftConversationCard | activity_row_interaction_test.dart; tap_target_matrix_test.dart (Saved rows) |

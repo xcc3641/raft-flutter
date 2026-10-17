@@ -95,6 +95,9 @@ class ReleaseTests(unittest.TestCase):
             self.assertIn('--build-number=214', command)
             self.assertIn('--dart-define=RAFT_APP_VERSION=1.2.3', command)
             self.assertIn('--dart-define=RAFT_BUILD_NUMBER=214', command)
+            # The release tag is compiled in so the app can list the notes
+            # between its own release and an offered update.
+            self.assertIn('--dart-define=RAFT_RELEASE_TAG=v1.2.3+9', command)
             self.assertNotIn('--build-number=9', command)
         self.assertEqual((release.APP / 'pubspec.yaml').read_bytes(), original)
 
@@ -272,6 +275,14 @@ class ReleaseTests(unittest.TestCase):
                     'https://feedback.example.com/?token=x', 'https://feedback.example.com/a b'):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 release.release_defines('1.2.3', '7', {**env, 'RAFT_FEEDBACK_EXPORT_URL': bad})
+
+    def test_release_tag_define_is_optional_and_validated(self):
+        env = {'GITHUB_SHA': 'c' * 40}
+        self.assertNotIn('RAFT_RELEASE_TAG', release.release_defines('1.2.3', '7', env))
+        self.assertEqual(release.release_defines('1.2.3', '7', env, 'v1.2.3+4')['RAFT_RELEASE_TAG'], 'v1.2.3+4')
+        for bad in ('1.2.3', 'v1 2', 'v1;rm'):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                release.release_defines('1.2.3', '7', env, bad)
 
     def test_release_refuses_missing_or_dev_defines_before_building(self):
         good = {'RAFT_APP_VERSION': '1.2.3', 'RAFT_BUILD_NUMBER': '7', 'RAFT_ORIGIN': release.OFFICIAL_API_ORIGIN,

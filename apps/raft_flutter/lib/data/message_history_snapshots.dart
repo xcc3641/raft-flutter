@@ -1,30 +1,32 @@
 import 'message_history_pages.dart';
 import 'history_snapshot_writes.dart';
 import 'message_window_snapshot.dart';
-import 'workspace_controller.dart';
+import 'workspace_message_host.dart';
 import 'workspace_message_windows.dart';
 
 /// Compatibility snapshot adapter. Durable rows/ranges are owned separately;
 /// this keeps the previous version's rollback format and window boundaries.
 class MessageHistorySnapshots {
-  static Future<void> flush(WorkspaceController w) {
-    while (w.presentationSource != null) {
-      w = w.presentationSource!;
+  static Future<void> flush(WorkspaceMessageHost host) {
+    var w = host.messageDomain;
+    while (w.source != null) {
+      w = w.source!;
     }
-    return HistorySnapshotWrites.flush(w);
+    return HistorySnapshotWrites.flush(w.context.receiverKey);
   }
 
   static bool restore(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     String id,
     dynamic page,
     MessageWindowRequest request, {
     required bool replace,
     required bool Function() allowed,
   }) {
+    final w = host.messageDomain;
     final authority = messageWindowAuthority(
-      w.server?.string('role'),
-      w.channel?.json ?? const {},
+      w.context.server?.string('role'),
+      w.presentation.channel?.json ?? const {},
     );
     if (!request.current ||
         page is! Map ||
@@ -32,22 +34,22 @@ class MessageHistorySnapshots {
         page['windowKind'] != 'tail' ||
         page['hasNewer'] == true ||
         page['authority'] != authority ||
-        !w.can('viewChannel', resource: w.channel) ||
+        !w.context.can('viewChannel', resource: w.presentation.channel) ||
         !w.messageWindows.notRevoked(id) ||
         !allowed() ||
-        page['parentChannelId'] != w.channel?.id) {
+        page['parentChannelId'] != w.presentation.channel?.id) {
       return false;
     }
-    w.hasMore = page['hasMore'] == true;
-    w.historyLimited = page['historyLimited'] == true;
-    if (replace) w.hasNewer = page['hasNewer'] == true;
+    w.state.hasMore = page['hasMore'] == true;
+    w.state.historyLimited = page['historyLimited'] == true;
+    if (replace) w.state.hasNewer = page['hasNewer'] == true;
     w.messageWindows.rememberWindow(
       request,
       id,
       authority,
-      w.hasMore,
+      w.state.hasMore,
       w.messageHistoryTicket(id) as String,
-      historyLimited: w.historyLimited,
+      historyLimited: w.state.historyLimited,
       rows: acceptedWindowRows(page['messages'], id),
       replace: replace,
     );
@@ -55,12 +57,12 @@ class MessageHistorySnapshots {
     w.messageWindows.setContextMode(request, id, null);
     // This accepted local window is ready to present. Background validation
     // must not leave the chat adapter waiting for a writer or the network.
-    w.channelLoading = false;
+    w.state.channelLoading = false;
     return true;
   }
 
   static Future<void> save(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     String id, {
     required bool thread,
     bool coalesce = false,
@@ -68,30 +70,35 @@ class MessageHistorySnapshots {
     required String Function(String?) replyToken,
     required Future<void> Function(String, String, dynamic) write,
   }) {
-    if (!w.deviceStore.writable ||
-        w.channelLoading && w.messageWindows.isContext(id) ||
-        !thread && w.channel == null ||
-        (thread ? id != w.threadChannelId : id != w.channel!.id) ||
+    final w = host.messageDomain;
+    if (!w.device.writable ||
+        w.state.channelLoading && w.messageWindows.isContext(id) ||
+        !thread && w.presentation.channel == null ||
+        (thread
+            ? id != w.state.threadChannelId
+            : id != w.presentation.channel!.id) ||
         !w.messageWindows.notRevoked(id) ||
-        (thread ? w.messageWindows.contextHasNewer(id) : w.hasNewer) ||
-        w.highlightedMessageId != null) {
+        (thread ? w.messageWindows.contextHasNewer(id) : w.state.hasNewer) ||
+        w.state.highlightedMessageId != null) {
       return Future<void>.value();
     }
-    final resource = thread ? w.threadSourceChannel : w.channel;
-    if (resource == null || !w.can('viewChannel', resource: resource)) {
+    final resource = thread ? w.threadSourceChannel : w.presentation.channel;
+    if (resource == null || !w.context.can('viewChannel', resource: resource)) {
       return Future<void>.value();
     }
     final authority = messageWindowAuthority(
-      w.server?.string('role'),
+      w.context.server?.string('role'),
       resource.json,
     );
     w.messageWindows.rememberWindow(
       liveWindowWrite,
       id,
       authority,
-      thread ? w.threadHasMore : w.hasMore,
+      thread ? w.state.threadHasMore : w.state.hasMore,
       replyToken(thread ? w.threadParentChannelId : id),
-      historyLimited: thread ? w.threadHistoryLimited : w.historyLimited,
+      historyLimited: thread
+          ? w.state.threadHistoryLimited
+          : w.state.historyLimited,
     );
     w.messageWindows.setContextMode(liveWindowWrite, id, null);
     final rows = thread ? w.replies : w.messages;
@@ -100,9 +107,11 @@ class MessageHistorySnapshots {
       'windowKind': 'tail',
       'authority': authority,
       'parentChannelId': thread ? w.threadParentChannelId : id,
-      'messages': MessageHistoryPages.snapshotRows(w.deviceStore.cache, rows),
-      'hasMore': thread ? w.threadHasMore : w.hasMore,
-      'historyLimited': thread ? w.threadHistoryLimited : w.historyLimited,
+      'messages': MessageHistoryPages.snapshotRows(w.device.cache, rows),
+      'hasMore': thread ? w.state.threadHasMore : w.state.hasMore,
+      'historyLimited': thread
+          ? w.state.threadHistoryLimited
+          : w.state.historyLimited,
     };
     final window = {
       ...payload,
@@ -111,7 +120,7 @@ class MessageHistorySnapshots {
           ? {}
           : Map<String, dynamic>.from(w.threadSummaries),
     };
-    final parent = w.threadParent;
+    final parent = w.state.threadParent;
     final threadPayload =
         thread &&
             identity != null &&
@@ -130,19 +139,19 @@ class MessageHistorySnapshots {
         : null;
     final parentId = thread ? w.threadParentChannelId ?? id : id;
     final scope = (
-      w.client.origin,
-      w.client.user?.id,
-      w.client.serverId,
+      w.transport.client.origin,
+      w.transport.client.user?.id,
+      w.transport.client.serverId,
       w.ledger.generation,
       replyToken(parentId),
     );
     bool current() =>
-        w.deviceStore.writable &&
+        w.device.writable &&
         scope ==
             (
-              w.client.origin,
-              w.client.user?.id,
-              w.client.serverId,
+              w.transport.client.origin,
+              w.transport.client.user?.id,
+              w.transport.client.serverId,
               w.ledger.generation,
               replyToken(parentId),
             ) &&
@@ -157,8 +166,14 @@ class MessageHistorySnapshots {
       await saved;
     }
 
-    return coalesce && MessageHistoryPages.storage(w.deviceStore.cache) != null
-        ? HistorySnapshotWrites.schedule(w, (scope, id), writeCopies)
-        : HistorySnapshotWrites.writeNow(w, (scope, id), writeCopies);
+    return coalesce && MessageHistoryPages.storage(w.device.cache) != null
+        ? HistorySnapshotWrites.schedule(w.context.receiverKey, (
+            scope,
+            id,
+          ), writeCopies)
+        : HistorySnapshotWrites.writeNow(w.context.receiverKey, (
+            scope,
+            id,
+          ), writeCopies);
   }
 }

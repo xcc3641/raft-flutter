@@ -3,14 +3,14 @@ import 'message_history_pages.dart';
 import 'message_history_positions.dart';
 import 'message_history_summaries.dart';
 import 'message_window_snapshot.dart';
-import 'workspace_controller.dart';
+import 'workspace_message_host.dart';
 import 'workspace_message_windows.dart';
 import 'user_error.dart';
 
 /// Paging commands share the receiver's existing request and boundary owners.
 class MessageHistoryNavigation {
   static Future<bool> page(
-    WorkspaceController w, {
+    WorkspaceMessageHost host, {
     required bool thread,
     required bool newer,
     BigInt? gapBefore,
@@ -18,13 +18,14 @@ class MessageHistoryNavigation {
     required MessageWindowRequest Function(String) requestFor,
     required void Function(String, dynamic) summaries,
   }) async {
+    final w = host.messageDomain;
     final current = thread ? w.replies : w.messages;
-    final id = thread ? w.threadChannelId : w.channel?.id;
+    final id = thread ? w.state.threadChannelId : w.presentation.channel?.id;
     final more = newer
-        ? (thread ? w.messageWindows.contextHasNewer(id) : w.hasNewer)
-        : (thread ? w.threadHasMore : w.hasMore);
+        ? (thread ? w.messageWindows.contextHasNewer(id) : w.state.hasNewer)
+        : (thread ? w.state.threadHasMore : w.state.hasMore);
     if (id == null ||
-        w.loadingOlder ||
+        w.state.loadingOlder ||
         gapBefore == null && !more ||
         current.isEmpty) {
       return false;
@@ -35,8 +36,8 @@ class MessageHistoryNavigation {
       return false;
     }
     final request = requestFor(id);
-    w.loadingOlder = true;
-    w.notifyListeners();
+    w.state.loadingOlder = true;
+    w.context.changed();
     try {
       final page = await MessageHistoryPages.read(
         w,
@@ -60,15 +61,15 @@ class MessageHistoryNavigation {
               : rows.length >= 50);
       if (newer) {
         w.messageWindows.setContextMode(request, id, hasMore ? true : null);
-        if (!thread) w.hasNewer = hasMore;
+        if (!thread) w.state.hasNewer = hasMore;
       } else if (gapBefore != null) {
         // An interior gap has no authority over the oldest window boundary.
       } else if (thread) {
-        w.threadHistoryLimited = limited;
-        w.threadHasMore = hasMore;
+        w.state.threadHistoryLimited = limited;
+        w.state.threadHasMore = hasMore;
       } else {
-        w.historyLimited = limited;
-        w.hasMore = hasMore;
+        w.state.historyLimited = limited;
+        w.state.hasMore = hasMore;
       }
       if (!thread) {
         final carried = page['threadSummariesByParentMessageId'];
@@ -79,32 +80,37 @@ class MessageHistoryNavigation {
               : carried,
         );
       }
-      MessageHistoryPages.storage(w.deviceStore.cache)?.memory
-          .direction(w, id, older: !newer);
+      MessageHistoryPages.storage(w.device.cache)?.memory
+          .direction(w.context.receiverKey, id, older: !newer);
       await w.saveHistoryWindow(id, thread: thread);
       return true;
     } catch (cause) {
       if (request.current && !silent) {
-        w.error = userErrorText(
-          cause,
-          where: newer ? 'load newer messages' : 'load older messages',
+        w.presentation.assignError(
+          userErrorText(
+            cause,
+            where: newer ? 'load newer messages' : 'load older messages',
+          ),
         );
       }
       return false;
     } finally {
       if (request.current) {
-        w.loadingOlder = false;
-        w.notifyListeners();
+        w.state.loadingOlder = false;
+        w.context.changed();
       }
     }
   }
 
   static Future<void> latest(
-    WorkspaceController w, {
+    WorkspaceMessageHost host, {
     required bool thread,
     required bool navigate,
   }) async {
-    final selectedId = thread ? w.threadChannelId : w.channel?.id;
+    final w = host.messageDomain;
+    final selectedId = thread
+        ? w.state.threadChannelId
+        : w.presentation.channel?.id;
     if (selectedId == null) return;
     final identity = w.threadIdentity;
     final positionScope = MessageHistoryPages.scope(
@@ -118,17 +124,19 @@ class MessageHistoryNavigation {
     } else {
       w.messageWindows.channelGeneration++;
     }
-    final revision = w.navigationRevision, seal = w.messageHistoryTicket('');
+    final revision = w.presentation.navigationRevision,
+        seal = w.messageHistoryTicket('');
     final request = w.messageWindows.request(
       thread: thread,
       allowed: () =>
-          w.deviceStore.writable &&
-          revision == w.navigationRevision &&
+          w.device.writable &&
+          revision == w.presentation.navigationRevision &&
           seal == w.messageHistoryTicket('') &&
-          selectedId == (thread ? w.threadChannelId : w.channel?.id),
+          selectedId ==
+              (thread ? w.state.threadChannelId : w.presentation.channel?.id),
     );
-    MessageHistoryPages.storage(w.deviceStore.cache)?.memory
-        .direction(w, selectedId, older: false);
+    MessageHistoryPages.storage(w.device.cache)?.memory
+        .direction(w.context.receiverKey, selectedId, older: false);
     try {
       await MessageHistoryPositions.clear(
         w,
@@ -139,28 +147,30 @@ class MessageHistoryNavigation {
       );
     } catch (cause) {
       if (request.current) {
-        w.error = userErrorText(cause, where: 'load latest messages');
-        w.notifyListeners();
+        w.presentation.assignError(
+          userErrorText(cause, where: 'load latest messages'),
+        );
+        w.context.changed();
       }
       return;
     }
     if (!request.current) return;
-    w.clearHighlightedMessage(w.highlightedMessageId);
+    w.entries.clearHighlightedMessage(w.state.highlightedMessageId);
     if (thread) {
-      final id = w.threadChannelId;
+      final id = w.state.threadChannelId;
       if (identity != null &&
           id != null &&
           w.messageWindows.contextHasNewer(id)) {
-        await w.openThreadIdentity(
+        await w.entries.openThreadIdentity(
           parentChannelId: identity.parentChannelId,
           parentMessageId: identity.parentMessageId,
           initialThreadChannelId: id,
           navigate: navigate,
         );
       }
-    } else if (w.channel case final selected?) {
-      if (w.hasNewer) {
-        await w.selectChannel(
+    } else if (w.presentation.channel case final selected?) {
+      if (w.state.hasNewer) {
+        await w.entries.selectChannel(
           selected,
           navigate: navigate,
           retainContextUntilAccepted: true,

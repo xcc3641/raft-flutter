@@ -290,7 +290,7 @@ class _SearchHistoryTagState extends State<_SearchHistoryTag> {
     final t = RaftTokens.of(context);
     final reveal = widget.editing || hovering || focused;
     final showRemove = !widget.touch || widget.editing;
-    return MouseRegion(
+    return RaftHoverRegion(
       onEnter: (_) => setState(() => hovering = true),
       onExit: (_) => setState(() => hovering = false),
       child: Focus(

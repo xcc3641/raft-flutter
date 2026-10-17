@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -110,7 +112,7 @@ class _RaftQuickReactionPickerState extends State<RaftQuickReactionPicker> {
   Widget build(BuildContext context) {
     final t = RaftTokens.of(context);
     final recipe = RaftQuickReactionRecipe(t);
-    return MouseRegion(
+    return RaftHoverRegion(
       onEnter: (_) => widget.onBoundaryEnter?.call(),
       onExit: (_) => widget.onBoundaryLeave?.call(),
       child: surface(

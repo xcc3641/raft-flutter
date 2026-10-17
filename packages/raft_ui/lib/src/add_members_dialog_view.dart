@@ -5,6 +5,8 @@
 // (Agents / Humans sections with one row per candidate and a remove-from-list
 // button) and Cancel / "Add N members". The adapter owns candidates, selection
 // and the batch add.
+import 'hover_region.dart';
+
 import 'package:flutter/material.dart';
 
 import 'design_primitives.dart' show RaftDensity, RaftDensityScope;
@@ -317,9 +319,8 @@ class _RowState extends State<_Row> {
   Widget build(BuildContext context) {
     final t = RaftTokens.of(context);
     final row = widget.row;
-    final reveal =
-        hovered || RaftDensityScope.of(context) == RaftDensity.touch;
-    return MouseRegion(
+    final reveal = hovered || RaftDensityScope.of(context) == RaftDensity.touch;
+    return RaftHoverRegion(
       onEnter: (_) => setState(() => hovered = true),
       onExit: (_) => setState(() => hovered = false),
       child: Container(
@@ -386,7 +387,11 @@ class _RowState extends State<_Row> {
 /// hover:bg-danger/30` (brutal `rounded-none border-black bg-brutal-red/20`) with an
 /// `X size=12`.
 class _RemoveButton extends StatefulWidget {
-  const _RemoveButton({super.key, required this.label, required this.onPressed});
+  const _RemoveButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+  });
   final String label;
   final VoidCallback onPressed;
   @override
@@ -409,7 +414,7 @@ class _RemoveButtonState extends State<_RemoveButton> {
       excludeSemantics: true,
       child: Tooltip(
         message: widget.label,
-        child: MouseRegion(
+        child: RaftHoverRegion(
           cursor: SystemMouseCursors.click,
           onEnter: (_) => setState(() => hovered = true),
           onExit: (_) => setState(() => hovered = false),

@@ -197,22 +197,22 @@ void main() {
     }
   });
 
-  test('full refresh removes old fields from the visible ledger and held sync body', () async {
+  test('full refresh removes old fields from the visible ledger and legacy sync body', () async {
     final cache = DriftWorkspaceCache(NativeDatabase.memory()),
         client = FullPageClient();
     final w = receiver(client, cache);
     try {
       await w.selectChannel(w.channels.single, autoRead: false);
-      await w.refreshMessageSyncFlag();
-      expect(w.syncCoreMessagesEnabled, isTrue);
-      client.arrivals.add(
-        RaftEvent('message:new', {
-          ...row('chat', 1000),
-          'attachments': [
-            {'id': 'removed'},
-          ],
-        }),
-      );
+      final incoming = {
+        ...row('chat', 1000),
+        'attachments': [
+          {'id': 'removed'},
+        ],
+      };
+      // Retained legacy bodies still need authoritative cleanup, but current
+      // socket admission no longer populates or consults the retired core.
+      w.messageSync.consumeNew(incoming);
+      client.arrivals.add(RaftEvent('message:new', incoming));
       await cache.messageHistory.receiver.settled;
       expect(w.ledger.message('chat', 'chat-1000')!['attachments'], isNotEmpty);
       expect(w.messageSync.messages('chat'), hasLength(1));

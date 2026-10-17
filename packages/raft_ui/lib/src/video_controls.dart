@@ -3,6 +3,8 @@
 // rail, full screen, open, download, seek rail), the click / hover / tap
 // behaviour around it, and the thin rails. No Material Slider.
 // (test/media_controls_guard_test.dart)
+import 'hover_region.dart';
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
@@ -320,7 +322,7 @@ class _RaftVideoOverlayState extends State<RaftVideoOverlay> {
       label: raftFormat(context, 'Video {filename}', {
         'filename': widget.filename,
       }),
-      child: MouseRegion(
+      child: RaftHoverRegion(
         onEnter: (_) => pointerEntered(),
         onHover: (_) => pointerMoved(),
         onExit: (_) => pointerLeft(),
@@ -335,7 +337,7 @@ class _RaftVideoOverlayState extends State<RaftVideoOverlay> {
                   label: playLabel,
                   excludeSemantics: true,
                   onTap: widget.onTogglePlay,
-                  child: MouseRegion(
+                  child: RaftHoverRegion(
                     cursor: SystemMouseCursors.click,
                     child: GestureDetector(
                       key: const Key('inline-video-surface'),
@@ -403,7 +405,7 @@ class _RaftVideoOverlayState extends State<RaftVideoOverlay> {
                 // gets the hit, the controls keep their own taps.
                 child: fading(
                   showBar,
-                  MouseRegion(
+                  RaftHoverRegion(
                     hitTestBehavior: HitTestBehavior.translucent,
                     onEnter: (_) => barHovered(true),
                     onExit: (_) => barHovered(false),
@@ -641,7 +643,7 @@ class _RaftVideoControlBarState extends State<RaftVideoControlBar> {
                     ),
                     const Spacer(),
                     if (showMute)
-                      MouseRegion(
+                      RaftHoverRegion(
                         onEnter: volumeEnter,
                         onExit: volumeExit,
                         child: button(
@@ -703,7 +705,7 @@ class _RaftVideoControlBarState extends State<RaftVideoControlBar> {
                   bottom: 26,
                   width: 64,
                   height: box,
-                  child: MouseRegion(
+                  child: RaftHoverRegion(
                     onEnter: volumeEnter,
                     onExit: volumeExit,
                     child: IgnorePointer(
@@ -808,7 +810,7 @@ class _ControlButton extends StatelessWidget {
     label: label,
     excludeSemantics: true,
     onTap: onTap,
-    child: MouseRegion(
+    child: RaftHoverRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -892,7 +894,7 @@ class _VideoRailState extends State<_VideoRail> {
           }
 
           final hover = hoverX;
-          return MouseRegion(
+          return RaftHoverRegion(
             cursor: SystemMouseCursors.click,
             onHover: widget.hoverLabel == null
                 ? null

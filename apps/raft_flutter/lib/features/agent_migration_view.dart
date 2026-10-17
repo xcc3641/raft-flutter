@@ -326,6 +326,7 @@ class _AgentMigrationState extends ManagementState<AgentMigrationView> {
     var proRequired = false;
     final generation = w.client.generation, sourceAuthority = authority;
     await scopedDialog<bool>(
+      form: true,
       (dialogContext) => _StartDialog(
         targets: targets,
         openComputers: _openComputers,

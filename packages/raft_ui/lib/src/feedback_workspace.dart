@@ -6,6 +6,7 @@
 // SegmentedControl, MessageReferenceChip, DropdownMenu, AlertDialog, Banner,
 // TextareaCounter). The app owns the store and the transport; every value
 // shown here arrives as data.
+import 'hover_region.dart';
 import 'dismiss_scope.dart';
 import 'dart:math' as math;
 import 'dart:ui' show SemanticsRole;
@@ -830,7 +831,7 @@ class _RaftFeedbackMessageState extends State<RaftFeedbackMessage> {
       ],
     );
     final root = s.root;
-    return MouseRegion(
+    return RaftHoverRegion(
       onEnter: (_) => setState(() => hovered = true),
       onExit: (_) => setState(() => hovered = false),
       child: Padding(
@@ -1206,37 +1207,37 @@ class _RaftFeedbackCloseSplitState extends State<RaftFeedbackCloseSplit> {
         routeContext: this.context,
         onDismiss: _closeMenu,
         child: Theme(
-        data: theme,
-        child: RaftFeedbackPortalTheme(
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _closeMenu,
-                ),
-              ),
-              RaftAnchoredPopup(
-                anchorKey: anchor,
-                alignRight: true,
-                snapToPixel: true,
-                gap: t.brutal ? 4 : 6,
-                child: Material(
-                  type: MaterialType.transparency,
-                  textStyle: text,
-                  child: RaftFeedbackCloseMenu(
-                    defaultReason: widget.defaultReason,
-                    onChoose: (reason) {
-                      _closeMenu();
-                      widget.onChoose(reason);
-                    },
-                    onDismiss: _closeMenu,
+          data: theme,
+          child: RaftFeedbackPortalTheme(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _closeMenu,
                   ),
                 ),
-              ),
-            ],
+                RaftAnchoredPopup(
+                  anchorKey: anchor,
+                  alignRight: true,
+                  snapToPixel: true,
+                  gap: t.brutal ? 4 : 6,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    textStyle: text,
+                    child: RaftFeedbackCloseMenu(
+                      defaultReason: widget.defaultReason,
+                      onChoose: (reason) {
+                        _closeMenu();
+                        widget.onChoose(reason);
+                      },
+                      onDismiss: _closeMenu,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
         ),
       ),
     );

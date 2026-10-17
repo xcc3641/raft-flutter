@@ -1,3 +1,5 @@
+import 'hover_region.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -8,6 +10,7 @@ import 'dialog_card.dart';
 import 'dismiss_scope.dart';
 import 'emoji_picker.dart';
 import 'form_controls.dart';
+import 'form_presentation.dart';
 import 'popover_surface.dart';
 import 'icons.dart';
 import 'localization.dart';
@@ -48,6 +51,8 @@ class _RaftSidebarSectionDialogState extends State<RaftSidebarSectionDialog> {
   late String emoji = widget.initialEmoji;
   final emojiAnchor = GlobalKey(debugLabel: 'section-emoji-trigger');
   final emojiPortal = OverlayPortalController();
+  final _body = GlobalKey(debugLabel: 'section dialog body');
+  final _footer = GlobalKey(debugLabel: 'section dialog footer');
 
   @override
   void dispose() {
@@ -127,38 +132,12 @@ class _RaftSidebarSectionDialogState extends State<RaftSidebarSectionDialog> {
       tokens: tokens,
     ).title;
     final canSubmit = controller.text.trim().isNotEmpty;
-    return RaftRecipeCard(
-      maxWidth: 384, // max-w-sm
-      padding: const EdgeInsets.all(20),
+    final body = KeyedSubtree(
+      key: _body,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Semantics(
-                    header: true,
-                    child: Text(
-                      raftText(context, widget.title).toUpperCase(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: raftCssTextStyle(
-                        family: titleSlot.fontFamily ?? t.headingFont,
-                        step: RaftTextSteps.base,
-                        weight: FontWeight.w700,
-                        color: t.ink,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                RaftCloseButton(onPressed: widget.onClose),
-              ],
-            ),
-          ),
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(
@@ -200,38 +179,84 @@ class _RaftSidebarSectionDialogState extends State<RaftSidebarSectionDialog> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              RaftRecipeButton(
-                label: raftText(context, 'Cancel'),
-                variant: RaftButtonRecipeVariant.outline,
-                size: RaftButtonRecipeSize.sm,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                textStep: RaftTextSteps.sm,
-                onPressed: widget.onClose,
-              ),
-              const SizedBox(width: 8),
-              RaftRecipeButton(
-                label: raftText(context, widget.submitLabel),
-                variant: RaftButtonRecipeVariant.accent,
-                size: RaftButtonRecipeSize.sm,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                textStep: RaftTextSteps.sm,
-                disabled: !canSubmit,
-                // `disabled:opacity-50` on the submit Button.
-                disabledOpacity: .5,
-                onPressed: canSubmit ? submit : null,
-              ),
-            ],
+        ],
+      ),
+    );
+    final footer = KeyedSubtree(
+      key: _footer,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          RaftRecipeButton(
+            label: raftText(context, 'Cancel'),
+            variant: RaftButtonRecipeVariant.outline,
+            size: RaftButtonRecipeSize.sm,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            textStep: RaftTextSteps.sm,
+            onPressed: raftExplicitClose(context, widget.onClose),
           ),
+          const SizedBox(width: 8),
+          RaftRecipeButton(
+            label: raftText(context, widget.submitLabel),
+            variant: RaftButtonRecipeVariant.accent,
+            size: RaftButtonRecipeSize.sm,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            textStep: RaftTextSteps.sm,
+            disabled: !canSubmit,
+            // `disabled:opacity-50` on the submit Button.
+            disabledOpacity: .5,
+            onPressed: canSubmit ? submit : null,
+          ),
+        ],
+      ),
+    );
+    // A bottom sheet below 768 ([showRaftForm]): the pinned title, the field
+    // and the pinned actions.
+    if (RaftFormFrame.sheetOf(context)) {
+      return RaftFormSheet(
+        title: raftText(context, widget.title),
+        onClose: widget.onClose,
+        body: body,
+        footer: footer,
+      );
+    }
+    return RaftRecipeCard(
+      maxWidth: 384, // max-w-sm
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Semantics(
+                    header: true,
+                    child: Text(
+                      raftText(context, widget.title).toUpperCase(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: raftCssTextStyle(
+                        family: titleSlot.fontFamily ?? t.headingFont,
+                        step: RaftTextSteps.base,
+                        weight: FontWeight.w700,
+                        color: t.ink,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                RaftCloseButton(
+                  onPressed: raftGuardedClose(context, widget.onClose),
+                ),
+              ],
+            ),
+          ),
+          body,
+          const SizedBox(height: 16),
+          footer,
         ],
       ),
     );
@@ -257,7 +282,7 @@ class _NoEmojiRowState extends State<_NoEmojiRow> {
     final t = RaftTokens.of(context);
     return Semantics(
       button: true,
-      child: MouseRegion(
+      child: RaftHoverRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => hovered = true),
         onExit: (_) => setState(() => hovered = false),
@@ -317,8 +342,9 @@ class _EmojiButton extends StatelessWidget {
   );
 }
 
-/// Opens [RaftSidebarSectionDialog] over a [RaftModalBackdrop] that closes on
-/// a backdrop press (`Modal closeOnBackdrop`). [cardKey] marks the card.
+/// Opens [RaftSidebarSectionDialog] as a form: a bottom sheet below 768, a
+/// centered dialog from 768 that closes on a scrim press (`Modal
+/// closeOnBackdrop`). [cardKey] marks the card.
 Future<void> showRaftSidebarSectionDialog(
   BuildContext context, {
   required String title,
@@ -327,34 +353,23 @@ Future<void> showRaftSidebarSectionDialog(
   String initialName = '',
   String initialEmoji = '',
   Key? cardKey,
-}) => showGeneralDialog<void>(
-  context: context,
-  barrierDismissible: false,
-  barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-  barrierColor: Colors.transparent,
-  transitionDuration: Duration.zero,
-  pageBuilder: (dialogContext, _, _) {
+}) => showRaftForm<void>(
+  context,
+  dismissible: true,
+  builder: (dialogContext) {
     void close() => Navigator.of(dialogContext).pop();
-    return RaftDismissScope(
-      child: Material(
-        type: MaterialType.transparency,
-        child: RaftModalBackdrop(
-          onBackdrop: close,
-          child: KeyedSubtree(
-            key: cardKey,
-            child: RaftSidebarSectionDialog(
-              title: title,
-              submitLabel: submitLabel,
-              initialName: initialName,
-              initialEmoji: initialEmoji,
-              onClose: close,
-              onSubmit: (name, emoji) {
-                close();
-                onSubmit(name, emoji);
-              },
-            ),
-          ),
-        ),
+    return KeyedSubtree(
+      key: cardKey,
+      child: RaftSidebarSectionDialog(
+        title: title,
+        submitLabel: submitLabel,
+        initialName: initialName,
+        initialEmoji: initialEmoji,
+        onClose: close,
+        onSubmit: (name, emoji) {
+          close();
+          onSubmit(name, emoji);
+        },
       ),
     );
   },

@@ -302,7 +302,7 @@ class _SystemNotificationBellState extends State<SystemNotificationBell>
               child: TapRegion(
                 groupId: this,
                 onTapOutside: (_) => close(),
-                child: MouseRegion(
+                child: RaftHoverRegion(
                   onEnter: (_) => closeDelay?.cancel(),
                   onExit: (_) {
                     if (!widget.mobile) {
@@ -509,7 +509,7 @@ class _SystemNotificationBellState extends State<SystemNotificationBell>
           }
           return KeyEventResult.ignored;
         },
-        child: MouseRegion(
+        child: RaftHoverRegion(
           onEnter: (_) {
             if (!widget.mobile) unawaited(show());
           },

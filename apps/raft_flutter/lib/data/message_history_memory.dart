@@ -1,44 +1,52 @@
 import 'history_memory.dart';
 import 'message_history.dart';
 import 'message_history_pages.dart';
-import 'workspace_controller.dart';
+import 'workspace_message_host.dart';
 import 'workspace_message_windows.dart';
 
 /// Adapter for existing body owners. The pool stores no message authority.
 class MessageHistoryMemory {
   static void sample(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     Object owner,
     void Function() capture,
-  ) =>
-      MessageHistoryPages.storage(w.deviceStore.cache)?.memory
-          .samplePosition(owner, capture);
-  static void cancelSample(WorkspaceController w, Object owner) =>
-      MessageHistoryPages.storage(w.deviceStore.cache)?.memory.cancelSample(owner);
-  static void attach(WorkspaceController w, MessageHistoryStorage storage) {
-    if (w.presentationSource != null) return;
+  ) {
+    final w = host.messageDomain;
+    return MessageHistoryPages.storage(w.device.cache)?.memory
+        .samplePosition(owner, capture);
+  }
+
+  static void cancelSample(WorkspaceMessageHost host, Object owner) {
+    final w = host.messageDomain;
+    return MessageHistoryPages.storage(w.device.cache)?.memory
+        .cancelSample(owner);
+  }
+
+  static void attach(WorkspaceMessageHost host, MessageHistoryStorage storage) {
+    final w = host.messageDomain;
+    if (w.source != null) return;
     storage.memory.register(
-      w,
+      w.context.receiverKey,
       HistoryMemoryPort(
-        changes: w,
-        selected: () => w.foreground
-            ? {w.channel?.id, w.threadChannelId}.nonNulls
+        changes: w.notifications.changes,
+        selected: () => w.presentation.foreground
+            ? {w.presentation.channel?.id, w.state.threadChannelId}.nonNulls
             : const [],
         stamp: () => (
           w.ledger.revision,
-          w.client.origin,
-          w.client.user?.id,
-          w.client.serverId,
-          w.channel?.id,
-          w.threadChannelId,
-          w.foreground,
-          w.loadingOlder,
-          w.channelLoading,
-          w.threadLoading,
-          w.messageWindows.accepted[w.channel?.id],
-          w.messageWindows.accepted[w.threadChannelId],
-          w.deviceStore.writable,
-          w.highlightedMessageId,
+          w.transport.client.origin,
+          w.transport.client.user?.id,
+          w.transport.client.serverId,
+          w.presentation.channel?.id,
+          w.state.threadChannelId,
+          w.presentation.foreground,
+          w.state.loadingOlder,
+          w.state.channelLoading,
+          w.state.threadLoading,
+          w.messageWindows.accepted[w.presentation.channel?.id],
+          w.messageWindows.accepted[w.state.threadChannelId],
+          w.device.writable,
+          w.state.highlightedMessageId,
         ),
         capture: () => capture(w, storage),
       ),
@@ -46,26 +54,27 @@ class MessageHistoryMemory {
   }
 
   static Future<List<HistoryMemoryWindow>> capture(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     MessageHistoryStorage storage,
   ) async {
+    final w = host.messageDomain;
     final result = <HistoryMemoryWindow>[];
     final generation = w.ledger.generation,
-        origin = w.client.origin,
-        principal = w.client.user?.id,
-        server = w.client.serverId,
+        origin = w.transport.client.origin,
+        principal = w.transport.client.user?.id,
+        server = w.transport.client.serverId,
         seal = w.messageHistoryTicket(''),
-        main = w.channel?.id,
-        thread = w.threadChannelId;
+        main = w.presentation.channel?.id,
+        thread = w.state.threadChannelId;
     bool current() =>
-        w.deviceStore.writable &&
+        w.device.writable &&
         generation == w.ledger.generation &&
-        origin == w.client.origin &&
-        principal == w.client.user?.id &&
-        server == w.client.serverId &&
+        origin == w.transport.client.origin &&
+        principal == w.transport.client.user?.id &&
+        server == w.transport.client.serverId &&
         seal == w.messageHistoryTicket('') &&
-        main == w.channel?.id &&
-        thread == w.threadChannelId;
+        main == w.presentation.channel?.id &&
+        thread == w.state.threadChannelId;
     if (principal == null || server == null || !current()) return result;
     for (final id in {
       ...w.ledger.channelIds,
@@ -75,7 +84,7 @@ class MessageHistoryMemory {
       ],
       for (final thread in w.messageWindows.threads.values)
         thread.parentChannelId,
-      ...w.messageSync.channelIds,
+      ...w.state.messageSync.channelIds,
     }) {
       if (!current()) break;
       if (!w.messageWindows.notRevoked(id)) continue;
@@ -106,7 +115,7 @@ class MessageHistoryMemory {
       final ticket = w.messageHistoryTicket(scope.parentChannel);
       final versions = _versions(w, id);
       if (versions.isEmpty) continue;
-      final active = w.foreground && (id == main || id == thread);
+      final active = w.presentation.foreground && (id == main || id == thread);
       final anchor = w.messageWindows.readingAnchor(id);
       var anchorId = anchor == null
           ? null
@@ -130,11 +139,11 @@ class MessageHistoryMemory {
           !displayed.any((row) => row.id == anchorId)) {
         anchorId = displayed[displayed.length ~/ 2].id;
       }
-      final highlighted = w.highlightedMessageId;
+      final highlighted = w.state.highlightedMessageId;
       final protected = <String>{
         ?highlighted,
-        if (w.threadParent?.channelId == id) w.threadParent!.id,
-        for (final sends in w.composer.sends.pending.values)
+        if (w.state.threadParent?.channelId == id) w.state.threadParent!.id,
+        for (final sends in w.drafts.composer.sends.pending.values)
           for (final send in sends)
             if ((send.channelId ?? send.row.channelId) == id) send.row.id,
       };
@@ -151,8 +160,10 @@ class MessageHistoryMemory {
           active: active,
           paused:
               active &&
-              (w.loadingOlder ||
-                  (id == main ? w.channelLoading : w.threadLoading)),
+              (w.state.loadingOlder ||
+                  (id == main
+                      ? w.state.channelLoading
+                      : w.state.threadLoading)),
           anchor: anchorId,
           protectedIds: protected,
           current: admitted,
@@ -174,15 +185,15 @@ class MessageHistoryMemory {
                 .toSet();
             if (released.isEmpty) return released;
             final boundary = _releaseBodies(w, id, released);
-            w.messageSync.releaseBodies(id, released);
+            w.state.messageSync.releaseBodies(id, released);
             if (id == main) {
-              w.hasMore = w.hasMore || boundary.older;
-              w.hasNewer = w.hasNewer || boundary.newer;
+              w.state.hasMore = w.state.hasMore || boundary.older;
+              w.state.hasNewer = w.state.hasNewer || boundary.newer;
             }
             if (id == thread) {
-              w.threadHasMore = w.threadHasMore || boundary.older;
+              w.state.threadHasMore = w.state.threadHasMore || boundary.older;
             }
-            w.notifyListeners();
+            w.context.changed();
             return released;
           },
         ),
@@ -192,9 +203,10 @@ class MessageHistoryMemory {
   }
 
   static Map<String, List<Map<String, dynamic>>> _versions(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     String id,
   ) {
+    final w = host.messageDomain;
     final result = <String, List<Map<String, dynamic>>>{};
     void add(Map<String, dynamic> row) {
       final key = row['id'];
@@ -214,7 +226,7 @@ class MessageHistoryMemory {
     for (final thread in w.messageWindows.threads.values) {
       if (thread.parent case final parent?) add(parent.json);
     }
-    for (final row in w.messageSync.messages(id)) {
+    for (final row in w.state.messageSync.messages(id)) {
       final copies = result.putIfAbsent(row['id'] as String, () => []);
       if (!copies.any((copy) => identical(copy, row))) copies.add(row);
     }
@@ -222,10 +234,11 @@ class MessageHistoryMemory {
   }
 
   static ({bool older, bool newer}) _releaseBodies(
-    WorkspaceController w,
+    WorkspaceMessageHost host,
     String id,
     Set<String> ids,
   ) {
+    final w = host.messageDomain;
     final owner = w.messageWindows, visible = w.messageWindows.rows(id);
     final kept = visible.where((row) => !ids.contains(row.id)).toList();
     final older = visible.any(

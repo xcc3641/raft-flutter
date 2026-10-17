@@ -6,7 +6,10 @@ import 'package:flutter/painting.dart' show imageCache;
 import 'package:flutter/rendering.dart' show debugDisableShadows;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leak_tracker_flutter_testing/leak_tracker_flutter_testing.dart';
-import 'package:raft_flutter/platform/video_frame_probe.dart' show VideoFrameProbe;
+import 'package:raft_flutter/platform/video_frame_probe.dart'
+    show VideoFrameProbe;
+import 'package:raft_flutter/data/source_time_formatter.dart'
+    show initializeSourceTimeFormatting;
 import 'package:raft_ui/raft_ui.dart' show RaftHotImages, RaftImageBytes;
 
 /// Wraps the codecs `PaintingBinding.instantiateImageCodecWithSize` hands to
@@ -81,7 +84,10 @@ class RaftTestBinding extends AutomatedTestWidgetsFlutterBinding {
     ui.ImmutableBuffer buffer, {
     ui.TargetImageSizeCallback? getTargetSize,
   }) async => OwnedFrameCodec(
-    await super.instantiateImageCodecWithSize(buffer, getTargetSize: getTargetSize),
+    await super.instantiateImageCodecWithSize(
+      buffer,
+      getTargetSize: getTargetSize,
+    ),
   );
 
   @override
@@ -158,5 +164,8 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
       int.tryParse(Platform.environment['RAFT_TEST_TIMEOUT_SECONDS'] ?? '') ??
       60;
   binding.defaultTestTimeout = Timeout(Duration(seconds: seconds));
+  // Keep this process-wide Future out of any widget's disposable fake clock.
+  // Later runAsync calls must never depend on a previous test pumping again.
+  await initializeSourceTimeFormatting();
   await testMain();
 }

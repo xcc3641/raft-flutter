@@ -9,11 +9,9 @@ import '../data/raft_location.dart';
 import '../data/raft_navigation_history.dart';
 import '../data/rail_side_preference.dart';
 import '../data/workspace_controller.dart';
-import '../data/workspace_mode_store.dart';
 import '../data/workspace_navigation.dart';
 import '../platform/app_services.dart';
 import '../platform/native_notifications.dart';
-import 'workspace_mode_settings_card.dart';
 import 'workspace_settings.dart';
 
 /// Notifies only when the settings page's workspace inputs change.
@@ -68,13 +66,11 @@ class MobileSettingsDirectPage extends StatefulWidget {
     super.key,
     required this.controller,
     required this.presentation,
-    required this.workspaceMode,
     required this.buildPage,
     required this.active,
   });
   final WorkspaceController controller;
   final Listenable presentation;
-  final Listenable workspaceMode;
   final Widget Function() buildPage;
 
   /// False while this phone route is covered. A covered route keeps the page
@@ -102,11 +98,7 @@ class _MobileSettingsDirectPageState extends State<MobileSettingsDirectPage> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([
-        selection,
-        widget.presentation,
-        widget.workspaceMode,
-      ]),
+      listenable: Listenable.merge([selection, widget.presentation]),
       builder: (context, _) {
         // The push animation still lays the covered route out. Building the
         // live page there mounts a second copy of the open panel.
@@ -153,7 +145,6 @@ Widget workspaceSettingsSurface({
   required Future<void> Function() onLogout,
   required MobileTabbarStore mobileTabbar,
   required RailSideStore railSide,
-  required WorkspaceModeStore workspaceMode,
   required bool providerEnabled,
   required bool bridgeEnabled,
   required bool labsEnabled,
@@ -180,7 +171,6 @@ Widget workspaceSettingsSurface({
     presentation,
     mobileTabbar.settings,
     railSide.side,
-    workspaceMode,
     providerEnabled,
     bridgeEnabled,
     labsEnabled,
@@ -201,10 +191,6 @@ Widget workspaceSettingsSurface({
           controller: controller,
           initialTab: tab,
           appUpdate: AppServicesScope.of(serviceContext).appUpdate,
-          workspaceModeCard: WorkspaceModeSettingsCard(
-            controller: controller,
-            store: workspaceMode,
-          ),
           appearance: appearance,
           onAppearance: (next) => onAppearance(next),
           presentation: presentation,

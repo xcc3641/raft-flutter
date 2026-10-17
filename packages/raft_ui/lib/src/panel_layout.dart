@@ -6,6 +6,8 @@
 // Geometry and colour come from the generated raft-ui recipes (panelHeader,
 // panelAction, tabs) and, for classes written directly in Web JSX, from the
 // Tailwind classes cited next to each value (packages/web/src paths).
+import 'hover_region.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -141,7 +143,7 @@ class _RaftInlineIconButtonState extends State<RaftInlineIconButton> {
       child: Semantics(
         button: true,
         label: widget.tooltip,
-        child: MouseRegion(
+        child: RaftHoverRegion(
           cursor: SystemMouseCursors.click,
           onEnter: (_) => setState(() => hovered = true),
           onExit: (_) => setState(() => hovered = false),
@@ -731,7 +733,7 @@ class _RaftPanelTabBarState<T> extends State<RaftPanelTabBar<T>> {
         weight: FontWeight.w500,
       ).copyWith(color: fg, letterSpacing: -0.065),
     );
-    return MouseRegion(
+    return RaftHoverRegion(
       key: keys.putIfAbsent(tab.id, GlobalKey.new),
       cursor: SystemMouseCursors.basic,
       onEnter: (_) => setState(() => hovered = tab.id),
@@ -843,7 +845,7 @@ class _RaftPanelTabBarState<T> extends State<RaftPanelTabBar<T>> {
     // before:bg-line-strong` (brutal): a 2px divider inside every tab that
     // follows another tab.
     final divider = index > 0 && t.brutal;
-    return MouseRegion(
+    return RaftHoverRegion(
       key: keys.putIfAbsent(tab.id, GlobalKey.new),
       cursor: SystemMouseCursors.basic,
       onEnter: (_) => setState(() => hovered = tab.id),
