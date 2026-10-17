@@ -2964,14 +2964,23 @@
    "area": "dms",
    "capability": "Tap the peer's avatar in a DM header to open their profile (agent or human)",
    "background": false,
-   "status": "missing",
+   "status": "covered",
    "webEntry": "ChatPanel.tsx DM titleSlot avatar button -> useProfileStore.openProfile(agent|human, peerId)",
    "gate": "",
-   "flutterEntry": "RaftDmHeader avatar is not tappable (no onAvatarTap); profile reachable via members/agent lists instead",
-   "flutterRefs": [],
+   "flutterEntry": "RaftDmHeader onAvatarTap -> WorkspaceController.openProfile",
+   "flutterRefs": [
+    {
+     "file": "packages/raft_ui/lib/src/channel_header.dart",
+     "needle": "final VoidCallback? onBack, onSearch, onSettings, onAvatarTap;"
+    },
+    {
+     "file": "apps/raft_flutter/lib/features/workspace_view.dart",
+     "needle": "onAvatarTap: !canOpenProfile"
+    }
+   ],
    "justification": "",
-   "impact": "Anyone in a DM wanting the peer's profile/role/agent status; one extra navigation through Members.",
-   "size": "S"
+   "impact": "",
+   "size": ""
   },
   {
    "kind": "ui",

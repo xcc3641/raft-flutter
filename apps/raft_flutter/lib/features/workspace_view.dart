@@ -3212,6 +3212,8 @@ class _WorkspaceViewState extends State<WorkspaceView>
             'online' => RaftActivityTone.online,
             _ => RaftActivityTone.offline,
           };
+    final peerId = c.string('peerId');
+    final canOpenProfile = peerId.isNotEmpty;
     return RaftDmHeader(
       key: Key(
         mobile ? 'workspace-mobile-detail-header' : 'workspace-channel-header',
@@ -3246,6 +3248,15 @@ class _WorkspaceViewState extends State<WorkspaceView>
       backLabel: mainSelection.active ? tr('Exit selection') : tr('Back'),
       onSearch: searchThisChannel,
       onSettings: channelSettings,
+      onAvatarTap: !canOpenProfile
+          ? null
+          : () {
+              if (mainSelection.active) return;
+              w.openProfile(
+                peer.agent ? RaftProfileKind.agent : RaftProfileKind.human,
+                peerId,
+              );
+            },
       searchLabel: tr('Search this channel'),
       settingsLabel: tr('Channel details and settings'),
     );

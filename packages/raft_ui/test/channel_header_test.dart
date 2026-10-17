@@ -131,7 +131,7 @@ void main() {
         t.view.devicePixelRatio = 1;
         addTearDown(t.view.resetPhysicalSize);
         addTearDown(t.view.resetDevicePixelRatio);
-        var searches = 0, settings = 0;
+        var searches = 0, settings = 0, avatarTaps = 0;
         Future<void> mount({RaftActivityTone? activity, String? text}) =>
             t.pumpWidget(
               MaterialApp(
@@ -150,6 +150,7 @@ void main() {
                         activityText: text,
                         onSearch: () => ++searches,
                         onSettings: () => ++settings,
+                        onAvatarTap: () => ++avatarTaps,
                       ),
                     ],
                   ),
@@ -181,7 +182,8 @@ void main() {
         }
         await t.tap(find.byKey(const ValueKey('channel-topbar-search')));
         await t.tap(find.byKey(const ValueKey('channel-overflow-trigger')));
-        expect([searches, settings], [1, 1]);
+        await t.tap(find.byKey(const Key('dm-header-avatar-button')));
+        expect([searches, settings, avatarTaps], [1, 1, 1]);
         expect(t.takeException(), isNull);
       },
     );

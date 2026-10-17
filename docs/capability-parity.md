@@ -11,9 +11,9 @@ Total capabilities: 739 (325 endpoint/network keys, 414 client-side).
 
 | Status | Count |
 | --- | ---: |
-| ✅ covered | 531 |
+| ✅ covered | 532 |
 | ⚠️ partial | 72 |
-| ❌ missing | 81 |
+| ❌ missing | 80 |
 | ➖ na | 55 |
 
 | Area | ✅ | ⚠️ | ❌ | ➖ |
@@ -21,7 +21,7 @@ Total capabilities: 739 (325 endpoint/network keys, 414 client-side).
 | Messages | 59 | 7 | 13 | 0 |
 | Threads | 16 | 1 | 0 | 1 |
 | Channels | 25 | 6 | 2 | 1 |
-| DMs | 4 | 0 | 2 | 0 |
+| DMs | 5 | 0 | 1 | 0 |
 | Members and roles | 19 | 1 | 3 | 0 |
 | Server settings and admin | 50 | 0 | 0 | 0 |
 | Billing | 7 | 0 | 0 | 0 |
@@ -213,7 +213,7 @@ Legend: ✅ covered (endpoint called and a reachable entry point with equivalent
 | --- | --- | --- | --- | --- | --- |
 | ✅ | Load the DM list for the sidebar (bg) | `GET /channels/dm` | channelStore.loadDMChannels / addOrRefreshDM (background) | workspace_controller.dart server selection / channel_repository.dart refreshChannels() via controller facade; RaftClient.channels(dm: true) |  |
 | ✅ | Open (create) a direct message with a person or agent | `POST /channels/dm` | Member/agent context menu 'Message' \| profile panel Message button \| double-click human row \| agent DM rows \| quick switcher / search \| forward picker[gate: any member (guests limited server-side)] | workspace_view.dart openDm helpers; member_profile_view.dart Message button; fleet_views.dart; quick_switcher_host.dart | Entry points differ slightly (no sidebar member-row context menu or double-click in Flutter; see ui:members-roles.sidebar-member-row-menu). |
-| ❌ | Tap the peer's avatar in a DM header to open their profile (agent or human) | `ui:dms.header-avatar-opens-profile` | ChatPanel.tsx DM titleSlot avatar button -> useProfileStore.openProfile(agent\|human, peerId) | RaftDmHeader avatar is not tappable (no onAvatarTap); profile reachable via members/agent lists instead | Impact: Anyone in a DM wanting the peer's profile/role/agent status; one extra navigation through Members. Size S |
+| ✅ | Tap the peer's avatar in a DM header to open their profile (agent or human) | `ui:dms.header-avatar-opens-profile` | ChatPanel.tsx DM titleSlot avatar button -> useProfileStore.openProfile(agent\|human, peerId) | RaftDmHeader onAvatarTap -> WorkspaceController.openProfile |  |
 | ✅ | Agent DM row context menu: Move to section, Mark as Read/Unread, Pin/Unpin, Close Chat | `ui:dms.sidebar-agent-row-menu` | Sidebar.tsx ctxMenu type=agent | workspace_view_sidebar_menus.dart openAgentMenu |  |
 | ❌ | A DM closed with 'Close Chat' reappears when it gets a new unread message or when you open it again (Message button / link) | `ui:dms.sidebar-closed-dm-auto-reopen` | Sidebar.tsx closedDmUnreadSet keeps closed DMs with unread visible; reopenDm() runs when the route is a DM | sidebar_projection.dart drops every id in hiddenDmIds unconditionally (no unread exception, no un-hide on open) | Impact: Anyone who closes a DM: later replies are invisible in the sidebar (still in Activity/unread totals), and re-opening via Message does not restore the row. Hidden DM ids are only ever added (closeDm); nothing in lib removes them. Size S |
 | ✅ | DM row context menu: Move to section, Mark as Read/Unread, Pin/Unpin, Close Chat | `ui:dms.sidebar-dm-row-menu` | Sidebar.tsx ctxMenu type=dm / human (pinned person) | workspace_view_sidebar_menus.dart openDmMenu |  |
