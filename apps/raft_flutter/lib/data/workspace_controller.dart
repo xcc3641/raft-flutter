@@ -12,19 +12,28 @@ import 'message_task_cache.dart';
 import 'message_translation_store.dart';
 import 'thread_agent_followers.dart';
 import 'thread_search.dart';
+import 'thread_unread_hint.dart';
+import 'workspace_services.dart';
+import 'session_scope.dart';
+import 'channel_revocation.dart';
+import 'channel_repository.dart';
 import 'panel_caches.dart';
 import 'source_channel_files_store.dart';
 import 'source_activity_unread_store.dart';
 import 'reaction_toggle.dart';
 import 'workspace_cache.dart';
-import 'workspace_cache_reads.dart';
+import 'workspace_device_store.dart';
+import 'sidebar_repository.dart';
+import 'raft_api_gateway.dart';
 import 'workspace_composer.dart';
 import 'workspace_uploads.dart';
 import 'workspace_sends.dart';
+import 'conversation_read_repository.dart';
 import 'conversation_window.dart';
 import 'workspace_message_windows.dart';
 
 export 'workspace_uploads.dart' show UploadDraft;
+export 'thread_search.dart' show WorkspaceThreadIdentity;
 export 'conversation_window.dart' show MessageContextLoadError;
 export 'workspace_message_windows.dart' show ReadingAnchor;
 import 'resource_snapshot_cache.dart';
@@ -43,40 +52,18 @@ import 'message_history_events.dart';
 import 'message_history_snapshots.dart';
 import 'message_history_navigation.dart';
 import 'message_history_positions.dart';
+import 'message_history_summaries.dart';
 import 'thread_window_snapshot.dart';
 import 'attachment_image_repository.dart';
 import 'cache_clear.dart';
 import 'attachment_url_cache.dart';
-import '../platform/memory_budgets.dart';
-import '../platform/memory_release.dart';
+import 'attachment_media.dart';
+import 'attachment_retention_index.dart';
+
+export 'attachment_media.dart' show WorkspaceAttachmentImageLease;
 import '../platform/attachment_player_sessions.dart';
 import 'upload_mime.dart';
 import 'feature_flag_client_facts.dart';
-
-class WorkspaceAttachmentImageLease {
-  WorkspaceAttachmentImageLease(this.lease, this._releaseAuthority);
-  final AttachmentImageLease lease;
-  final VoidCallback _releaseAuthority;
-  bool _released = false;
-  void release({bool discard = false}) {
-    if (_released) return;
-    _released = true;
-    discard ? lease.discard() : lease.release();
-    _releaseAuthority();
-  }
-}
-
-/// Real URI identity, independent of the asynchronously accepted parent record.
-@immutable
-class WorkspaceThreadIdentity {
-  const WorkspaceThreadIdentity({
-    required this.parentChannelId,
-    required this.parentMessageId,
-    this.focusedMessageId,
-  });
-  final String parentChannelId, parentMessageId;
-  final String? focusedMessageId;
-}
 
 /// Web `isThreadAbsentLookupError` (threadStore.ts): only the route's explicit
 /// "no thread for this message" 404 means an empty thread. A 404 carrying a
@@ -91,7 +78,8 @@ bool isThreadAbsentLookupError(Object? error) {
   return error.message == 'No thread found for this message';
 }
 
-class WorkspaceController extends ChangeNotifier {
+class WorkspaceController extends ChangeNotifier
+    implements WorkspaceServiceAuthority, SessionScopeBinding {
   /// High-frequency socket events that never change workspace state.
   static const presenceEvents = {
     'agent:activity',
@@ -103,7 +91,7 @@ class WorkspaceController extends ChangeNotifier {
 
   WorkspaceController(
     this.client, {
-    this.cache,
+    WorkspaceCache? cache,
     this.presentationSource,
     this.mobileNavigation = false,
     this.ownsClient = true,
@@ -114,10 +102,108 @@ class WorkspaceController extends ChangeNotifier {
     AttachmentImageByteStore? attachmentImageStore,
     AttachmentUrlCache? attachmentUrls,
     WorkspaceComposer? composer,
-  }) : _attachmentUrls = attachmentUrls ?? AttachmentUrlCache(),
-       _presentationAuthority = presentationSource?.navigationAuthority,
-       attachmentImageStore =
-           attachmentImageStore ?? AttachmentDiskCache.installed {
+  }) : _presentationAuthority = presentationSource?.navigationAuthority {
+    conversationReads = ConversationReadRepository(
+      client,
+      readState: () => readState,
+      revokedChannels: () => _revokedChannels,
+      channelId: () => channel?.id,
+      threadChannelId: () => threadChannelId,
+      mobileNavigation: () => mobileNavigation,
+      mayMarkRead: _mayMarkRead,
+      markRead: (id) => markRead(id),
+      channelRows: () => [...channels, ...dms],
+      messages: (id) => ledger.messages(id),
+      isContext: (id) => messageWindows.isContext(id),
+      hasNewer: () => hasNewer,
+      save: (kind, id, value) => _save(kind, id, value),
+      changed: notifyListeners,
+      prefetch: () => prefetchLikelyChannels(),
+      isDiskOnly: (id) => messageWindows.isDiskOnly(id),
+      visibleIds: (id) => visibleIds[id],
+      generation: () => ledger.generation,
+      windowGeneration: (thread) =>
+          thread ? threadGeneration : channelGeneration,
+      isDisposed: () => _disposed,
+      refreshUnread: () => refreshUnread(),
+    );
+    sessionScope = SessionScope(this, ownsMedia: presentationSource == null);
+    channelRepository = ChannelRepository(
+      client,
+      channels: () => channels,
+      dms: () => dms,
+      generation: () => ledger.generation,
+      identity: _syncIdentity,
+      isDisposed: () => _disposed,
+      revokedChannels: () => _revokedChannels,
+      acceptLists: _acceptChannelLists,
+      saveDirectory: (record) {
+        _save('channels', '', record);
+      },
+      acceptSelection: _adoptAcceptedChannelSelection,
+      patchSelected: (patch) {
+        if (channel != null) channel = patch(channel!);
+      },
+      reloadLists: () => refreshChannels(),
+      reloadRow: (id) => refreshChannel(id),
+      revokeChannel: _revokeChannel,
+      closeDeniedThread: (id) {
+        if (_threadIdentity?.parentChannelId == id) closeThread();
+      },
+      changed: notifyListeners,
+      setError: setError,
+      quietFailure: _quietFailure,
+    );
+    apiGateway =
+        presentationSource?.apiGateway ??
+        RaftApiGateway(
+          client,
+          savedChanged: () {
+            ++savedRevision;
+            notifyListeners();
+          },
+          refreshUnread: () => refreshUnread(),
+        );
+    deviceStore = WorkspaceDeviceStore(
+      client,
+      cache: cache,
+      isDisposed: () => _disposed,
+      isChannelRevoked: (id) => _revokedChannels.contains(id),
+      isServerRevoked: (id) => _revokedServers.contains(id),
+      historyTicket: messageHistoryTicket,
+      readFailed: () {
+        if (!_disposed) error ??= 'Local workspace history is unavailable.';
+      },
+      writeFailed: (cause) {
+        if (!_disposed) {
+          error ??= MessageHistoryPages.saveError(cause);
+          notifyListeners();
+        }
+      },
+      purgeFailed: () {
+        if (!_disposed) {
+          // ignore: raft_lints/avoid_imperative_notice_state -- Cache-purge device failures raise the existing one-shot notice; the device service reports failure without owning UI state.
+          setError(
+            'Revoked workspace data could not be removed from this device.',
+          );
+        }
+      },
+    );
+    sidebarRepository =
+        presentationSource?.sidebarRepository ??
+        SidebarRepository(
+          client,
+          order: () => sidebarOrder,
+          setOrder: (value) => sidebarOrder = value,
+          serverId: () => server?.id,
+          loadAuthority: () =>
+              jsonEncode([client.user?.id, server?.id, server?.string('role')]),
+          isDisposed: () => _disposed,
+          readDevice: () => _cached('sidebar-order', ''),
+          saveDevice: (value) => _save('sidebar-order', '', value),
+          changed: notifyListeners,
+          reload: () => loadSidebar(),
+        );
     this.composer =
         composer ??
         presentationSource?.composer ??
@@ -134,36 +220,38 @@ class WorkspaceController extends ChangeNotifier {
             jsonEncode(server?.json['permissions']),
           ),
         );
-    if (presentationSource == null) {
-      _removePlayerTrim = _playerSessions.installMemoryTrim();
-    }
+    attachmentMedia =
+        presentationSource?.attachmentMedia ??
+        AttachmentMedia(
+          scope: () => attachmentImageScope,
+          get: (path, {query}) => client.get(path, query: query),
+          post: (path, {data}) => client.post(path, data: data),
+          isDisposed: () => _disposed,
+          admitsImages: () =>
+              client.user != null && server?.id == client.serverId,
+          isRevoked: (id) => _revokedChannels.contains(id),
+          retainedByHistory: _retainsAttachmentByHistory,
+          imageStore: attachmentImageStore ?? AttachmentDiskCache.installed,
+          urls: attachmentUrls,
+        );
     MessageHistoryPages.attach(this);
-    _ownsFollowedThreads = followedThreads == null;
-    this.followedThreads =
-        followedThreads ??
-        FollowedThreadsStore(
-          scope: _entityScope,
-          query: (path) => query(path),
-          command: (path, data) => command('POST', path, data: data),
-          authority: this,
-          events: client.events,
-          isOpen: (id) => threadChannelId == id,
-        );
-    _ownsEntityDirectory = entityDirectory == null;
-    this.entityDirectory =
-        entityDirectory ??
-        WorkspaceEntityDirectory(
-          scope: _entityScope,
-          query: (path) => query(path),
-          events: client.events,
-          readDevice: cache == null ? null : _readEntities,
-          writeDevice: cache == null ? null : _writeEntities,
-        );
+    services = WorkspaceServices(
+      this,
+      source: presentationSource,
+      isDisposed: () => _disposed,
+      entityScope: _entityScope,
+      panelIdentity: _panelCacheIdentity,
+      channelFilesAuthority: _channelFilesAuthority,
+      readEntities: cache == null ? null : _readEntities,
+      writeEntities: cache == null ? null : _writeEntities,
+      entityDirectory: entityDirectory,
+      followedThreads: followedThreads,
+    );
     // Directory changes are not forwarded to this notifier: agent heartbeats,
     // last-seen and machine status patches would rebuild every workspace
     // listener. Surfaces that render entities listen to [entityDirectory]
     // (or a [WorkspaceEntitySelection] of it) directly.
-    if (_ownsEntityDirectory) addListener(_entityAuthorityChanged);
+    if (services.ownsEntityDirectory) addListener(_entityAuthorityChanged);
     if (presentationSource == null) {
       this.composer.sends.attach(this, _sendChanged);
     }
@@ -180,7 +268,12 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   VoidCallback? _removeCacheClear;
+  late final SessionScope sessionScope;
+  @override
   late final WorkspaceComposer composer;
+  late final SidebarRepository sidebarRepository;
+  late final ChannelRepository channelRepository;
+  @override
   late final WorkspaceMessageWindows messageWindows =
       presentationSource?.messageWindows ??
       WorkspaceMessageWindows(
@@ -270,17 +363,19 @@ class WorkspaceController extends ChangeNotifier {
   /// widget holds, requests in flight and playing or held players stay.
   @visibleForTesting
   void clearRebuildableMemory() {
-    _attachmentImages?.trimIdle();
-    _attachmentUrls.dropResolved();
-    _playerSessions.trimStills();
-    _playerSessions.forgetFrames();
+    attachmentMedia.trimRebuildable();
   }
 
   /// Borrowed editor controllers project messages but never own the session,
   /// membership recovery, server selection, socket resume, or client teardown.
   final bool ownsClient;
+  @override
   final RaftClient client;
-  final WorkspaceCache? cache;
+  late final RaftApiGateway apiGateway;
+  @override
+  late final WorkspaceDeviceStore deviceStore;
+  @override
+  WorkspaceCache? get cache => deviceStore.cache;
 
   /// Route-local presentation borrows the session and accepted stores. Only
   /// the source reduces socket events and owns server/bootstrap lifecycle.
@@ -288,6 +383,7 @@ class WorkspaceController extends ChangeNotifier {
   final String? _presentationAuthority;
   bool presentationActive = true;
   final RestoreSharedDraftAttachment? restoreSharedAttachment;
+  @override
   final Future<void> Function(
     String origin,
     String principal,
@@ -295,49 +391,36 @@ class WorkspaceController extends ChangeNotifier {
     String? channel,
   )?
   discardSharedScope;
-  late final WorkspaceEntityDirectory entityDirectory;
-  late final bool _ownsEntityDirectory;
+  late final WorkspaceServices services;
+  @override
+  WorkspaceEntityDirectory get entityDirectory => services.entityDirectory;
 
   /// Server-scoped followed threads, shared with borrowed controllers.
-  late final FollowedThreadsStore followedThreads;
-  late final bool _ownsFollowedThreads;
+  @override
+  FollowedThreadsStore get followedThreads => services.followedThreads;
 
   /// Web `useTranslationStore`: translation settings and the in-memory
   /// translation cache, created on first use.
-  MessageTranslationStore get translations =>
-      presentationSource?.translations ??
-      (_translations ??= MessageTranslationStore(this));
-  MessageTranslationStore? _translations;
+  @override
+  MessageTranslationStore get translations => services.translations;
 
   /// Web ThreadPanel in-thread search state (bar, query, matches), created on
   /// first use; a presentation mirror shares its source's.
-  ThreadSearch get threadSearch =>
-      presentationSource?.threadSearch ??
-      (_threadSearch ??= ThreadSearch(this));
-  ThreadSearch? _threadSearch;
+  @override
+  ThreadSearch get threadSearch => services.threadSearch;
 
   /// Web `useThreadAgentFollowerStore`: the agents following each thread.
-  ThreadAgentFollowers get threadFollowers =>
-      presentationSource?.threadFollowers ??
-      (_threadFollowers ??= ThreadAgentFollowers(this));
-  ThreadAgentFollowers? _threadFollowers;
+  @override
+  ThreadAgentFollowers get threadFollowers => services.threadFollowers;
 
   /// Web `useAnnouncementStore`: the account-level announcement queue,
   /// living as long as this account session.
-  AnnouncementStore get announcements =>
-      presentationSource?.announcements ??
-      (_announcements ??= AnnouncementStore(
-        get: (path, {query}) => client.get(path, query: query),
-        post: (path) => client.post(path),
-        principal: () => client.user?.id,
-      ));
-  AnnouncementStore? _announcements;
+  @override
+  AnnouncementStore get announcements => services.announcements;
 
   /// Web `useOnboardingAnnouncementGateStore` (session memory per account).
-  AnnouncementOnboardingGate get announcementGate =>
-      presentationSource?.announcementGate ??
-      (_announcementGate ??= AnnouncementOnboardingGate());
-  AnnouncementOnboardingGate? _announcementGate;
+  @override
+  AnnouncementOnboardingGate get announcementGate => services.announcementGate;
   WorkspaceEntityScope? _entityScope() {
     final principal = client.user?.id;
     final serverId = client.serverId;
@@ -361,121 +444,37 @@ class WorkspaceController extends ChangeNotifier {
     );
   }
 
-  /// Device records of the server-scoped entity directory: kind `entities`,
-  /// id = [WorkspaceEntityKind.name], under the scope's origin, principal and
-  /// server (so logout, account and server revocation clear them with the
-  /// rest of the account/server data). The directory checks role and
-  /// capabilities before painting one.
   Future<dynamic> _readEntities(
     WorkspaceEntityScope scope,
     WorkspaceEntityKind kind,
-  ) async {
-    final store = cache;
-    if (store == null || _disposed || _cacheRetired) return null;
-    await _cacheWrites;
-    if (_disposed || _cacheRetired) return null;
-    return store.read(
-      scope.origin,
-      scope.principal,
-      scope.serverId,
-      'entities',
-      kind.name,
-    );
-  }
+  ) => deviceStore.readEntities(scope, kind);
 
   void _writeEntities(
     WorkspaceEntityScope scope,
     WorkspaceEntityKind kind,
     Map<String, dynamic>? record,
-  ) {
-    final store = cache;
-    if (store == null ||
-        _cacheRetired ||
-        (record != null && _revokedServers.contains(scope.serverId))) {
-      return;
-    }
-    _cacheWrites = _cacheWrites.then((_) async {
-      try {
-        await store.write(
-          scope.origin,
-          scope.principal,
-          scope.serverId,
-          'entities',
-          kind.name,
-          record,
-        );
-      } catch (_) {
-        // Best effort: the directory is revalidated on every start anyway.
-      }
-    });
-  }
+  ) => deviceStore.writeEntities(scope, kind, record);
 
-  /// Saved message translations of [serverId] under the current account
-  /// (see [MessageTranslationStore.restore]); empty without a device cache.
-  Future<List<Map<String, dynamic>>> readDeviceTranslations(
-    String serverId,
-  ) async {
-    final store = cache, principal = client.user?.id;
-    if (store == null || principal == null || _disposed || _cacheRetired) {
-      return const [];
-    }
-    final origin = client.origin;
-    await _cacheWrites;
-    if (_disposed || _cacheRetired) return const [];
-    try {
-      return await store.readTranslations(origin, principal, serverId);
-    } catch (_) {
-      // Best effort: missing entries are requested again.
-      return const [];
-    }
-  }
+  @override
+  Future<List<Map<String, dynamic>>> readDeviceTranslations(String serverId) =>
+      deviceStore.readDeviceTranslations(serverId);
 
-  /// Queues a device write of translation [entries] of [serverId] under the
-  /// current account. Nothing is written once the cache is retired, for a
-  /// revoked server, or for a channel revoked since the entry was made.
+  @override
   void writeDeviceTranslations(
     String serverId,
     List<Map<String, dynamic>> entries,
-  ) {
-    final store = cache, principal = client.user?.id;
-    if (store == null ||
-        principal == null ||
-        _cacheRetired ||
-        _revokedServers.contains(serverId)) {
-      return;
-    }
-    final rows = [
-      for (final entry in entries)
-        if (client.serverId != serverId ||
-            !_revokedChannels.contains(entry['channelId']))
-          entry,
-    ];
-    if (rows.isEmpty) return;
-    final origin = client.origin;
-    _cacheWrites = _cacheWrites.then((_) async {
-      if (_cacheRetired) return;
-      try {
-        await store.writeTranslations(origin, principal, serverId, rows);
-      } catch (_) {
-        // Best effort: unsaved translations are requested again.
-      }
-    });
-  }
+  ) => deviceStore.writeDeviceTranslations(serverId, entries);
 
-  /// The server translation gate saved for [serverId] (kind
-  /// `translation-settings`), or null.
-  Future<dynamic> readTranslationGate(String serverId) => _cacheRetired
-      ? Future.value()
-      : _cached('translation-settings', '', server: serverId);
+  @override
+  Future<dynamic> readTranslationGate(String serverId) =>
+      deviceStore.readTranslationGate(serverId);
 
-  /// Saves (or with null deletes) the translation gate of [serverId].
-  void saveTranslationGate(String serverId, Map<String, dynamic>? gate) {
-    if (gate != null && _revokedServers.contains(serverId)) return;
-    unawaited(_save('translation-settings', '', gate, server: serverId));
-  }
+  @override
+  void saveTranslationGate(String serverId, Map<String, dynamic>? gate) =>
+      deviceStore.saveTranslationGate(serverId, gate);
 
   void _entityAuthorityChanged() {
-    if (_disposed || !_ownsEntityDirectory) return;
+    if (_disposed || !services.ownsEntityDirectory) return;
     if (entityDirectory.synchronize() && entityDirectory.started) {
       // ignore: raft_lints/avoid_unreviewed_idle_work -- One-shot deferral out of a build or notification; the callback does not schedule another microtask itself.
       scheduleMicrotask(() {
@@ -484,15 +483,16 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  AttachmentImageRepository? _attachmentImages;
+  /// One media owner for the session and all borrowed presentations.
+  @override
+  late final AttachmentMedia attachmentMedia;
 
-  /// Persistent bytes for inline/list image previews (null: memory only).
-  final AttachmentImageByteStore? attachmentImageStore;
-  int get retainedImageDecodedBytes => _attachmentImages?.decodedByteCount ?? 0;
-  int get retainedImageCount => _attachmentImages?.entryCount ?? 0;
-  int get retainedImageEncodedBytes => _attachmentImages?.encodedByteCount ?? 0;
-  final _imageAuthorities =
-      <AttachmentImageKey, Map<Object, bool Function()>>{};
+  /// Compatibility facade while attachment surfaces move to [attachmentMedia].
+  int get retainedImageDecodedBytes =>
+      attachmentMedia.retainedImageDecodedBytes;
+  int get retainedImageCount => attachmentMedia.retainedImageCount;
+  int get retainedImageEncodedBytes =>
+      attachmentMedia.retainedImageEncodedBytes;
   AttachmentImageScope get attachmentImageScope => AttachmentImageScope(
     origin: client.origin,
     principal: client.user?.id ?? '',
@@ -522,23 +522,11 @@ class WorkspaceController extends ChangeNotifier {
     ]);
   }
 
-  ServerBoundCache<String, Object> get agentTabCache =>
-      presentationSource?.agentTabCache ?? _agentTabCache;
-  late final _agentTabCache = ServerBoundCache<String, Object>(
-    _panelCacheIdentity,
-  );
+  @override
+  ServerBoundCache<String, Object> get agentTabCache => services.agentTabCache;
+  @override
   ServerBoundCache<String, TaskHistorySnapshot> get taskHistoryCache =>
-      presentationSource?.taskHistoryCache ?? _taskHistoryCache;
-  late final _taskHistoryCache = ServerBoundCache<String, TaskHistorySnapshot>(
-    _panelCacheIdentity,
-    limit: 128,
-  );
-  late final _channelFilesStores =
-      ServerBoundCache<String, SourceChannelFilesStore>(
-        _panelCacheIdentity,
-        limit: 24,
-        onEvict: (store) => store.retire(),
-      );
+      services.taskHistoryCache;
 
   /// Channel access behind a cached Files list: the server identity plus the
   /// member's current capabilities for that channel. null (nothing shown, list
@@ -558,172 +546,30 @@ class WorkspaceController extends ChangeNotifier {
   /// The controller-owned Files projection of [channelId]. The same store is
   /// returned on every visit, so a revisit paints the last list immediately
   /// and a refresh replaces it in place.
-  SourceChannelFilesStore channelFilesStore(String channelId) {
-    final source = presentationSource;
-    if (source != null) return source.channelFilesStore(channelId);
-    final store = _channelFilesStores.putIfAbsent(
-      channelId,
-      () => SourceChannelFilesStore(
-        channelId: channelId,
-        authority: () => _channelFilesAuthority(channelId),
-        get: (path, {query}) async {
-          try {
-            return await client.get(path, query: query);
-          } on RaftApiException catch (error) {
-            throw ChannelFilesRequestFailure(
-              [401, 403].contains(error.status)
-                  ? ChannelFilesFailure.unauthorized
-                  : ChannelFilesFailure.unavailable,
-            );
-          }
-        },
-      ),
-    );
-    store.syncAuthority();
-    return store;
-  }
+  @override
+  SourceChannelFilesStore channelFilesStore(String channelId) =>
+      services.channelFilesStore(channelId);
 
-  bool _retainsAttachment(AttachmentImageKey key) {
-    if (_disposed ||
-        key.scope != attachmentImageScope ||
-        client.user == null ||
-        server?.id != client.serverId) {
-      return false;
-    }
-    // A freshly accepted Files row is an independent permission projection.
-    // Its active owner never grants authority through a cached URL or count.
-    if (_imageAuthorities[key]?.values.any((admitted) => admitted()) == true) {
-      return true;
-    }
-    final candidates =
-        _retainedAttachmentIndex()[key.channelId]?[key.attachmentId] ??
-        const <Map<String, dynamic>>[];
-    for (final metadata in candidates) {
-      final canonical = AttachmentImageKey.fromMetadata(
-        scope: key.scope,
-        channelId: key.channelId,
-        metadata: metadata,
-        rendition: key.rendition,
-        target: key.target,
+  // Per receiver, even when its media owner is borrowed from another page.
+  late final AttachmentRetentionIndex attachmentRetentionIndex =
+      AttachmentRetentionIndex(
+        ledgerRevision: () => ledger.revision,
+        stateStamp: () => _stateStamp,
+        scope: () => attachmentImageScope,
+        channels: () => channels,
+        dms: () => dms,
+        revokedChannels: () => _revokedChannels,
+        canView: (row) => can('viewChannel', resource: row),
+        messages: (id) => ledger.messages(id),
       );
-      if (canonical == key) return true;
-    }
-    return false;
-  }
 
-  // Attachments in currently admitted channels, keyed by channel then file.
-  // Notifications recheck admission; history is scanned only when the ledger,
-  // image scope or admitted channel ids change.
-  Object? _retainedIndexStamp;
-  Map<String, Map<String, List<Map<String, dynamic>>>> _retainedIndex = {};
-  Object? _retainedAdmissionStamp;
-  List<String> _retainedChannelIds = const [];
-  int _retainedIndexBuilds = 0;
+  bool _retainsAttachmentByHistory(AttachmentImageKey key) =>
+      attachmentRetentionIndex.retains(key);
 
   /// Number of complete history scans used for attachment retention.
   @visibleForTesting
-  int get debugRetainedAttachmentIndexBuilds => _retainedIndexBuilds;
-
-  List<String> _admittedAttachmentChannels() {
-    // Keep every former index invalidation boundary. In particular a normal
-    // notification still reevaluates can() and revocations before reusing any
-    // metadata, even when the channel list has the same identity and length.
-    final stamp = (
-      ledger.revision,
-      _stateStamp,
-      attachmentImageScope,
-      identityHashCode(channels),
-      channels.length,
-      identityHashCode(dms),
-      dms.length,
-      _revokedChannels.length,
-    );
-    if (stamp == _retainedAdmissionStamp) return _retainedChannelIds;
-    final admitted = [
-      for (final channel in [...channels, ...dms])
-        if (!_revokedChannels.contains(channel.id) &&
-            can('viewChannel', resource: channel))
-          channel.id,
-    ];
-    if (!listEquals(admitted, _retainedChannelIds)) {
-      _retainedChannelIds = List.unmodifiable(admitted);
-    }
-    _retainedAdmissionStamp = stamp;
-    return _retainedChannelIds;
-  }
-
-  Map<String, Map<String, List<Map<String, dynamic>>>>
-  _retainedAttachmentIndex() {
-    final admitted = _admittedAttachmentChannels();
-    final stamp = (ledger.revision, attachmentImageScope, admitted);
-    if (stamp == _retainedIndexStamp) return _retainedIndex;
-    ++_retainedIndexBuilds;
-    final index = <String, Map<String, List<Map<String, dynamic>>>>{};
-    for (final id in admitted) {
-      final channelIds = <String>{id};
-      for (final message in ledger.messages(id)) {
-        final thread = RaftMessage(message).threadId;
-        if (thread != null) channelIds.add(thread);
-      }
-      for (final channelId in channelIds) {
-        if (index.containsKey(channelId)) continue;
-        final byAttachment = index[channelId] = {};
-        for (final message in ledger.messages(channelId)) {
-          for (final metadata in RaftMessage(message).attachments) {
-            final id = metadata['id'];
-            if (id is String) (byAttachment[id] ??= []).add(metadata);
-          }
-        }
-      }
-    }
-    _retainedIndexStamp = stamp;
-    return _retainedIndex = index;
-  }
-
-  VoidCallback _registerImageAuthority(
-    AttachmentImageKey key,
-    bool Function() authorized,
-  ) {
-    final owner = Object();
-    _imageAuthorities.putIfAbsent(key, () => {})[owner] = authorized;
-    return () {
-      final owners = _imageAuthorities[key];
-      owners?.remove(owner);
-      if (owners?.isEmpty == true) _imageAuthorities.remove(key);
-      _attachmentImages?.synchronize(attachmentImageScope);
-    };
-  }
-
-  AttachmentImageRepository _newImageRepository() {
-    final budgets = RaftMemoryBudgets.current;
-    final repository = AttachmentImageRepository(
-      scope: attachmentImageScope,
-      retainedAuthority: _retainsAttachment,
-      store: attachmentImageStore,
-      maxEntries: budgets.attachmentImageEntries,
-      maxDecodedBytes: budgets.attachmentImageDecodedBytes,
-      maxActiveDecodedBytes: budgets.attachmentImageActiveDecodedBytes,
-      maxEncodedBytes: budgets.attachmentImageEncodedBytes,
-    );
-    // Decoded bitmaps are rebuildable from the byte store: let go of the
-    // unleased ones under memory pressure and while the app is hidden.
-    _removeImageReporter = RaftMemoryRelease.instance.addReporter(
-      'attachmentImages',
-      () =>
-          '${repository.entryCount}/${repository.maxEntries} entries '
-          '${repository.decodedByteCount}/${repository.maxDecodedBytes} B decoded '
-          '${repository.encodedByteCount} B encoded',
-    );
-    _removeImageTrimmer = RaftMemoryRelease.instance.addTrimmer(
-      (reason) => repository.trimIdle(
-        pressure: reason == RaftMemoryTrim.pressure,
-        reason: reason.name,
-      ),
-    );
-    return repository;
-  }
-
-  VoidCallback? _removeImageTrimmer, _removeImageReporter;
+  int get debugRetainedAttachmentIndexBuilds =>
+      attachmentRetentionIndex.debugBuilds;
 
   WorkspaceAttachmentImageLease acquireAttachmentImage(
     AttachmentImageKey key, {
@@ -731,99 +577,36 @@ class WorkspaceController extends ChangeNotifier {
     required bool Function() authorized,
     bool foreground = false,
     bool bestAvailable = false,
-  }) {
-    if (presentationSource != null) {
-      return presentationSource!.acquireAttachmentImage(
-        key,
-        load: load,
-        authorized: authorized,
-        foreground: foreground,
-        bestAvailable: bestAvailable,
-      );
-    }
-    final releaseAuthority = _registerImageAuthority(key, authorized);
-    try {
-      final repository = _attachmentImages ??= _newImageRepository();
-      repository.synchronize(attachmentImageScope);
-      return WorkspaceAttachmentImageLease(
-        repository.acquire(
-          key,
-          load: load,
-          authorized: authorized,
-          foreground: foreground,
-          bestAvailable: bestAvailable,
-        ),
-        releaseAuthority,
-      );
-    } catch (_) {
-      releaseAuthority();
-      rethrow;
-    }
-  }
+  }) => attachmentMedia.acquireImage(
+    key,
+    load: load,
+    authorized: authorized,
+    foreground: foreground,
+    bestAvailable: bestAvailable,
+  );
 
-  /// Synchronous lookup: a lease on the already decoded image for [key], or
-  /// null when it is not retained (or no longer authorized). Never loads.
+  /// Synchronous lookup; never loads an image.
   WorkspaceAttachmentImageLease? peekAttachmentImage(
     AttachmentImageKey key, {
     required bool Function() authorized,
-  }) {
-    if (presentationSource != null) {
-      return presentationSource!.peekAttachmentImage(
-        key,
-        authorized: authorized,
-      );
-    }
-    final repository = _attachmentImages;
-    if (repository == null || _disposed) return null;
-    repository.synchronize(attachmentImageScope);
-    final releaseAuthority = _registerImageAuthority(key, authorized);
-    final lease = repository.acquireReady(key, authorized: authorized);
-    if (lease == null) {
-      releaseAuthority();
-      return null;
-    }
-    return WorkspaceAttachmentImageLease(lease, releaseAuthority);
-  }
+  }) => attachmentMedia.peekImage(key, authorized: authorized);
 
-  /// The persistent attachment cache, when this controller has one (the
-  /// installed app cache by default; tests with a fake byte store have none).
-  AttachmentDiskCache? get attachmentDiskCache {
-    final source = presentationSource;
-    if (source != null) return source.attachmentDiskCache;
-    final store = attachmentImageStore;
-    return store is AttachmentDiskCache ? store : null;
-  }
+  AttachmentDiskCache? get attachmentDiskCache => attachmentMedia.diskCache;
 
-  /// Persistent key of a derived entry (`file`, `preview`, `html`) of
-  /// [metadata]'s attachment for the current account and server.
   AttachmentImageStoreKey attachmentCacheKey(
     Map<String, dynamic> metadata,
     String kind, {
     required String channelId,
-  }) => AttachmentImageKey.storeKeyOf(
-    scope: attachmentImageScope,
-    channelId: channelId,
-    metadata: metadata,
-    kind: kind,
-  );
-
-  /// True when [key]'s source bytes are already stored on this device, so
-  /// nothing needs to be signed or fetched for them.
-  Future<bool> attachmentStored(AttachmentImageKey key) async {
-    final disk = attachmentDiskCache;
-    if (disk == null) return false;
-    try {
-      return await disk.contains(key.source.storeKey);
-    } catch (_) {
-      return false;
-    }
-  }
+  }) => attachmentMedia.cacheKey(metadata, kind, channelId: channelId);
 
   /// Set by the host from its actual logical width before bootstrap. Home
   /// retains selection/drafts, but is not an open conversation/read surface.
   bool mobileNavigation;
+  @override
   final messageSync = MessageSync();
+  @override
   final threadRepliesSync = ThreadRepliesSync();
+  @override
   final notificationPrefsSync = NotificationPrefsSync();
   bool syncCoreNotificationPrefsEnabled = false;
   String? _replyIdentity;
@@ -892,7 +675,7 @@ class WorkspaceController extends ChangeNotifier {
     return const {'private', 'dm', 'joint', 'thread'}.contains(known.type);
   }
 
-  void _mergeThreadSummaries(String id, dynamic rows) => _summariesByChannel
+  void mergeThreadSummaries(String id, dynamic rows) => _summariesByChannel
       .putIfAbsent(id, () => {})
       .addAll(
         _hydrateThreadSummaries(rows, id, expectedToken: _replyToken(id)),
@@ -968,6 +751,7 @@ class WorkspaceController extends ChangeNotifier {
         request.parentChannelId,
         () => {},
       )[request.parentMessageId] = result.summary;
+      MessageHistorySummaries.rebaselined(this, request, result.summary);
       _applyThreadUnread(request.threadChannelId, result.summary);
       if (channel?.id == request.parentChannelId) _saveWindow(channel!.id);
       notifyListeners();
@@ -1007,6 +791,7 @@ class WorkspaceController extends ChangeNotifier {
       if (owner != null && !_revokedChannels.contains(owner)) {
         _summariesByChannel.putIfAbsent(owner, () => {})[parentId] =
             result.summary;
+        MessageHistorySummaries.store(this, owner, {parentId: result.summary});
       }
       _applyThreadUnread(payload['threadChannelId'], payload);
     }
@@ -1044,18 +829,8 @@ class WorkspaceController extends ChangeNotifier {
 
   /// A thread summary carries the server's own per-thread unread count; it
   /// replaces only a count the unread snapshot already tracks.
-  void _applyThreadUnread(dynamic threadChannelId, dynamic summary) {
-    if (threadChannelId is! String ||
-        summary is! Map ||
-        !unread.containsKey(threadChannelId) ||
-        threadChannelId == this.threadChannelId) {
-      return;
-    }
-    final count = summary['unreadCount'];
-    if (count is! int || count < 0 || unread[threadChannelId] == count) return;
-    unread = {...unread, threadChannelId: count};
-    _persistUnread();
-  }
+  void _applyThreadUnread(dynamic threadChannelId, dynamic summary) =>
+      conversationReads.applyThreadUnread(threadChannelId, summary);
 
   void _consumeNotificationPrefs(dynamic payload) {
     _ensureSyncIdentity();
@@ -1085,21 +860,8 @@ class WorkspaceController extends ChangeNotifier {
 
       servers = servers.map(patch).toList();
       if (server != null) server = patch(server!);
-    } else {
-      final state = accepted['state'] as Map;
-      final id = accepted['channelId'];
-      if (_revokedChannels.contains(id)) return;
-      RaftChannel patch(RaftChannel value) {
-        if (value.id != id) return value;
-        final old = value.json['prefsVersion'],
-            incoming = state['prefsVersion'];
-        if (old is int && incoming is int && incoming < old) return value;
-        return RaftChannel({...value.json, ...state});
-      }
-
-      channels = channels.map(patch).toList();
-      dms = dms.map(patch).toList();
-      if (channel != null) channel = patch(channel!);
+    } else if (!channelRepository.applyNotificationPrefs(accepted)) {
+      return;
     }
     refreshUnread();
   }
@@ -1108,21 +870,8 @@ class WorkspaceController extends ChangeNotifier {
   /// frame carries a string `serverId`/`scopeId` and a boolean
   /// `prefs.collapseLongMessages`.
   static ({String serverId, String channelId, bool collapse, int? version})?
-  readMessageDisplayPrefsUpdate(dynamic payload) {
-    if (payload is! Map) return null;
-    final serverId = payload['serverId'], scopeId = payload['scopeId'];
-    final prefs = payload['prefs'];
-    if (serverId is! String || scopeId is! String || prefs is! Map) return null;
-    final collapse = prefs['collapseLongMessages'];
-    if (collapse is! bool) return null;
-    final version = payload['prefsVersion'];
-    return (
-      serverId: serverId,
-      channelId: scopeId,
-      collapse: collapse,
-      version: version is num ? version.toInt() : null,
-    );
-  }
+  readMessageDisplayPrefsUpdate(dynamic payload) =>
+      ChannelRepository.readMessageDisplayPrefsUpdate(payload);
 
   /// Source `applyMessageDisplayPrefsState` for one row: a patch older than
   /// the row's `displayPrefsVersion` is ignored.
@@ -1130,37 +879,18 @@ class WorkspaceController extends ChangeNotifier {
     RaftChannel value, {
     required bool collapse,
     int? version,
-  }) {
-    final prior = value.json['displayPrefsVersion'];
-    if (prior is num && version != null && version < prior) return value;
-    return RaftChannel({
-      ...value.json,
-      'collapseLongMessages': collapse,
-      'displayPrefsVersion': ?version,
-    });
-  }
+  }) => ChannelRepository.applyMessageDisplayPrefsToChannel(
+    value,
+    collapse: collapse,
+    version: version,
+  );
 
   /// Source socketBridge `message_display_prefs:updated`: written onto the
   /// channel row so chat folding follows another device's toggle.
-  void _consumeMessageDisplayPrefs(dynamic payload) {
-    final update = readMessageDisplayPrefsUpdate(payload);
-    if (update == null ||
-        (client.serverId != null && update.serverId != client.serverId) ||
-        _revokedChannels.contains(update.channelId)) {
-      return;
-    }
-    RaftChannel patch(RaftChannel value) => value.id != update.channelId
-        ? value
-        : applyMessageDisplayPrefsToChannel(
-            value,
-            collapse: update.collapse,
-            version: update.version,
-          );
-    channels = channels.map(patch).toList();
-    dms = dms.map(patch).toList();
-    if (channel != null) channel = patch(channel!);
-  }
+  void _consumeMessageDisplayPrefs(dynamic payload) =>
+      channelRepository.consumeMessageDisplayPrefs(payload);
 
+  @override
   bool syncCoreMessagesEnabled = false;
 
   /// Web serverFeatureFlags `remote_computer_upgrade_v2`: whether the
@@ -1181,6 +911,7 @@ class WorkspaceController extends ChangeNotifier {
   bool agentMigrationEnabled = false, runtimeFormV2WebEnabled = false;
   int _messageFlagRequest = 0;
 
+  @override
   Future<void> refreshMessageSyncFlag() async {
     _ensureSyncIdentity();
     final request = ++_messageFlagRequest;
@@ -1260,37 +991,29 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  Future<void> _cacheWrites = Future<void>.value();
-
-  /// Set when the account's device data is being cleared (logout): nothing
-  /// more is written for it, so a late write cannot resurrect cleared rows.
-  bool _cacheRetired = false;
-
   /// Writes every pending (debounced) change and completes once all queued
   /// device writes have landed.
   Future<void> flushCache() async {
     await MessageHistorySnapshots.flush(this);
     await MessageHistoryPages.storage(cache)?.receiver.settled;
     await MessageHistoryPages.storage(cache)?.positionsSettled;
-    if (_ownsEntityDirectory) entityDirectory.flushDevice();
-    _translations?.flushDevice();
-    await Future.wait([_cacheWrites, composer.flushed]);
+    services.flushDevice();
+    await Future.wait([deviceStore.settled, composer.flushed]);
   }
 
   /// Stops all further device writes of this workspace and completes once
   /// the writes already queued have landed. The caller then clears the
   /// account's device data.
   Future<void> retireCache() {
-    _cacheRetired = true;
-    return Future.wait([_cacheWrites, composer.flushed]);
+    return Future.wait([deviceStore.retire(), composer.flushed]);
   }
 
   Map<String, String> get drafts =>
       !composer.ownedBy(this) && (server == null || _disposed)
       ? const {}
       : composer.drafts;
-  final Set<String> _revokedChannels = {};
-  final Set<String> _revokedServers = {};
+  Set<String> get _revokedChannels => sessionScope.revokedChannels;
+  Set<String> get _revokedServers => sessionScope.revokedServers;
   Object? _presentationOwner;
   bool _mainPresented = true, _threadPresented = true;
   Object? _tabPresentationOwner;
@@ -1343,20 +1066,17 @@ class WorkspaceController extends ChangeNotifier {
     _mainPresented = _threadPresented = true;
   }
 
-  SourceActivityUnreadStore? _activityUnread;
-
   /// This session owns one window; pages and platform adapters only borrow it.
   /// Server selection creates it before UI; standalone views can borrow a
   /// passive projection before selection. Neither path starts work by reading.
-  SourceActivityUnreadStore get activityUnread => _disposed
-      ? throw StateError('Workspace session is disposed.')
-      : presentationSource?.activityUnread ??
-            (_activityUnread ??= SourceActivityUnreadStore(this));
+  @override
+  @override
+  SourceActivityUnreadStore get activityUnread => services.activityUnread;
 
   /// The existing session projection; reading it never constructs or starts it.
-  SourceActivityUnreadStore? get activityUnreadIfBound => _disposed
-      ? null
-      : presentationSource?.activityUnreadIfBound ?? _activityUnread;
+  @override
+  SourceActivityUnreadStore? get activityUnreadIfBound =>
+      services.activityUnreadIfBound;
 
   final foregroundChanges = ValueNotifier<bool>(true);
 
@@ -1374,9 +1094,8 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  /// A workspace switch and loss of the active workspace retire the same
-  /// accepted windows and session projections before another read can publish.
-  void _resetServerWindows(String? id) {
+  @override
+  void resetServerProjection() {
     historyLimited = threadHistoryLimited = false;
     channel = null;
     channels = [];
@@ -1389,71 +1108,27 @@ class WorkspaceController extends ChangeNotifier {
     threadChannelId = null;
     _summariesByChannel.clear();
     highlightedMessageId = null;
-    messageWindows.channelGeneration++;
-    messageWindows.threadGeneration++;
-    messageWindows.switchServer(id);
-    readState.reset();
-    resourceSnapshots.clear();
-    _prefetched.clear();
-    reactionViewer.reset();
-    messageSync.reset();
-    syncCoreMessagesEnabled = false;
   }
 
-  void revokeServer(String id) {
-    final principal = client.user?.id;
-    if (principal == null) return;
-    _revokedServers.add(id);
-    servers.removeWhere((s) => s.id == id);
-    final origin = client.origin;
-    unawaited(discardSharedScope?.call(origin, principal, id, null));
-    // Everything cached for that server on this device is revoked with it.
-    final store = attachmentImageStore;
-    if (store != null && presentationSource == null) {
-      unawaited(
-        store
-            .purgeIdentity(AttachmentImageKey.identityOf(origin, principal, id))
-            .catchError((Object _) {}),
-      );
-    }
-    if (client.serverId == id) {
-      composer.clearOwnedBy(this);
-      _resetServerWindows(null);
-      server = null;
-      sidebarOrder = {};
-      error = null;
-      _messageFlagRequest++;
-      if (ownsClient) client.selectServer(null);
-      loading = false;
-      channelLoading = false;
-      threadLoading = false;
-    }
-    _cacheWrites = _cacheWrites.then((_) async {
-      try {
-        await cache?.revokeServer(origin, principal, id);
-      } catch (_) {
-        if (!_disposed) {
-          // ignore: raft_lints/avoid_imperative_notice_state -- Cache-purge device failures and background refresh failures raise a one-shot toast; stale-scope and rate-limited failures are suppressed (_quietFailure) and the error is cleared on server switch or revoke.
-          setError(
-            'Revoked workspace data could not be removed from this device.',
-          );
-        }
-      }
-    });
-    _save('servers', '', servers.map((s) => s.json).toList(), server: '');
-    notifyListeners();
+  @override
+  void clearSessionPrefetch() => _prefetched.clear();
+
+  void revokeServer(String id) => sessionScope.revokeServer(id);
+
+  @override
+  void closeRevokedServerProjection() {
+    server = null;
+    sidebarOrder = {};
+    error = null;
+    _messageFlagRequest++;
+    if (ownsClient) client.selectServer(null);
+    loading = false;
+    channelLoading = false;
+    threadLoading = false;
   }
 
-  Future<dynamic> _cached(String kind, String id, {String? server}) async {
-    try {
-      return await WorkspaceCacheReads.read(cache, client, _cacheWrites, kind, id,
-        server: server, active: () => cacheWritable, authority: messageHistoryTicket,
-        visible: (id) => !_revokedChannels.contains(id));
-    } catch (_) {
-      if (!_disposed) error ??= 'Local workspace history is unavailable.';
-      return null;
-    }
-  }
+  Future<dynamic> _cached(String kind, String id, {String? server}) =>
+      deviceStore.read(kind, id, server: server);
 
   Future<void> _save(
     String kind,
@@ -1461,38 +1136,13 @@ class WorkspaceController extends ChangeNotifier {
     dynamic value, {
     String? server,
     bool requiredSuccess = false,
-  }) async {
-    final user = client.user?.id;
-    if (cache == null || user == null || _cacheRetired) return;
-    if (_revokedChannels.contains(id) ||
-        value is Map && _revokedChannels.contains(value['channelId'])) {
-      return;
-    }
-    final origin = client.origin, serverId = server ?? client.serverId ?? '';
-    final windowScope = value is Map && const {'window', 'thread-window'}.contains(kind)
-        ? '${value['parentChannelId'] ?? id}'
-        : null;
-    final windowTicket = windowScope == null
-        ? null
-        : messageHistoryTicket(windowScope);
-    final writing = _cacheWrites.then((_) async {
-      if (windowScope != null &&
-          (!cacheWritable || windowTicket != messageHistoryTicket(windowScope))) {
-        return;
-      }
-      try {
-        await cache!.write(origin, user, serverId, kind, id, value);
-      } catch (cause) {
-        if (!_disposed) {
-          error ??= MessageHistoryPages.saveError(cause);
-          notifyListeners();
-        }
-        if (requiredSuccess) rethrow;
-      }
-    });
-    _cacheWrites = writing.then<void>((_) {}, onError: (Object _) {});
-    await writing;
-  }
+  }) => deviceStore.write(
+    kind,
+    id,
+    value,
+    server: server,
+    requiredSuccess: requiredSuccess,
+  );
 
   void saveDraft(String text, {bool thread = false}) {
     final source = presentationSource;
@@ -1589,7 +1239,7 @@ class WorkspaceController extends ChangeNotifier {
       messageWindowAuthority(server?.string('role'), channel?.json ?? const {});
 
   /// Device writes stop before logout purges are queued.
-  bool get cacheWritable => !_cacheRetired && !_disposed;
+  bool get cacheWritable => deviceStore.writable;
   Object messageHistoryTicket(String id) => _replyToken(id);
   void rejectHistoryRead(String id) => _windowReceiver._revokeChannel(id);
   Future<void> saveHistoryWindow(String id, {bool thread = false}) =>
@@ -1628,21 +1278,19 @@ class WorkspaceController extends ChangeNotifier {
   late final StreamSubscription<RaftEvent> subscription;
   MessageLedger get ledger => messageWindows.ledger;
   final _reactionViewer = ReactionViewerLedger();
+  @override
   ReactionViewerLedger get reactionViewer =>
       presentationSource?.reactionViewer ?? _reactionViewer;
   final Map<String, Future<void>> _reactionWrites = {};
   final Map<String, Future<void>> _viewerLoads = {};
   Map<String, List<UploadDraft>> get _uploads => composer.uploads.byScope;
-  Map<String, ComposerSendAttempt> get _attempts => composer.attempts;
 
   bool _disposed = false;
   int _stateStamp = 0;
   @override
   void notifyListeners() {
     _stateStamp++;
-    _attachmentImages?.synchronize(attachmentImageScope);
-    _attachmentUrls.synchronize(attachmentImageScope);
-    _playerSessions.synchronize(attachmentImageScope);
+    if (presentationSource == null) attachmentMedia.synchronize();
     if (!_disposed) {
       _syncScopeVisits();
       _ensureSyncIdentity();
@@ -1886,7 +1534,7 @@ class WorkspaceController extends ChangeNotifier {
     if (_disposed) return;
     final wasOpen = channel?.id == pendingId;
     composer.adoptScope(pendingId, real.id);
-    _channelRowSeq[real.id] = ++_channelReadSeq;
+    channelRepository.recordRowWrite(real.id);
     if (wasOpen) channel = real;
     _putChannelRow(real);
     notifyListeners();
@@ -1906,7 +1554,7 @@ class WorkspaceController extends ChangeNotifier {
   void putSharedChannelRow(RaftChannel row) {
     final source = presentationSource;
     if (source != null) return source.putSharedChannelRow(row);
-    _channelRowSeq[row.id] = ++_channelReadSeq;
+    channelRepository.recordRowWrite(row.id);
     _putChannelRow(row);
   }
 
@@ -2045,36 +1693,51 @@ class WorkspaceController extends ChangeNotifier {
     composer.uploads.remove(draft, _saveDraftScope);
   }
 
-  final _readState = ReadStateLedger();
+  late final ConversationReadRepository conversationReads;
+  ReadStateLedger get _readState => conversationReads.localReadState;
+  @override
   ReadStateLedger get readState => presentationSource?.readState ?? _readState;
 
   /// Workspace-owned page snapshots (Activity, Saved) that survive
   /// navigation; dropped on every server or account switch.
   final _resourceSnapshots = ResourceSnapshotCache();
+  @override
   ResourceSnapshotCache get resourceSnapshots =>
       presentationSource?.resourceSnapshots ?? _resourceSnapshots;
   Map<String, Set<String>> get visibleIds => messageWindows.visibleIds;
-  bool hasNewer = false, threadHasMore = false;
+  bool hasNewer = false;
+  @override
+  bool threadHasMore = false;
   bool threadHistoryLimited = false, historyLimited = false;
   String? highlightedMessageId;
 
   /// Pending unknown context; cross-channel cached tails are not that context.
   String? get pendingMessageContextChannelId =>
       messageWindows.pendingContextChannelId;
+  @override
   List<RaftRecord> servers = [];
-  List<RaftChannel> channels = [], dms = [];
-  Map<String, int> unread = {};
+  @override
+  List<RaftChannel> get channels => channelRepository.channels;
+  set channels(List<RaftChannel> value) => channelRepository.channels = value;
+  @override
+  List<RaftChannel> get dms => channelRepository.dms;
+  set dms(List<RaftChannel> value) => channelRepository.dms = value;
+  Map<String, int> get unread => conversationReads.unread;
+  set unread(Map<String, int> value) => conversationReads.unread = value;
 
   /// Source messageStore `mentionFlags`: conversations whose unread messages
   /// mention the member (unread snapshot `hasMention`, a live `message:new`
   /// that mentions the member). Cleared with the unread count.
-  Set<String> mentions = {};
+  Set<String> get mentions => conversationReads.mentions;
+  set mentions(Set<String> value) => conversationReads.mentions = value;
 
   /// Unread summary `hasNew`: non-joined public channels with messages past
   /// the cursor (no exact count). Lights the quiet dot of a non-joined row;
   /// cleared with the unread count (Web `newFlags`).
-  Set<String> newFlags = {};
+  Set<String> get newFlags => conversationReads.newFlags;
+  set newFlags(Set<String> value) => conversationReads.newFlags = value;
   Map<String, dynamic> sidebarOrder = {};
+  @override
   RaftRecord? server;
   bool can(String capability, {RaftChannel? resource}) => raftCan(
     server?.string('role'),
@@ -2090,6 +1753,7 @@ class WorkspaceController extends ChangeNotifier {
   // ignore: raft_lints/avoid_imperative_notice_state -- Cleared when a thread opens or closes and hidden whenever threadIdentity is stale.
   String? _threadResolutionError;
 
+  @override
   WorkspaceThreadIdentity? get threadIdentity =>
       _threadVisit?.current == true ? _threadIdentity : null;
   bool get threadResolutionLoading =>
@@ -2098,6 +1762,7 @@ class WorkspaceController extends ChangeNotifier {
       threadIdentity != null && _threadParentLoading;
   String? get threadResolutionError =>
       threadIdentity == null ? null : _threadResolutionError;
+  @override
   RaftMessage? get presentedThreadParent => _threadIdentity == null
       ? threadParent
       : threadIdentity != null &&
@@ -2128,6 +1793,7 @@ class WorkspaceController extends ChangeNotifier {
       _threadChannelResource(threadParentChannelId);
 
   RaftMessage? threadParent;
+  @override
   String? threadChannelId;
   bool loading = false,
       channelLoading = false,
@@ -2269,6 +1935,7 @@ class WorkspaceController extends ChangeNotifier {
   bool presentsReply(String? id) =>
       messageWindows.containsVisible(threadChannelId, id);
 
+  @override
   List<RaftMessage> get replies => messageWindows.rows(threadChannelId);
 
   /// Web display order uses server sequence, with a display-only coordinate
@@ -2508,6 +2175,27 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  @override
+  void beginServerSelectionProjection(RaftRecord next) {
+    server = next;
+    // A workspace error belongs to the server where it was raised.
+    error = null;
+    _burstAt.clear();
+    if (mobileNavigation) section = 'home';
+    if (!canVisitSection(section)) section = 'chat';
+    sidebarOrder = {};
+    client.selectServer(next.id);
+  }
+
+  @override
+  void resetServerSelectionState() {
+    channelRepository.resetRowAuthority();
+    // The new server's socket connects for the first time.
+    _connectedBefore = _roomsJoinedPending = false;
+    _gapSyncedThrough = null;
+    hasNewer = false;
+  }
+
   /// [onHydrated] runs once the on-device channels, selection window and
   /// unread counts of [next] are painted, before any network response; it
   /// does not run when nothing is cached. The returned future still settles
@@ -2530,35 +2218,7 @@ class WorkspaceController extends ChangeNotifier {
       throw StateError('A borrowed editor cannot select a server.');
     }
     if (_revokedServers.contains(next.id)) return;
-    server = next;
-    // A workspace error belongs to the server it was raised in (it is a toast
-    // not yet shown when no workspace view was mounted to consume it).
-    error = null;
-    _burstAt.clear();
-    if (mobileNavigation) section = 'home';
-    if (!canVisitSection(section)) section = 'chat';
-    sidebarOrder = {};
-    client.selectServer(next.id);
-    activityUnread.start();
-    entityDirectory.synchronize();
-    // Agents, members and computers saved on this device paint with the
-    // cached channels (first workspace frame); the preload revalidates them.
-    final restoredEntities = entityDirectory.restored;
-    // Saved translations and the server's translation gate paint with them,
-    // so a cached row shows its translation at its first frame.
-    final restoredTranslations = translations.restore();
-    unawaited(entityDirectory.preload());
-    followedThreads.start();
-    composer.clearOwnedBy(this);
-    _resetServerWindows(next.id);
-    refreshMessageSyncFlag();
-    loadSidebar();
-    _revokedChannels.clear();
-    _channelRowSeq.clear();
-    // The new server's socket connects for the first time.
-    _connectedBefore = _roomsJoinedPending = false;
-    _gapSyncedThrough = null;
-    hasNewer = false;
+    final selection = sessionScope.selectServer(next);
     final selectionAtStart = channelGeneration,
         threadAtStart = threadGeneration,
         navigationAtStart = navigationRevision;
@@ -2566,8 +2226,8 @@ class WorkspaceController extends ChangeNotifier {
     final generation = client.generation;
     final replyIdentity = _syncIdentity();
     final cached = await _cached('channels', '');
-    await restoredEntities;
-    await restoredTranslations;
+    await selection.restoredEntities;
+    await selection.restoredTranslations;
     if (generation != client.generation) return;
     if (cached is Map) {
       channels = (cached['channels'] as List)
@@ -2719,181 +2379,34 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _persistReadState() {
-    final serverId = client.serverId, principal = client.user?.id;
-    if (serverId == null || principal == null) return;
-    _save('read-frontiers', '', readState.exportFor(serverId, principal));
-    _save('unread', '', Map.of(unread));
-  }
+  void _persistReadState() => conversationReads.persistReadState();
 
-  void _persistUnread() {
-    if (client.serverId == null || client.user == null) return;
-    _save('unread', '', Map.of(unread));
-  }
+  void _persistUnread() => conversationReads.persistUnread();
 
   /// Latest activity seq per scope from the last unread snapshot; live
   /// messages raise it. Lets a read receipt clear a count without a GET.
-  final Map<String, BigInt> _latestActivity = {};
+  Map<String, BigInt> get _latestActivity => conversationReads.latestActivity;
 
   /// Source messageStore `message:new`: +1 for a conversation the member is
   /// not reading, never for the member's own message. Counts only what the
   /// unread snapshot counts (joined channels, DMs, tracked threads).
-  void _receiveUnread(Map<String, dynamic> row) {
-    final id = row['channelId'];
-    if (id is! String || _revokedChannels.contains(id)) return;
-    final seq = canonicalUint64(row['seq']);
-    if (seq != null && seq > (_latestActivity[id] ?? BigInt.zero)) {
-      _latestActivity[id] = seq;
-    }
-    // Source canAutoMarkLiveAppendRead: a live arrival in the open
-    // conversation is read only if the user was just interacting; while the
-    // user is idle it stays unread (Activity keeps its indicator). Phone
-    // (owner decision 2026-10-12, docs/parity.md): a foreground page whose
-    // timeline sits at the latest end reads it with no tap.
-    if ((id == channel?.id || id == threadChannelId) &&
-        _mayMarkRead(id) &&
-        (RaftUserActivity.recent ||
-            mobileNavigation && !_scrolledAway.contains(id))) {
-      unawaited(markRead(id));
-      return;
-    }
-    if (row['senderType'] == 'user' && row['senderId'] == client.user?.id) {
-      return;
-    }
-    final known = [...channels, ...dms].where((c) => c.id == id).firstOrNull;
-    final counted = known == null
-        ? unread.containsKey(id)
-        : known.type != 'channel' || known.joined;
-    if (!counted) return;
-    final serverId = client.serverId, principal = client.user?.id;
-    final frontier = serverId == null || principal == null
-        ? null
-        : readState.state(serverId, principal, id);
-    if (seq != null &&
-        frontier != null &&
-        BigInt.from(frontier['maxReadSeq']) >= seq) {
-      return;
-    }
-    unread = {...unread, id: (unread[id] ?? 0) + 1};
-    if (_mentionsMember(row)) mentions = {...mentions, id};
-    _persistUnread();
-    unawaited(prefetchLikelyChannels());
-  }
+  void _receiveUnread(Map<String, dynamic> row) =>
+      conversationReads.receiveUnread(row);
 
-  /// Source `mentionsCurrentUser`: a structured user mention of the member.
-  bool _mentionsMember(Map<String, dynamic> row) {
-    final me = client.user?.id, list = row['mentions'];
-    return me != null &&
-        list is List &&
-        list.any((m) => m is Map && m['type'] == 'user' && m['id'] == me);
-  }
-
-  void _clearMention(String id) {
-    if (mentions.contains(id)) mentions = {...mentions}..remove(id);
-    if (newFlags.contains(id)) newFlags = {...newFlags}..remove(id);
-  }
+  void _clearMention(String id) => conversationReads.clearMention(id);
 
   /// Source `applyAcceptedReadStateProjection`: an accepted read frontier
   /// recounts the scope from held messages when they cover it, and clears
   /// it when it reaches the latest known activity. Otherwise the count
   /// waits for the next reconcile.
-  void _projectReadState(String id) {
-    final serverId = client.serverId, principal = client.user?.id;
-    if (serverId == null || principal == null || !unread.containsKey(id)) {
-      return;
-    }
-    final state = readState.state(serverId, principal, id);
-    if (state == null) return;
-    final maxRead = BigInt.from(state['maxReadSeq']);
-    final rows = ledger.messages(id);
-    var latest = _latestActivity[id];
-    if (rows.isNotEmpty) {
-      final last = RaftMessage(rows.last).seq;
-      if (latest == null || last > latest) latest = last;
-    }
-    int? count;
-    if (latest != null && maxRead >= latest) {
-      count = 0;
-    } else if (rows.isNotEmpty &&
-        !messageWindows.isContext(id) &&
-        !(id == channel?.id && hasNewer) &&
-        RaftMessage(rows.first).seq <= maxRead) {
-      count = rows
-          .where(
-            (row) =>
-                RaftMessage(row).seq > maxRead &&
-                !(row['senderType'] == 'user' && row['senderId'] == principal),
-          )
-          .length;
-    }
-    if (count == null || unread[id] == count) return;
-    unread = {...unread, id: count};
-    if (count == 0) _clearMention(id);
-  }
+  void _projectReadState(String id) => conversationReads.projectReadState(id);
 
   Future<void> refreshUnread() async {
     final source = presentationSource;
     if (source != null) {
       return source.refreshUnread();
     }
-    final requestGeneration = readState.generation;
-    final serverId = client.serverId, principal = client.user?.id;
-    if (serverId == null || principal == null) return;
-    try {
-      final value = await client.get('/channels/unread', query: {'summary': 1});
-      if (client.serverId != serverId || client.user?.id != principal) return;
-      final counts = value is Map ? value['channels'] ?? value : {};
-      if (counts is Map) {
-        final next = <String, int>{};
-        final nextMentions = <String>{};
-        final nextNew = <String>{};
-        for (final e in counts.entries) {
-          final id = e.key.toString(), entry = e.value;
-          if (entry is num) {
-            next[id] = entry.toInt();
-            continue;
-          }
-          if (entry is! Map) continue;
-          final frontier = entry['readState'];
-          final outcome = readState.consumeSnapshot(
-            frontier,
-            serverId: serverId,
-            principalId: principal,
-            scopeId: id,
-            generationAtRequest: requestGeneration,
-            // RisingWave projects this endpoint asynchronously. An absent row
-            // cannot erase a newer positive HTTP/socket acknowledgement.
-            authoritativeAbsence: false,
-          );
-          final state = readState.state(serverId, principal, id);
-          final latest = frontier is Map && frontier['latestActivity'] is Map
-              ? canonicalUint64(frontier['latestActivity']['seq'])
-              : null;
-          if (latest != null) _latestActivity[id] = latest;
-          final fullyRead =
-              state != null &&
-              latest != null &&
-              BigInt.from(state['maxReadSeq']) >= latest;
-          next[id] = fullyRead
-              ? 0
-              : outcome == 'corrupt'
-              ? (unread[id] ?? 0)
-              : ((entry['unreadCount'] ?? 0) as num).toInt();
-          if (entry['hasMention'] == true && next[id]! > 0) {
-            nextMentions.add(id);
-          }
-          if (entry['hasNew'] == true) nextNew.add(id);
-        }
-        unread = next;
-        mentions = nextMentions;
-        newFlags = nextNew;
-        _persistReadState();
-      }
-      notifyListeners();
-      unawaited(prefetchLikelyChannels());
-    } catch (_) {
-      /* Keep accepted counts through transient failures. */
-    }
+    return conversationReads.refreshUnread();
   }
 
   final _prefetched = <String>{};
@@ -2967,7 +2480,7 @@ class WorkspaceController extends ChangeNotifier {
           );
           // Reply rows are part of the window: a first open renders them in
           // the same frame as the prefetched messages.
-          _mergeThreadSummaries(c.id, page['threadSummariesByParentMessageId']);
+          mergeThreadSummaries(c.id, page['threadSummariesByParentMessageId']);
         } catch (_) {
           // Best effort: the channel opens normally on demand.
         }
@@ -2977,191 +2490,61 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  void _revokeChannel(String id) {
-    final origin = client.origin,
-        principal = client.user?.id,
-        serverId = client.serverId;
-    // Content just handed over from a share is kept when its destination is
-    // refused: the composer says so and Send stays off, nothing is discarded.
-    final keepShared = _shareHolds.containsKey(id);
-    if (keepShared) {
-      _shareHolds[id] = 'This conversation is no longer available. Your draft and files are kept.';
+  void _revokeChannel(String id) => sessionScope.revokeChannel(id);
+
+  @override
+  ChannelRevocationPlan planChannelRevocation(String id) =>
+      ChannelRevocationPlan.discover(
+        channelId: id,
+        messages: ledger.messages(id),
+        parentMessageIds: threadRepliesSync.parentMessageIdsForChannel(id),
+        summaries: _summariesByChannel,
+        identity: _threadIdentity,
+        parent: threadParent,
+        threadChannelId: threadChannelId,
+      );
+
+  @override
+  void clearRevokedChannelProjection(String scope) {
+    unread.remove(scope);
+    _clearMention(scope);
+    _latestActivity.remove(scope);
+    _summariesByChannel.remove(scope);
+  }
+
+  @override
+  void removeRevokedParentSummary(dynamic messageId) {
+    for (final bucket in _summariesByChannel.values) {
+      bucket.remove(messageId);
     }
-    if (!keepShared && principal != null && serverId != null) {
-      unawaited(discardSharedScope?.call(origin, principal, serverId, id));
-    }
-    final messageIds = <dynamic>{
-      ...ledger.messages(id).map((m) => m['id']),
-      ...threadRepliesSync.parentMessageIdsForChannel(id),
-      if (_threadIdentity != null &&
-          (_threadIdentity!.parentChannelId == id || threadChannelId == id))
-        _threadIdentity!.parentMessageId,
-      if (threadChannelId == id && threadParent != null) threadParent!.id,
-    };
-    final threadIds = <String>{
-      for (final message in ledger.messages(id))
-        if (message['threadChannelId'] is String) message['threadChannelId'],
-      for (final summary in [
-        ...?_summariesByChannel[id]?.values,
-        for (final bucket in _summariesByChannel.values)
-          for (final messageId in messageIds) ?bucket[messageId],
-      ])
-        if (summary is Map &&
-            messageIds.contains(summary['parentMessageId']) &&
-            summary['threadChannelId'] is String)
-          summary['threadChannelId'],
-      if ((threadParent?.channelId == id ||
-              _threadIdentity?.parentChannelId == id) &&
-          threadChannelId != null)
-        threadChannelId!,
-    };
-    for (final scope in {id, ...threadIds}) {
-      _revokedChannels.add(scope);
-      _attachmentImages
-        ?..synchronize(attachmentImageScope)
-        ..invalidateChannel(scope);
-      _attachmentUrls.invalidateChannel(scope);
-      _playerSessions.invalidateChannel(scope);
-      // Stored images, preview files and documents of the channel go too,
-      // also when no decoded image was ever held this session.
-      _purgeStoredChannel(scope);
-      messageWindows.revokeChannel(scope);
-      messageSync.revokeChannel(scope);
-      threadRepliesSync.revokeChannel(scope);
-      notificationPrefsSync.revokeChannel(scope);
-      messageWindows.discardWindow(scope);
-      unread.remove(scope);
-      _clearMention(scope);
-      _latestActivity.remove(scope);
-      _summariesByChannel.remove(scope);
-      messageWindows.revokeThreads(scope);
-      if (serverId != null && principal != null) {
-        readState.revoke(serverId, principal, scope);
-      }
-      composer.retireScope(scope, keepFiles: keepShared && scope == id);
-      if (keepShared && scope == id) continue;
-      _attempts.remove(scope);
-    }
-    for (final messageId in messageIds) {
-      final scope = 'thread:$messageId';
-      _attempts.remove(scope);
-      composer.retireScope(scope);
-      reactionViewer.remove(messageId);
-      for (final bucket in _summariesByChannel.values) {
-        bucket.remove(messageId);
-      }
-    }
-    if (channel?.id == id && !keepShared) {
+  }
+
+  @override
+  void closeRevokedChannelProjection(ChannelRevocation event) {
+    final id = event.plan.channelId;
+    if (channel?.id == id && !event.keepShared) {
       channel = null;
       _missingConversationChannelId = id;
       messageWindows.channelGeneration++;
     }
     if (threadParent?.channelId == id ||
         _threadIdentity?.parentChannelId == id ||
-        threadIds.contains(threadChannelId) ||
+        event.plan.threadIds.contains(threadChannelId) ||
         threadChannelId == id) {
       closeThread();
     }
-    _persistReadState();
-    if (principal != null && serverId != null) {
-      // Web keeps authored text on channel removal or a refused message read.
-      // Snapshot it before the private-cache purge; never restore server files.
-      final keptDrafts = {
-        for (final scope in {
-          id,
-          ...threadIds,
-          for (final messageId in messageIds) 'thread:$messageId',
-        })
-          scope: composer.draftRecord(scope, includeShareTokens: false),
-      };
-      _cacheWrites = _cacheWrites.then((_) async {
-        try {
-          final sharedDraft = keepShared
-              ? await cache?.read(origin, principal, serverId, 'draft', id)
-              : null;
-          for (final scope in {id, ...threadIds}) {
-            await cache?.revokeChannel(origin, principal, serverId, scope);
-          }
-          for (final entry in keptDrafts.entries) {
-            await cache?.write(
-              origin,
-              principal,
-              serverId,
-              'draft',
-              entry.key,
-              entry.key == id && keepShared ? sharedDraft : entry.value,
-            );
-          }
-        } catch (_) {
-          if (!_disposed) {
-            // ignore: raft_lints/avoid_imperative_notice_state -- Cache-purge device failures and background refresh failures raise a one-shot toast; stale-scope and rate-limited failures are suppressed (_quietFailure) and the error is cleared on server switch or revoke.
-            setError(
-              'Revoked workspace data could not be removed from this device.',
-            );
-          }
-        }
-      });
-    }
   }
 
-  void _purgeStoredChannel(String channelId) {
-    final store = attachmentImageStore;
-    if (store == null || presentationSource != null) return;
-    unawaited(
-      store
-          .purgeChannel(
-            AttachmentImageKey.storeIdentity(attachmentImageScope),
-            channelId,
-          )
-          .catchError((Object _) {}),
-    );
-  }
+  @override
+  void persistSessionReadState() => _persistReadState();
 
-  int _sidebarRequest = 0;
+  @override
   Future<void> loadSidebar() async {
     if (presentationSource != null) return presentationSource!.loadSidebar();
-    final request = ++_sidebarRequest;
-    final generation = client.generation, id = client.serverId;
-    final authority = jsonEncode([
-      client.user?.id,
-      server?.id,
-      server?.string('role'),
-    ]);
-    bool accepts() =>
-        !_disposed &&
-        request == _sidebarRequest &&
-        generation == client.generation &&
-        id == client.serverId &&
-        authority ==
-            jsonEncode([client.user?.id, server?.id, server?.string('role')]);
-    if (id == null) return;
-    final cached = await _cached('sidebar-order', '');
-    if (!accepts()) return;
-    if (cached is Map) {
-      sidebarOrder = Map<String, dynamic>.from(cached);
-      notifyListeners();
-    }
-    try {
-      final value = await client.get('/servers/$id/sidebar-order');
-      if (!accepts()) return;
-      sidebarOrder = Map<String, dynamic>.from(value);
-      _save('sidebar-order', '', sidebarOrder);
-      notifyListeners();
-    } catch (_) {
-      /* Cached order remains usable while offline. */
-    }
+    return sidebarRepository.load();
   }
 
   // ---- sidebar-order writes (Source serverStore.updateSidebarOrder) -------
-
-  static const _sectionFields = {
-    'customSections',
-    'sectionOrder',
-    'sectionPlacements',
-  };
-  int _sidebarSectionSeq = 0, _sidebarSectionsInFlight = 0;
-  Future<void> _sidebarSectionTail = Future.value();
-  num? _sidebarConfirmedVersion;
 
   /// Applies [updates] to [sidebarOrder] at once (the row moves before the
   /// request returns), then PATCHes `/servers/:id/sidebar-order`. A request
@@ -3171,76 +2554,7 @@ class WorkspaceController extends ChangeNotifier {
   Future<void> updateSidebarOrder(Map<String, dynamic> updates) async {
     final source = presentationSource;
     if (source != null) return source.updateSidebarOrder(updates);
-    final id = server?.id ?? client.serverId;
-    if (id == null || _disposed) return;
-    final generation = client.generation;
-    final previous = sidebarOrder;
-    final next = {...previous, ...updates};
-    final sections = updates.keys.any(_sectionFields.contains);
-    sidebarOrder = next;
-    _save('sidebar-order', '', next);
-    notifyListeners();
-    bool current() =>
-        !_disposed &&
-        (server?.id ?? client.serverId) == id &&
-        client.generation == generation;
-
-    Future<void> perform(int sequence, num? version, bool queued) async {
-      if (!current()) return;
-      try {
-        final value = await client.request(
-          'PATCH',
-          '/servers/$id/sidebar-order',
-          data: sections ? {...updates, 'sectionsVersion': ?version} : updates,
-        );
-        if (!current()) return;
-        final reply = value is Map
-            ? Map<String, dynamic>.from(value)
-            : <String, dynamic>{};
-        if (queued) _sidebarConfirmedVersion = reply['sectionsVersion'] as num?;
-        if (queued && sequence != _sidebarSectionSeq) {
-          // A newer section write is queued: keep its optimistic order and
-          // only adopt the versions.
-          sidebarOrder = {
-            ...sidebarOrder,
-            if (reply['sectionsVersion'] != null)
-              'sectionsVersion': reply['sectionsVersion'],
-            if (reply['pinnedVersion'] != null)
-              'pinnedVersion': reply['pinnedVersion'],
-          };
-        } else {
-          sidebarOrder = {...next, ...reply};
-        }
-        _save('sidebar-order', '', sidebarOrder);
-        notifyListeners();
-      } catch (error) {
-        if (!current()) return;
-        if (!queued || sequence == _sidebarSectionSeq) {
-          sidebarOrder = previous;
-          _save('sidebar-order', '', previous);
-          notifyListeners();
-        }
-        if (error is RaftApiException && error.status == 409) {
-          unawaited(loadSidebar());
-        }
-      }
-    }
-
-    if (!sections) return perform(0, null, false);
-    final sequence = ++_sidebarSectionSeq;
-    _sidebarConfirmedVersion ??= previous['sectionsVersion'] as num?;
-    // An idle queue sends at once; otherwise this write waits for the
-    // previous one so it carries the version that one produced.
-    final run = _sidebarSectionsInFlight == 0
-        ? perform(sequence, _sidebarConfirmedVersion, true)
-        : _sidebarSectionTail.then(
-            (_) => perform(sequence, _sidebarConfirmedVersion, true),
-          );
-    _sidebarSectionsInFlight++;
-    _sidebarSectionTail = run;
-    return run.whenComplete(() {
-      if (--_sidebarSectionsInFlight == 0) _sidebarConfirmedVersion = null;
-    });
+    return sidebarRepository.update(updates);
   }
 
   /// Source channelStore.setActivityMuteState: patches the mute fields of one
@@ -3248,12 +2562,7 @@ class WorkspaceController extends ChangeNotifier {
   void setActivityMuteState(String id, Map<String, dynamic> state) {
     final source = presentationSource;
     if (source != null) return source.setActivityMuteState(id, state);
-    RaftChannel patch(RaftChannel value) =>
-        value.id == id ? RaftChannel({...value.json, ...state}) : value;
-    channels = channels.map(patch).toList();
-    dms = dms.map(patch).toList();
-    if (channel != null) channel = patch(channel!);
-    notifyListeners();
+    channelRepository.setActivityMuteState(id, state);
   }
 
   /// The channel row [id] as currently held (channels first, then DMs).
@@ -3264,17 +2573,8 @@ class WorkspaceController extends ChangeNotifier {
   void markUnreadLocally(String id) {
     final source = presentationSource;
     if (source != null) return source.markUnreadLocally(id);
-    if ((unread[id] ?? 0) > 0) return;
-    unread = {...unread, id: 1};
-    notifyListeners();
+    conversationReads.markUnreadLocally(id);
   }
-
-  /// Read order of channel-row authority. Every list read, single-row read
-  /// and realtime row patch takes the next value when it starts; a row keeps
-  /// the value of whatever last wrote it. An older response therefore never
-  /// overwrites a newer row, and never revokes a row added after it started.
-  int _channelReadSeq = 0, _channelListSeq = 0;
-  final Map<String, int> _channelRowSeq = {};
 
   /// Full channel and DM list reload (Source `loadChannels` +
   /// `loadDMChannels`): server selection, `rooms:joined`, a role change, or a
@@ -3284,62 +2584,7 @@ class WorkspaceController extends ChangeNotifier {
     if (source != null) {
       return source.refreshChannels();
     }
-    final generation = ledger.generation;
-    final read = ++_channelReadSeq;
-    try {
-      final lists = await Future.wait([
-        client.channels(),
-        client.channels(dm: true),
-      ]);
-      if (generation != ledger.generation || _disposed) return;
-      // A list read that started later has already been applied.
-      if (read < _channelListSeq) return;
-      _channelListSeq = read;
-      // Rows written after this read started keep their current state.
-      final newer = {
-        for (final entry in _channelRowSeq.entries)
-          if (entry.value > read) entry.key,
-      };
-      _channelRowSeq.removeWhere((_, seq) => seq <= read);
-      List<RaftChannel> merge(
-        List<RaftChannel> fetched,
-        List<RaftChannel> current,
-      ) {
-        final held = {for (final c in current) c.id: c};
-        final fetchedIds = {for (final c in fetched) c.id};
-        final next = [
-          for (final c in fetched)
-            if (!newer.contains(c.id))
-              _reuseChannelRow(held[c.id], c)
-            else if (held[c.id] != null)
-              held[c.id]!,
-        ];
-        // A row added after this read started keeps its held position.
-        for (var i = 0; i < current.length; i++) {
-          final c = current[i];
-          if (newer.contains(c.id) && !fetchedIds.contains(c.id)) {
-            next.insert(i < next.length ? i : next.length, c);
-          }
-        }
-        return next;
-      }
-
-      _acceptChannelLists(
-        merge(lists[0], channels),
-        merge(lists[1], dms),
-        readmit: {
-          for (final c in [...lists[0], ...lists[1]])
-            if (!newer.contains(c.id)) c.id,
-        },
-      );
-    } catch (e) {
-      // A rate-limited background refresh is not an error to show: the held
-      // lists stay, and the next refresh (after Retry-After) catches up.
-      if (generation == ledger.generation && !_disposed && !_quietFailure(e)) {
-        // ignore: raft_lints/avoid_imperative_notice_state -- Raised only for the current ledger generation and not for rate-limited or stale-scope failures; cleared on server switch or revoke.
-        setError(userErrorText(e, where: 'refresh channels'));
-      }
-    }
+    return channelRepository.refreshChannels();
   }
 
   /// The one place channel lists change after selection. A row missing from
@@ -3349,20 +2594,9 @@ class WorkspaceController extends ChangeNotifier {
     List<RaftChannel> nextChannels,
     List<RaftChannel> nextDms, {
     required Set<String> readmit,
-  }) {
-    final accessible = {
-      for (final c in [...nextChannels, ...nextDms]) c.id,
-    };
-    for (final old in [...channels, ...dms]) {
-      if (!accessible.contains(old.id)) _revokeChannel(old.id);
-    }
-    _revokedChannels.removeAll(readmit);
-    channels = nextChannels;
-    dms = nextDms;
-    _save('channels', '', {
-      'channels': channels.map((c) => c.json).toList(),
-      'dms': dms.map((c) => c.json).toList(),
-    });
+  }) => channelRepository.acceptLists(nextChannels, nextDms, readmit: readmit);
+
+  void _adoptAcceptedChannelSelection(Set<String> accessible) {
     // A held share's destination (and a DM that is not on the server yet)
     // stays open when the lists do not carry it: the composer says why.
     if (channel != null &&
@@ -3381,203 +2615,28 @@ class WorkspaceController extends ChangeNotifier {
         messageWindows.channelGeneration++;
       }
     }
-    notifyListeners();
   }
-
-  /// A refreshed row equal to the held one keeps the held object, so sidebar
-  /// rows and the open channel do not rebuild for an unchanged read.
-  static RaftChannel _reuseChannelRow(RaftChannel? held, RaftChannel fresh) {
-    if (held == null) return fresh;
-    try {
-      return jsonEncode(held.json) == jsonEncode(fresh.json) ? held : fresh;
-    } catch (_) {
-      return fresh;
-    }
-  }
-
-  /// Whether the server's channel lists carry [row] for this viewer: private
-  /// and joint channels only for members (`requiresExplicitMembership`).
-  static bool _listsChannel(RaftChannel row) =>
-      !const {'private', 'joint'}.contains(row.type) || row.joined;
 
   /// Replaces [next]'s row in place, or adds it (a new DM goes first, as the
   /// server's recency-ordered DM list would place it).
-  void _putChannelRow(RaftChannel next) {
-    final held = [...channels, ...dms].where((c) => c.id == next.id);
-    if (held.length == 1 && identical(held.single, next)) return;
-    final dm = next.type == 'dm';
-    List<RaftChannel> put(List<RaftChannel> list, bool owns) {
-      final index = list.indexWhere((c) => c.id == next.id);
-      if (!owns) return index < 0 ? list : ([...list]..removeAt(index));
-      if (index >= 0) return [...list]..[index] = next;
-      return dm ? [next, ...list] : [...list, next];
-    }
-
-    _acceptChannelLists(put(channels, !dm), put(dms, dm), readmit: {next.id});
-  }
-
-  static String? _payloadChannelId(dynamic payload) {
-    if (payload is! Map) return null;
-    final id = payload['channelId'] ?? payload['id'];
-    return id is String && id.isNotEmpty ? id : null;
-  }
-
-  /// Source `readApiChannel`: `{channel: row}` or a bare row with a name.
-  static Map<String, dynamic>? _payloadChannelRow(dynamic payload) {
-    if (payload is! Map) return null;
-    final candidate = payload.containsKey('channel')
-        ? payload['channel']
-        : payload;
-    if (candidate is! Map ||
-        candidate['id'] is! String ||
-        candidate['name'] is! String) {
-      return null;
-    }
-    return Map<String, dynamic>.from(candidate);
-  }
+  void _putChannelRow(RaftChannel next) => channelRepository.putRow(next);
 
   /// Source channelRealtimeSync: a channel event changes one row. A carried
   /// row is patched in place; an id re-reads that one channel; only an event
   /// without an id reloads both lists.
-  void _channelRealtime(String name, dynamic payload) {
-    if (name == 'channel:updated') {
-      final row = _payloadChannelRow(payload);
-      if (row != null) {
-        // A user-room event can carry another server's joint-channel row.
-        final serverId = row['serverId'];
-        if (serverId is String &&
-            client.serverId != null &&
-            serverId != client.serverId) {
-          return;
-        }
-        _patchChannelRow(row);
-        return;
-      }
-    }
-    final id = _payloadChannelId(payload);
-    if (id == null) {
-      if (name != 'dm:new') unawaited(refreshChannels());
-      return;
-    }
-    if (name == 'dm:new') {
-      client.joinChannel(id);
-      // Source addOrRefreshDM: a held DM moves first without a read.
-      final index = dms.indexWhere((c) => c.id == id);
-      if (index >= 0 && !_revokedChannels.contains(id)) {
-        if (index > 0) {
-          _acceptChannelLists(channels, [
-            dms[index],
-            for (var i = 0; i < dms.length; i++)
-              if (i != index) dms[i],
-          ], readmit: const {});
-        }
-        return;
-      }
-    }
-    unawaited(refreshChannel(id));
-  }
+  void _channelRealtime(String name, dynamic payload) =>
+      channelRepository.consumeRealtime(name, payload);
 
   /// Web `patchChannel` `hiddenAllChannel`: an admin hiding `#all` turns it
   /// into a private channel named `all`, which leaves the list.
   static bool isHiddenAllChannelRow(Map<String, dynamic> row) =>
-      row['name'] == 'all' && row['type'] == 'private';
-
-  void _patchChannelRow(Map<String, dynamic> patch) {
-    final id = patch['id'] as String;
-    final held = [...channels, ...dms].where((c) => c.id == id).firstOrNull;
-    if (isHiddenAllChannelRow({...?held?.json, ...patch})) {
-      _channelRowSeq[id] = ++_channelReadSeq;
-      if (held != null) {
-        _acceptChannelLists(
-          channels.where((c) => c.id != id).toList(),
-          dms.where((c) => c.id != id).toList(),
-          readmit: const {},
-        );
-      }
-      return;
-    }
-    // A projection lacks viewer fields (membership, capabilities): an unknown
-    // or revoked row is read once instead of trusted.
-    if (held == null || _revokedChannels.contains(id)) {
-      unawaited(refreshChannel(id));
-      return;
-    }
-    final next = _reuseChannelRow(held, RaftChannel({...held.json, ...patch}));
-    if (!_listsChannel(next) || next.type == 'thread') {
-      unawaited(refreshChannel(id));
-      return;
-    }
-    _channelRowSeq[id] = ++_channelReadSeq;
-    _putChannelRow(next);
-  }
-
-  final Map<String, Future<void>> _channelReads = {};
-  final Set<String> _channelRereads = {};
+      ChannelRepository.isHiddenAllChannelRow(row);
 
   /// Source `ensureChannel(id, {refresh: true})`: reads one channel and
   /// upserts its row. Lost access (403/404, or a private row the lists would
   /// not carry) revokes that channel through the list revocation path.
-  Future<void> refreshChannel(String id) {
-    final pending = _channelReads[id];
-    if (pending != null) {
-      // The read in flight may predate this change: read once more after it.
-      _channelRereads.add(id);
-      return pending;
-    }
-    final read = _readChannel(id).whenComplete(() {
-      _channelReads.remove(id);
-      if (_channelRereads.remove(id) && !_disposed) {
-        unawaited(refreshChannel(id));
-      }
-    });
-    return _channelReads[id] = read;
-  }
-
-  Future<void> _readChannel(String id) async {
-    final generation = ledger.generation, identity = _syncIdentity();
-    final read = ++_channelReadSeq;
-    bool current() =>
-        !_disposed &&
-        generation == ledger.generation &&
-        identity == _syncIdentity() &&
-        read > _channelListSeq &&
-        read > (_channelRowSeq[id] ?? 0);
-    RaftChannel? fresh;
-    var lostAccess = false;
-    try {
-      final data = await client.get('/channels/$id');
-      if (!current() || data is! Map || data['id'] != id) return;
-      fresh = RaftChannel(Map<String, dynamic>.from(data));
-      if (fresh.type == 'thread') return;
-      final serverId = fresh.json['serverId'];
-      if (serverId is String && serverId != client.serverId) fresh = null;
-    } on RaftApiException catch (e) {
-      if (!current() || (e.status != 403 && e.status != 404)) return;
-      lostAccess = true;
-    } catch (_) {
-      // Transient failure: the held row stays until a later read.
-      return;
-    }
-    _channelRowSeq[id] = read;
-    final held = [...channels, ...dms].where((c) => c.id == id).firstOrNull;
-    if (fresh != null && _listsChannel(fresh)) {
-      _putChannelRow(_reuseChannelRow(held, fresh));
-    } else if (held != null) {
-      _acceptChannelLists(
-        channels.where((c) => c.id != id).toList(),
-        dms.where((c) => c.id != id).toList(),
-        readmit: const {},
-      );
-    }
-    // The server never emits `channel:removed`: this 403/404 is the way a lost
-    // channel is noticed, so it runs that event's cleanup. A held row was
-    // already revoked by the list update above.
-    if (lostAccess) {
-      if (held == null) _revokeChannel(id);
-      if (_threadIdentity?.parentChannelId == id) closeThread();
-      if (held == null) notifyListeners();
-    }
-  }
+  Future<void> refreshChannel(String id) =>
+      channelRepository.refreshChannel(id);
 
   bool _roomsJoinedPending = false, _connectedBefore = false;
   DateTime? _lastHeartbeat, _lastServerEvent;
@@ -3744,7 +2803,7 @@ class WorkspaceController extends ChangeNotifier {
           final seq = RaftMessage(row).seq;
           if (seq > next) next = seq;
         }
-        if (_mayMarkRead(id)) {
+        if (_mayMarkRead(id) && !_scrolledAway.away(id)) {
           unawaited(markRead(id));
         } else {
           arrived.forEach(_receiveUnread);
@@ -4063,7 +3122,7 @@ class WorkspaceController extends ChangeNotifier {
         !retainContextUntilAccepted &&
         ((unread[next.id] ?? 0) != 0 || mentions.contains(next.id));
     final readPostsBefore = _readPosts[next.id] ?? 0;
-    _scrolledAway.remove(next.id);
+    _scrolledAway.reset(next.id);
     if (optimisticRead) {
       // Web `clearUnread`: the count and the mention flag clear together.
       if ((unread[next.id] ?? 0) != 0) unread = {...unread, next.id: 0};
@@ -4176,16 +3235,7 @@ class WorkspaceController extends ChangeNotifier {
           : reconcileTailWindow(retained, rows),
       replace: true,
     );
-    final held = _summariesByChannel[id] ?? const {};
-    _summariesByChannel[id] = {
-      for (final row in retained)
-        if (held[row['id']] != null) row['id'] as String: held[row['id']],
-      ..._hydrateThreadSummaries(
-        fresh['threadSummariesByParentMessageId'],
-        id,
-        expectedToken: _replyToken(id),
-      ),
-    };
+    MessageHistorySummaries.accept(this, id, retained, rows, fresh);
     hasMore =
         fresh['historyLimited'] != true &&
         (visibleIds[id]!.length > rows.length
@@ -4248,7 +3298,7 @@ class WorkspaceController extends ChangeNotifier {
       MessageHistoryNavigation.page(this, thread: thread, newer: newer,
         gapBefore: gapBefore,
         requestFor: (id) => _windowRequest(id, thread: thread),
-        summaries: _mergeThreadSummaries);
+        summaries: mergeThreadSummaries);
 
   bool _mayMarkRead(String id) {
     if (!foreground ||
@@ -4288,15 +3338,10 @@ class WorkspaceController extends ChangeNotifier {
 
   /// Open conversations whose timeline is scrolled above the latest end
   /// (reported by the chat view on the edge only, never per frame).
-  final Set<String> _scrolledAway = {};
+  RaftTimelineBottoms get _scrolledAway => conversationReads.scrolledAway;
 
-  void setTimelineAtBottom(String id, bool atBottom) {
-    if (atBottom) {
-      _scrolledAway.remove(id);
-    } else {
-      _scrolledAway.add(id);
-    }
-  }
+  void setTimelineAtBottom(String id, bool atBottom) =>
+      conversationReads.setTimelineAtBottom(id, atBottom);
 
   /// Where the reader was in a conversation when its timeline is about to be
   /// rebuilt for another layout (fold / unfold). The next timeline that
@@ -4311,7 +3356,7 @@ class WorkspaceController extends ChangeNotifier {
 
   /// Read receipts sent per scope: lets an optimistic open-time clear know
   /// whether the receipt that backs it was ever sent.
-  final Map<String, int> _readPosts = {};
+  Map<String, int> get _readPosts => conversationReads.readPosts;
 
   Future<void> markRead(String id) => _windowReceiver._markRead(id);
 
@@ -4319,96 +3364,7 @@ class WorkspaceController extends ChangeNotifier {
   /// Their tail may be stale, so they never send a read receipt (nor clear
   /// the unread count) until revalidated.
 
-  Future<void> _markRead(String id) async {
-    if (messageWindows.isDiskOnly(id) || !_mayMarkRead(id)) {
-      return;
-    }
-    final rows = ledger
-        .messages(id)
-        .where((m) => visibleIds[id]?.contains(m['id']) ?? false)
-        .toList();
-    if (rows.isEmpty) return;
-    final origin = client.origin,
-        principal = client.user?.id,
-        serverId = client.serverId,
-        generation = ledger.generation;
-    final window = id == threadChannelId ? threadGeneration : channelGeneration;
-    _readPosts[id] = (_readPosts[id] ?? 0) + 1;
-    try {
-      final receipt = await client.post(
-        '/channels/$id/read',
-        data: {'seq': rows.last['seq']},
-      );
-      if (client.origin != origin ||
-          client.user?.id != principal ||
-          client.serverId != serverId) {
-        return;
-      }
-      if (ledger.generation != generation ||
-          window !=
-              (id == threadChannelId ? threadGeneration : channelGeneration) ||
-          !_mayMarkRead(id)) {
-        // The user left (or the window was replaced) while the receipt was in
-        // flight. The server cursor still advanced: fold the accepted frontier
-        // in and clear only what it covers, so Home never keeps an indicator
-        // for a conversation that was read (Source clearUnread).
-        // A reset ledger or a revoked scope never accepts a late receipt.
-        if (ledger.generation == generation && !_revokedChannels.contains(id)) {
-          _acceptStaleReadReceipt(id, receipt);
-        }
-        return;
-      }
-      if (receipt is Map && client.serverId != null && client.user != null) {
-        readState.consumeUpdate(
-          {
-            'serverId': client.serverId,
-            'scopeId': id,
-            'maxReadSeq': receipt['maxReadSeq'],
-            'readStateVersion': receipt['readStateVersion'],
-          },
-          serverId: client.serverId!,
-          principalId: client.user!.id,
-        );
-      }
-      // Source clearUnread: the read tail is the latest; no snapshot GET.
-      if ((unread[id] ?? 0) != 0) unread = {...unread, id: 0};
-      _clearMention(id);
-      _persistReadState();
-      notifyListeners();
-    } catch (_) {
-      // The cursor did not advance: an optimistic clear must not hide it.
-      if (!_disposed &&
-          client.origin == origin &&
-          client.user?.id == principal &&
-          client.serverId == serverId) {
-        unawaited(refreshUnread());
-      }
-    }
-  }
-
-  void _acceptStaleReadReceipt(String id, dynamic receipt) {
-    final serverId = client.serverId, principal = client.user?.id;
-    if (_disposed || serverId == null || principal == null) return;
-    if (receipt is Map) {
-      readState.consumeUpdate(
-        {
-          'serverId': serverId,
-          'scopeId': id,
-          'maxReadSeq': receipt['maxReadSeq'],
-          'readStateVersion': receipt['readStateVersion'],
-        },
-        serverId: serverId,
-        principalId: principal,
-      );
-    }
-    final before = unread[id] ?? 0;
-    _projectReadState(id);
-    if ((unread[id] ?? 0) != before) {
-      _persistReadState();
-      notifyListeners();
-    }
-    if ((unread[id] ?? 0) != 0) unawaited(refreshUnread());
-  }
+  Future<void> _markRead(String id) => conversationReads.markRead(id);
 
   /// Source acceptActivityReadAllAck: an Activity row's persisted read-all
   /// receipt is a read-state fact for [scopeId]. Folding it into the ledger is
@@ -4419,28 +3375,12 @@ class WorkspaceController extends ChangeNotifier {
     dynamic receipt, {
     required String serverId,
     required String principalId,
-  }) {
-    if (client.serverId != serverId || client.user?.id != principalId) {
-      return false;
-    }
-    if (receipt is! Map) return false;
-    final outcome = readState.consumeUpdate(
-      {
-        'serverId': serverId,
-        'scopeId': scopeId,
-        'maxReadSeq': receipt['maxReadSeq'] ?? receipt['seq'],
-        'readStateVersion': receipt['readStateVersion'],
-      },
-      serverId: serverId,
-      principalId: principalId,
-    );
-    if (outcome == 'corrupt') return false;
-    if ((unread[scopeId] ?? 0) != 0) unread = {...unread, scopeId: 0};
-    _clearMention(scopeId);
-    _persistReadState();
-    notifyListeners();
-    return true;
-  }
+  }) => conversationReads.acceptReadAllAck(
+    scopeId,
+    receipt,
+    serverId: serverId,
+    principalId: principalId,
+  );
 
   Future<bool> send(
     String text, {
@@ -4630,6 +3570,7 @@ class WorkspaceController extends ChangeNotifier {
   /// Opens a real thread identity independently of its parent metadata.
   /// [initialThreadChannelId] is the accepted inbox row's existing channel;
   /// Source opens that channel immediately without a resolution lookup.
+  @override
   Future<void> openThreadIdentity({
     required String parentChannelId,
     required String parentMessageId,
@@ -5196,7 +4137,7 @@ class WorkspaceController extends ChangeNotifier {
       replace: true,
     );
     messageWindows.setContextMode(request, id, context ? hasNewer : null);
-    _mergeThreadSummaries(id, page['threadSummariesByParentMessageId']);
+    mergeThreadSummaries(id, page['threadSummariesByParentMessageId']);
     return rows;
   }
 
@@ -5335,222 +4276,56 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
   Future<dynamic> query(String path, {Map<String, dynamic>? query}) =>
       presentationSource?.sharedQuery(path, query: query) ??
-      client.get(path, query: query);
+      apiGateway.query(path, query: query);
 
-  // ---- Signed attachment URLs -------------------------------------------
-  // One cache and one resolve path for every attachment surface (list preview,
-  // lightbox, document/media preview, inline players, Files panel). Memory
-  // only; see [AttachmentUrlCache] for the lifetime rules.
-  final AttachmentUrlCache _attachmentUrls;
+  /// Compatibility facade; all presentations share [attachmentMedia].
+  PlayerSessions get playerSessions => attachmentMedia.playerSessions;
 
-  /// The players of inline video/audio cards and their full-screen viewers
-  /// (one stream per attachment, shared; see [PlayerSessions]). A route-local
-  /// presentation shares its source's.
-  PlayerSessions get playerSessions =>
-      presentationSource?.playerSessions ?? _playerSessions;
-  final PlayerSessions _playerSessions = PlayerSessions();
-  VoidCallback? _removePlayerTrim;
-
-  int _attachmentUrlRequests = 0;
-
-  /// Number of `/attachments/<id>/url` + batch requests this controller sent.
   @visibleForTesting
-  int get debugAttachmentUrlRequests =>
-      presentationSource?.debugAttachmentUrlRequests ?? _attachmentUrlRequests;
-  @visibleForTesting
-  AttachmentUrlCache get debugAttachmentUrls =>
-      presentationSource?.debugAttachmentUrls ?? _attachmentUrls;
+  AttachmentUrlCache get debugAttachmentUrls => attachmentMedia.debugUrls;
 
-  /// The signed URL of attachment [id]. Reuses a fresh cached URL and joins a
-  /// request already in flight; otherwise asks the API once. [disposition]
-  /// null sends no disposition (server default). `attachment` URLs are
-  /// one-shot downloads and are never retained. [channelId] ties the entry to
-  /// its channel so revocation drops it.
   Future<String> attachmentUrl(
     String id, {
     String? disposition = 'inline',
     String? channelId,
     bool refresh = false,
     bool coalesce = false,
-  }) {
-    final source = presentationSource;
-    if (source != null) {
-      return source.attachmentUrl(
-        id,
-        disposition: disposition,
-        channelId: channelId,
-        refresh: refresh,
-        coalesce: coalesce,
+  }) => attachmentMedia.url(
+    id,
+    disposition: disposition,
+    channelId: channelId,
+    refresh: refresh,
+    coalesce: coalesce,
+  );
+
+  Future<bool> attachmentPreviewEnabled() => attachmentMedia.previewEnabled();
+
+  /// Coalesce identical concurrent reads, retaining this facade's query
+  /// override and giving each caller its own copy of the decoded response.
+  @override
+  Future<dynamic> sharedQuery(String path, {Map<String, dynamic>? query}) =>
+      apiGateway.sharedQuery(
+        path,
+        query: query,
+        readerKey: this,
+        scopeClient: client,
+        read: this.query,
       );
-    }
-    final scope = attachmentImageScope;
-    Future<dynamic> fetch() {
-      _attachmentUrlRequests++;
-      return client.get(
-        '/attachments/${Uri.encodeComponent(id)}/url',
-        query: disposition == null ? null : {'disposition': disposition},
-      );
-    }
-
-    if (disposition == 'attachment' || _revokedChannels.contains(channelId)) {
-      return fetch().then(_urlOf);
-    }
-    if (refresh) _attachmentUrls.invalidate(id, disposition: disposition ?? '');
-    if (coalesce && disposition == 'inline') {
-      // Many tiles asking at once (a screenful of images) share one batch
-      // request instead of sending one request each.
-      return _attachmentUrls.resolveCoalesced(
-        id,
-        scope: scope,
-        channelId: channelId,
-        fetchMany: _fetchAttachmentUrls,
-        fetch: fetch,
-      );
-    }
-    return _attachmentUrls.resolve(
-      id,
-      disposition: disposition ?? '',
-      scope: scope,
-      channelId: channelId,
-      fetch: fetch,
-    );
-  }
-
-  static String _urlOf(dynamic body) {
-    final url = body is Map ? body['url'] : null;
-    if (url is! String || url.isEmpty) {
-      throw const FormatException('Invalid attachment response.');
-    }
-    return url;
-  }
-
-  /// A transfer rejected [id]'s cached URL (expired): forget it.
-  void invalidateAttachmentUrl(String id) {
-    final source = presentationSource;
-    if (source != null) {
-      source.invalidateAttachmentUrl(id);
-    } else {
-      _attachmentUrls.invalidate(id);
-    }
-  }
-
-  /// `POST /attachments/urls` (1..50 ids) for the visible tiles that need a
-  /// signed URL in this frame (images without a server thumbnail). Foreground
-  /// work: a user-visible load, never speculative.
-  Future<dynamic> _fetchAttachmentUrls(List<String> ids) {
-    _attachmentUrlRequests++;
-    return client.post('/attachments/urls', data: {'attachmentIds': ids});
-  }
-
-  DateTime? _previewGateAt;
-  bool? _previewGate;
-  Object? _previewGateScope;
-
-  /// Whether document/media previews are enabled on the server. The flag is
-  /// per server, so a short per-scope memory removes a serial round trip from
-  /// every preview open; a failed read is never remembered.
-  Future<bool> attachmentPreviewEnabled() async {
-    final source = presentationSource;
-    if (source != null) return source.attachmentPreviewEnabled();
-    final scope = attachmentImageScope;
-    final at = _previewGateAt;
-    if (_previewGate != null &&
-        _previewGateScope == scope &&
-        at != null &&
-        DateTime.now().difference(at) < const Duration(minutes: 2)) {
-      return _previewGate!;
-    }
-    final gate = await client.get('/messages/attachment-preview/enabled');
-    final enabled = gate is Map && gate['enabled'] == true;
-    if (_disposed || scope != attachmentImageScope) return enabled;
-    _previewGate = enabled;
-    _previewGateScope = scope;
-    _previewGateAt = DateTime.now();
-    return enabled;
-  }
-
-  final _sharedReads = <String, Future<dynamic>>{};
-
-  /// Coalesce identical concurrent reads of the same window. The Activity
-  /// page and the Activity attention badge both reconcile the inbox 150 ms
-  /// after the same socket event; they now share one request. Every caller
-  /// receives its own copy of the decoded response.
-  Future<dynamic> sharedQuery(String path, {Map<String, dynamic>? query}) {
-    final params = query == null
-        ? null
-        : (query.keys.toList()..sort()).map((k) => [k, query[k]]).toList();
-    final key = jsonEncode([
-      client.origin,
-      client.generation,
-      client.user?.id,
-      client.serverId,
-      path,
-      params,
-    ]);
-    var pending = _sharedReads[key];
-    if (pending == null) {
-      final started = pending = this.query(path, query: query);
-      _sharedReads[key] = started;
-      unawaited(
-        started
-            .then<void>((_) {}, onError: (Object _, StackTrace _) {})
-            .whenComplete(() {
-              if (identical(_sharedReads[key], started)) {
-                _sharedReads.remove(key);
-              }
-            }),
-      );
-    }
-    return pending.then(_copyDecoded);
-  }
 
   /// A deep copy of a decoded response, so consumers never share its maps.
-  static dynamic copyDecoded(dynamic value) => _copyDecoded(value);
+  static dynamic copyDecoded(dynamic value) =>
+      RaftApiGateway.copyDecoded(value);
 
-  static dynamic _copyDecoded(dynamic value) => switch (value) {
-    Map() => <String, dynamic>{
-      for (final MapEntry(:key, :value) in value.entries)
-        '$key': _copyDecoded(value),
-    },
-    List() => [for (final item in value) _copyDecoded(item)],
-    _ => value,
-  };
   int savedRevision = 0;
+  @override
   Future<dynamic> command(String method, String path, {dynamic data}) async {
     if (presentationSource != null) {
       return presentationSource!.command(method, path, data: data);
     }
-    final generation = client.generation,
-        principal = client.user?.id,
-        serverId = client.serverId;
-    final value = await client.request(method, path, data: data);
-    if (generation == client.generation &&
-        principal == client.user?.id &&
-        serverId == client.serverId &&
-        ((method == 'POST' && path == '/channels/saved') ||
-            (method == 'DELETE' && path.startsWith('/channels/saved/')))) {
-      ++savedRevision;
-      notifyListeners();
-    }
-    if (_reconcilesUnread(path)) await refreshUnread();
-    return value;
-  }
-
-  /// Commands whose effect on unread counts is only known to the server
-  /// (read-all, mark unread, join/leave, notification preferences).
-  static bool _reconcilesUnread(String path) {
-    final segments = Uri.parse(path).pathSegments;
-    return segments.isNotEmpty &&
-        const {
-          'read',
-          'read-all',
-          'unread',
-          'join',
-          'leave',
-          'notification-settings',
-        }.contains(segments.last);
+    return apiGateway.command(method, path, data: data);
   }
 
   Future<void> hydrateReactionViewer(RaftMessage message) async {
@@ -5898,7 +4673,7 @@ class WorkspaceController extends ChangeNotifier {
             ? messageSync.consumeNew(row)
             : row;
         if (projection == null) return;
-        if (!duplicate) MessageHistoryEvents.store(this, projection);
+        MessageHistoryEvents.store(this, projection);
         ledger.ingest([projection], expectedGeneration: ledger.generation);
       }
       final id = row['channelId'];
@@ -5957,6 +4732,7 @@ class WorkspaceController extends ChangeNotifier {
             );
             if (outcome == 'accepted' && fact['scopeId'] is String) {
               _projectReadState(fact['scopeId'] as String);
+              applyReadStateUnreadHint(_summariesByChannel, fact);
             }
           }
         }
@@ -5973,36 +4749,21 @@ class WorkspaceController extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    sessionScope.dispose();
     MessageHistoryPages.detach(this);
     if (presentationSource == null) messageWindows.dispose();
     composer.sends.detach(this);
     composer.disposeOwnedBy(this);
-    if (_ownsEntityDirectory) {
+    if (services.ownsEntityDirectory) {
       removeListener(_entityAuthorityChanged);
-      entityDirectory.dispose();
     }
-    if (_ownsFollowedThreads) followedThreads.dispose();
-    _translations?.dispose();
-    _threadSearch?.dispose();
-    _threadFollowers?.dispose();
-    _announcements?.dispose();
-    _announcementGate?.dispose();
-    _imageAuthorities.clear();
-    _removeImageTrimmer?.call();
-    _removeImageTrimmer = null;
-    _removeImageReporter?.call();
-    _removeImageReporter = null;
-    _removePlayerTrim?.call();
-    _removePlayerTrim = null;
+    services.disposeOwnedStores();
     _removeCacheClear?.call();
     _removeCacheClear = null;
-    _attachmentImages?.dispose();
-    _attachmentUrls.dispose();
-    _playerSessions.dispose();
-    _channelFilesStores.clear();
+    if (presentationSource == null) attachmentMedia.dispose();
+    services.retireChannelFiles();
     subscription.cancel();
-    _activityUnread?.dispose();
-    _activityUnread = null;
+    services.disposeActivityUnread();
     foregroundChanges.dispose();
     resumes.dispose();
     if (ownsClient) client.dispose();

@@ -1,11 +1,15 @@
 import importlib.machinery
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 import contextlib
 import io
 from pathlib import Path
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock
 
@@ -86,9 +90,18 @@ class ParallelismTests(unittest.TestCase):
         self.assertEqual(check.plan_parallelism(16, 0.0, {}, 'linux'), (5, 3))
         self.assertEqual(check.plan_parallelism(16, 0.0, {}, 'darwin'), (1, 8))
         self.assertEqual(check.plan_parallelism(16, 0.0, {'RAFT_CHECK_SHARDS': '2'}, 'darwin'), (2, 4))
-        self.assertEqual(check.plan_parallelism(16, 10.0, {}, 'linux'), (2, 3))
+        self.assertEqual(check.plan_parallelism(16, 10.0, {}, 'linux'), (3, 2))
+        # A saturated 16-CPU machine keeps three shards instead of one.
+        self.assertEqual(check.plan_parallelism(16, 30.0, {}, 'linux'), (3, 2))
+        self.assertEqual(check.plan_parallelism(8, 30.0, {}, 'linux'), (2, 2))
         self.assertEqual(check.plan_parallelism(2, 8.0, {}, 'linux'), (1, 2))
         self.assertLessEqual(check.plan_parallelism(128, 0.0, {}, 'linux')[0], 8)
+
+    def test_shard_timeout_scales_with_measured_work(self):
+        self.assertEqual(check.shard_timeout_seconds(600, 3), 3600)
+        self.assertEqual(check.shard_timeout_seconds(6000, 2), 7500)
+        self.assertEqual(check.shard_timeout_seconds(6000, 2, '90'), 5400)
+        self.assertEqual(check.shard_timeout_seconds(None, 2), 3600)
 
     def test_environment_overrides(self):
         self.assertEqual(check.plan_parallelism(16, 0.0, {'RAFT_CHECK_SHARDS': '3', 'RAFT_CHECK_JOBS': '1'}, 'linux'), (3, 1))
@@ -394,3 +407,390 @@ class StartupGateTests(unittest.TestCase):
                     check.run_shard(0, [], 2, {}, 60, gate)
             gate.enter()  # not deadlocked
             gate.leave()
+
+
+def failure(file, name='boom', shard=0, status='failed'):
+    return {'name': name, 'file': file, 'status': status, 'error': '', 'shard': shard}
+
+
+class RetryDecisionTests(unittest.TestCase):
+    def test_failed_test_files_are_retried_once_each(self):
+        failures = [failure('a_test.dart', 'one'), failure('a_test.dart', 'two'), failure('b_test.dart')]
+        decision = check.retry_decision(failures, True, None, 3)
+        self.assertEqual(decision, {'files': ['a_test.dart', 'b_test.dart'], 'skip': None})
+
+    def test_a_file_that_never_finished_is_retried_too(self):
+        decision = check.retry_decision([failure('a_test.dart', '(file never ran)', status='incomplete')], True, None, 3)
+        self.assertEqual(decision['files'], ['a_test.dart'])
+
+    def test_six_files_still_retry_and_seven_do_not(self):
+        six = [failure(f'f{i}_test.dart') for i in range(6)]
+        self.assertEqual(len(check.retry_decision(six, True, None, 3)['files']), 6)
+        seven = [failure(f'f{i}_test.dart') for i in range(7)]
+        decision = check.retry_decision(seven, True, None, 3)
+        self.assertEqual(decision['files'], [])
+        self.assertIn('7 test files', decision['skip'])
+
+    def test_many_failed_tests_in_few_files_still_count_files(self):
+        failures = [failure('a_test.dart', f't{i}') for i in range(20)]
+        self.assertEqual(check.retry_decision(failures, True, None, 3)['files'], ['a_test.dart'])
+
+    def test_another_failing_check_means_no_retry(self):
+        decision = check.retry_decision([failure('a_test.dart')], False, None, 3)
+        self.assertEqual(decision['files'], [])
+
+    def test_an_early_stop_means_no_retry(self):
+        stop = {'reason': 'max-failures'}
+        self.assertEqual(check.retry_decision([failure('a_test.dart')], True, stop, 3)['files'], [])
+
+    def test_retries_zero_turns_it_off(self):
+        self.assertEqual(check.retry_decision([failure('a_test.dart')], True, None, 0)['files'], [])
+
+    def test_a_failure_without_a_test_file_means_no_retry(self):
+        for bad in (failure(''), failure('?'), failure('a_test.dart', '(load/compile error)')):
+            self.assertEqual(check.retry_decision([failure('b_test.dart'), bad], True, None, 3)['files'], [], bad)
+
+    def test_nothing_failed_nothing_to_retry(self):
+        self.assertEqual(check.retry_decision([], True, None, 3)['files'], [])
+
+
+class RetryFilesTests(unittest.TestCase):
+    def test_a_file_that_passes_on_a_retry_is_a_flake_with_the_first_runs_failed_tests(self):
+        failures = [failure('a_test.dart', 'one'), failure('a_test.dart', 'one'), failure('a_test.dart', 'two'), failure('a_test.dart', '(file never ran)')]
+        calls = []
+
+        def run_once(file, attempt):
+            calls.append((file, attempt))
+            return attempt == 2
+
+        flaky, still = check.retry_files(['a_test.dart'], failures, 3, run_once)
+        self.assertEqual(flaky, [{'file': 'a_test.dart', 'tests': ['one', 'two'], 'errors': [], 'attempts': 2}])
+        self.assertEqual(still, [])
+        self.assertEqual(calls, [('a_test.dart', 1), ('a_test.dart', 2)])  # stops at the first pass
+
+    def test_a_file_failing_every_attempt_stays_failed(self):
+        calls = []
+        flaky, still = check.retry_files(['a_test.dart'], [failure('a_test.dart')], 3, lambda f, n: calls.append(n) and False)
+        self.assertEqual(flaky, [])
+        self.assertEqual(still, [{'file': 'a_test.dart', 'attempts': 3}])
+        self.assertEqual(calls, [1, 2, 3])
+
+    def test_files_are_judged_independently(self):
+        flaky, still = check.retry_files(['a_test.dart', 'b_test.dart'], [failure('a_test.dart'), failure('b_test.dart')], 3, lambda f, n: f == 'a_test.dart')
+        self.assertEqual([f['file'] for f in flaky], ['a_test.dart'])
+        self.assertEqual([f['file'] for f in still], ['b_test.dart'])
+        self.assertEqual(flaky[0]['attempts'], 1)
+
+    def test_retry_passed_needs_exit_zero_marker_and_every_test_finished(self):
+        good = check.parse_test_events(events(SUITE, started(1, 'x', 0), done(1, 5)), lambda p: 'a_test.dart')
+        self.assertTrue(check.retry_passed(0, 'ok\nAll tests passed!\n', good, ['a_test.dart']))
+        self.assertFalse(check.retry_passed(1, 'All tests passed!\n', good, ['a_test.dart']))
+        self.assertFalse(check.retry_passed(0, 'no marker\n', good, ['a_test.dart']))
+        self.assertFalse(check.retry_passed(0, 'All tests passed!\n', good, ['other_test.dart']))
+        bad = check.parse_test_events(events(SUITE, started(1, 'x', 0), done(1, 5, result='failure')), lambda p: 'a_test.dart')
+        self.assertFalse(check.retry_passed(0, 'All tests passed!\n', bad, ['a_test.dart']))
+
+    def test_summary_lists_flakes_and_still_failing_files(self):
+        flaky = [{'file': 'a_test.dart', 'tests': ['one', 'two'], 'attempts': 2}]
+        text = check.format_summary([], [], {'passed': 3, 'skipped': 0}, [], flaky=flaky, retry_failed=[{'file': 'b_test.dart', 'attempts': 3}])
+        self.assertIn('FLAKY (passed on retry):', text)
+        self.assertIn('a_test.dart (retry attempt 2): one; two', text)
+        self.assertIn('Still failing after retries:', text)
+        self.assertNotIn('FLAKY', check.format_summary([], [], {'passed': 3, 'skipped': 0}, []))
+
+
+def test_events(path, name, ok):
+    suite = {'type': 'suite', 'suite': {'id': 1, 'platform': 'vm', 'path': str(path)}, 'time': 0}
+    return events(suite, started(10, f'loading {path}', 0), done(10, 1), started(11, name, 1), done(11, 2, result='success' if ok else 'failure'))
+
+
+class RunGateRetryTests(unittest.TestCase):
+    """run_gate end to end with fake child processes: one scripted outcome list per test file."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / 'apps/raft_flutter/test').mkdir(parents=True)
+        self.script, self.calls, self.analyze_ok = {}, [], True
+        env = unittest.mock.patch.dict(os.environ, {'RAFT_CHECK_MAX_FAILURES': '0', 'RAFT_CHECK_SHARDS': '2'})
+        env.start()
+        self.addCleanup(env.stop)
+        for name, value in (('root', self.root), ('local', self.root / '.local'), ('app_dir', self.root / 'apps/raft_flutter')):
+            patcher = unittest.mock.patch.object(check, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for patcher in (unittest.mock.patch.object(check, 'run_logged', self.fake_run), unittest.mock.patch.object(check.subprocess, 'check_output', lambda *a, **k: 'hash')):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def add_tests(self, **outcomes):
+        """name -> list of per-run outcomes (True = passes); the last one repeats."""
+        for name, runs in outcomes.items():
+            (self.root / 'apps/raft_flutter/test' / f'{name}_test.dart').write_text('void main() {}\n')
+            self.script[f'test/{name}_test.dart'] = list(runs)
+
+    def fake_run(self, args, cwd, log_path, env, timeout=None, outcome=None, after_start=None):
+        args = [str(a) for a in args]
+        if '--file-reporter' not in args:
+            Path(log_path).write_text('ok\n')
+            return 1 if 'analyze' in args and not self.analyze_ok else 0
+        files = args[args.index('test') + 1:args.index('--no-pub')]
+        events_path = Path(args[args.index('--file-reporter') + 1].removeprefix('json:'))
+        retry = events_path.name.startswith('retry-')
+        lines, ok = [], True
+        for file in files:
+            self.calls.append((file, 'retry' if retry else 'shard'))
+            runs = self.script[file]
+            passed = runs.pop(0) if len(runs) > 1 else runs[0]
+            ok = ok and passed
+            lines += test_events(self.root / 'apps/raft_flutter' / file, 'sample test', passed)
+        events_path.write_text('\n'.join(lines) + '\n')
+        Path(log_path).write_text('All tests passed!\n' if ok else 'Some tests failed.\n')
+        if after_start:
+            after_start(FakeChild())
+        return 0 if ok else 1
+
+    def run_it(self):
+        emitted = []
+
+        def emit(event, /, notify=None, **details):
+            emitted.append(event)
+
+        emit.message = lambda *a: ''
+        with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
+            outcome = check.run_gate(dict(os.environ), emit, 0.0)
+        return outcome, json.loads(out.getvalue().strip().splitlines()[-1]), emitted
+
+    def retries(self, file):
+        return [c for c in self.calls if c == (file, 'retry')]
+
+    def test_a_flaky_file_passes_the_run_and_is_listed_in_the_json(self):
+        self.add_tests(a=[False, True], b=[True])
+        outcome, result, emitted = self.run_it()
+        self.assertTrue(outcome['ok'])
+        self.assertTrue(result['passed'])
+        self.assertEqual(result['flaky'], [{'file': 'apps/raft_flutter/test/a_test.dart', 'tests': ['sample test'], 'errors': [], 'attempts': 1}])
+        self.assertEqual(len(self.retries('test/a_test.dart')), 1)
+        self.assertEqual(self.retries('test/b_test.dart'), [])
+        self.assertTrue(all(result['checks'].values()))
+        self.assertIn('FLAKY (passed on retry)', (self.root / '.local/check-summary.txt').read_text())
+        self.assertIn('All tests passed!', (self.root / '.local/all-project-tests.txt').read_text())
+        self.assertIn('FLAKY', emitted)
+
+    def test_a_file_failing_all_three_attempts_keeps_the_run_failed(self):
+        self.add_tests(a=[False], b=[True])
+        outcome, result, _ = self.run_it()
+        self.assertFalse(outcome['ok'])
+        self.assertFalse(result['passed'])
+        self.assertNotIn('flaky', result)
+        self.assertEqual(len(self.retries('test/a_test.dart')), 3)
+        self.assertFalse(result['checks']['all-project-tests.txt'])
+        self.assertIn('Still failing after retries', (self.root / '.local/check-summary.txt').read_text())
+
+    def test_a_flake_and_a_real_failure_in_one_run(self):
+        self.add_tests(a=[False, True], b=[False])
+        outcome, result, _ = self.run_it()
+        self.assertFalse(result['passed'])
+        self.assertEqual([f['file'] for f in result['flaky']], ['apps/raft_flutter/test/a_test.dart'])
+        self.assertEqual([f['file'] for f in outcome['failures']], ['apps/raft_flutter/test/b_test.dart'])
+
+    def test_more_than_six_failed_files_are_not_retried(self):
+        self.add_tests(**{f'f{i}': [False, True] for i in range(7)})
+        outcome, result, _ = self.run_it()
+        self.assertFalse(result['passed'])
+        self.assertEqual([c for c in self.calls if c[1] == 'retry'], [])
+
+    def test_a_failing_analysis_is_never_retried(self):
+        self.analyze_ok = False
+        self.add_tests(a=[False, True])
+        outcome, result, _ = self.run_it()
+        self.assertFalse(result['passed'])
+        self.assertFalse(result['checks']['analyze-all.txt'])
+        self.assertEqual(self.retries('test/a_test.dart'), [])
+
+    def test_retries_zero_is_the_opt_out(self):
+        self.add_tests(a=[False, True])
+        with unittest.mock.patch.dict(os.environ, {'RAFT_CHECK_RETRIES': '0'}):
+            outcome, result, _ = self.run_it()
+        self.assertFalse(result['passed'])
+        self.assertEqual(self.retries('test/a_test.dart'), [])
+
+    def test_a_clean_run_has_no_flaky_key_and_no_retry(self):
+        self.add_tests(a=[True], b=[True])
+        outcome, result, _ = self.run_it()
+        self.assertTrue(result['passed'])
+        self.assertNotIn('flaky', result)
+        self.assertEqual([c for c in self.calls if c[1] == 'retry'], [])
+
+
+def git(cwd, *args):
+    return subprocess.check_output(['git', *args], cwd=cwd, text=True, env=dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t', GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t')).strip()
+
+
+class ReuseTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = Path(self.tmp.name) / 'repo'
+        self.repo.mkdir()
+        self.cache = Path(self.tmp.name) / 'cache'
+        self.env = {'RAFT_CHECK_CACHE': str(self.cache)}
+        git(self.repo, 'init', '-q')
+        (self.repo / 'a.txt').write_text('one\n')
+        git(self.repo, 'add', '.')
+        git(self.repo, 'commit', '-q', '-m', 'one')
+
+    def tree(self):
+        return git(self.repo, 'rev-parse', 'HEAD^{tree}')
+
+    def test_clean_tree_hash_is_the_head_tree_and_none_when_dirty(self):
+        self.assertEqual(check.clean_tree_hash(self.repo), self.tree())
+        (self.repo / 'a.txt').write_text('changed\n')
+        self.assertIsNone(check.clean_tree_hash(self.repo))
+        git(self.repo, 'checkout', '-q', 'a.txt')
+        (self.repo / 'new.txt').write_text('untracked\n')
+        self.assertIsNone(check.clean_tree_hash(self.repo))
+
+    def test_cache_dir_defaults_under_home_and_honours_the_override(self):
+        self.assertEqual(check.cache_root({'RAFT_CHECK_CACHE': '/x/y'}), Path('/x/y'))
+        self.assertEqual(check.cache_root({}), Path.home() / '.cache' / 'raft-check')
+
+    def test_a_recorded_pass_is_found_for_the_same_tree(self):
+        tree = self.tree()
+        result = {'passed': True, 'sourceChanged': False, 'checks': {'x': True}, 'flaky': [{'file': 'a', 'tests': [], 'attempts': 1}]}
+        path = check.record_pass(tree, 'abc123', result, 'sampled', {'themes': 'sampled'}, env=self.env, now=time.gmtime(0))
+        self.assertEqual(path, self.cache / 'passed' / f'{tree}.json')
+        record = json.loads(path.read_text())
+        self.assertEqual((record['tree'], record['commit'], record['time'], record['result']), (tree, 'abc123', '1970-01-01T00:00:00Z', result))
+        found = check.reusable_pass('sampled', self.repo, self.env)
+        self.assertEqual(found['result'], result)  # the flakes stay listed
+        self.assertIn(f'tree {tree} already passed at 1970-01-01T00:00:00Z on abc123; reusing', check.reuse_message(found))
+
+    def test_a_different_tree_misses(self):
+        check.record_pass(self.tree(), 'abc', {'passed': True}, 'sampled', env=self.env)
+        (self.repo / 'a.txt').write_text('two\n')
+        git(self.repo, 'commit', '-q', '-am', 'two')
+        self.assertIsNone(check.reusable_pass('sampled', self.repo, self.env))
+
+    def test_the_same_tree_under_another_commit_still_hits(self):
+        check.record_pass(self.tree(), 'abc', {'passed': True}, 'sampled', env=self.env)
+        git(self.repo, 'commit', '-q', '--allow-empty', '-m', 'same tree again')
+        self.assertIsNotNone(check.reusable_pass('sampled', self.repo, self.env))
+
+    def test_a_dirty_worktree_never_reuses(self):
+        check.record_pass(self.tree(), 'abc', {'passed': True}, 'sampled', env=self.env)
+        (self.repo / 'a.txt').write_text('dirty\n')
+        self.assertIsNone(check.reusable_pass('sampled', self.repo, self.env))
+
+    def test_no_record_and_unreadable_records_miss(self):
+        self.assertIsNone(check.reusable_pass('sampled', self.repo, self.env))
+        path = check.passed_record_path(self.tree(), self.env)
+        path.parent.mkdir(parents=True)
+        path.write_text('not json')
+        self.assertIsNone(check.reusable_pass('sampled', self.repo, self.env))
+        path.write_text(json.dumps({'tree': self.tree(), 'result': {'passed': False}}))
+        self.assertIsNone(check.reusable_pass('sampled', self.repo, self.env))
+
+    def test_a_sampled_pass_does_not_cover_all_themes_but_the_reverse_does(self):
+        check.record_pass(self.tree(), 'abc', {'passed': True}, 'sampled', env=self.env)
+        self.assertIsNone(check.reusable_pass('all', self.repo, self.env))
+        check.record_pass(self.tree(), 'abc', {'passed': True}, 'all', env=self.env)
+        self.assertIsNotNone(check.reusable_pass('sampled', self.repo, self.env))
+        self.assertIsNone(check.record_pass(self.tree(), 'abc', {'passed': True}, 'sampled', env=self.env))  # keeps the all-themes record
+        self.assertIsNotNone(check.reusable_pass('all', self.repo, self.env))
+
+    def test_an_unwritable_cache_does_not_raise(self):
+        blocker = Path(self.tmp.name) / 'file'
+        blocker.write_text('x')
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertIsNone(check.record_pass(self.tree(), 'abc', {'passed': True}, 'sampled', env={'RAFT_CHECK_CACHE': str(blocker)}))
+
+    def run_main(self, argv, gate_outcome=None):
+        gate = unittest.mock.Mock(return_value=gate_outcome or {'ok': True, 'failures': [], 'stop': None, 'changed': False, 'failed_checks': [],
+                                                                  'flaky': [], 'result': {'passed': True, 'checks': {}}, 'run_record': {'themes': 'sampled'}})
+
+        class Silent:
+            def __init__(self, *a):
+                pass
+
+            def __call__(self, *a, **k):
+                pass
+
+            def message(self, *a):
+                return ''
+
+        patches = [unittest.mock.patch.object(check, 'root', self.repo), unittest.mock.patch.object(check, 'local', self.repo / '.local'),
+                   unittest.mock.patch.object(check, 'run_gate', gate), unittest.mock.patch.object(check.gate_events, 'Events', Silent),
+                   unittest.mock.patch.object(check.gate_events, 'raise_on_signals', lambda: None),
+                   unittest.mock.patch.object(check, 'run_tmp_root', lambda: Path(self.tmp.name) / 'tmp'),
+                   unittest.mock.patch.object(sys, 'argv', ['check-project', *argv]), unittest.mock.patch.dict(os.environ, self.env)]
+        for patcher in patches:
+            patcher.start()
+        self.addCleanup(check.STOP.clear)  # main() stops its children on the way out
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    check.main()
+        finally:
+            for patcher in reversed(patches):
+                patcher.stop()
+        return raised.exception.code, out.getvalue(), gate
+
+    def test_reuse_hit_prints_the_line_and_the_stored_json_and_runs_nothing(self):
+        tree = self.tree()
+        stored = {'passed': True, 'sourceChanged': False, 'checks': {'x': True}}
+        check.record_pass(tree, 'abc', stored, 'sampled', {'themes': 'sampled', 'completed': True}, env=self.env, now=time.gmtime(0))
+        code, out, gate = self.run_main(['--reuse'])
+        self.assertEqual(code, 0)
+        gate.assert_not_called()
+        lines = out.strip().splitlines()
+        self.assertEqual(lines[0], f'check-project: tree {tree} already passed at 1970-01-01T00:00:00Z on abc; reusing')
+        self.assertEqual(json.loads(lines[-1]), {**stored, 'reused': True})
+        self.assertTrue(json.loads((self.repo / '.local/engineering-run.json').read_text())['completed'])
+
+    def test_reuse_miss_runs_the_checks_and_records_the_pass(self):
+        tree = self.tree()
+        code, out, gate = self.run_main(['--reuse'])
+        gate.assert_called_once()
+        self.assertEqual(code, 0)
+        self.assertEqual(check.read_pass_record(tree, self.env)['commit'], git(self.repo, 'rev-parse', 'HEAD'))
+
+    def test_reuse_with_a_dirty_worktree_runs_and_records_nothing(self):
+        check.record_pass(self.tree(), 'abc', {'passed': True}, 'sampled', env=self.env)
+        (self.repo / 'a.txt').write_text('dirty\n')
+        code, out, gate = self.run_main(['--reuse'])
+        gate.assert_called_once()
+        self.assertNotIn('reused', out)
+
+    def test_a_run_without_the_flag_never_reuses_but_records_a_clean_pass(self):
+        check.record_pass(self.tree(), 'abc', {'passed': True}, 'sampled', env=self.env)
+        code, out, gate = self.run_main([])
+        gate.assert_called_once()
+
+    def test_a_failed_run_is_not_recorded(self):
+        outcome = {'ok': False, 'failures': [], 'stop': None, 'changed': False, 'failed_checks': ['analyze-all.txt'], 'flaky': [], 'result': {'passed': False}}
+        code, out, gate = self.run_main([], outcome)
+        self.assertEqual(code, 1)
+        self.assertIsNone(check.read_pass_record(self.tree(), self.env))
+
+    def test_unknown_arguments_and_help(self):
+        with self.assertRaises(SystemExit):
+            check.parse_args(['--nope'])
+        self.assertEqual(check.parse_args(['--reuse', '--all-themes']), (True, True))
+        self.assertEqual(check.parse_args([]), (False, False))
+
+
+class FlakyEvidenceTests(unittest.TestCase):
+    def test_first_run_errors_are_kept_for_a_flake(self):
+        failures = [
+            {'file': 'a_test.dart', 'name': 'one', 'error': 'Expected: <14>\n  Actual: <6.4>', 'status': 'failed'},
+            {'file': 'a_test.dart', 'name': 'two', 'error': 'Expected: <14>\n  Actual: <6.4>', 'status': 'failed'},
+            {'file': 'b_test.dart', 'name': 'three', 'error': 'other file', 'status': 'failed'},
+            {'file': 'a_test.dart', 'name': 'four', 'error': 'x' * 400, 'status': 'failed'},
+        ]
+        errors = check.first_run_errors(failures, 'a_test.dart')
+        self.assertEqual(errors[0], 'Expected: <14>\n  Actual: <6.4>')
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(errors[1].endswith('…'))
+        self.assertLessEqual(len(errors[1]), 301)

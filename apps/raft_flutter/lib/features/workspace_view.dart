@@ -79,7 +79,6 @@ import 'resource_cards.dart' show resourceRelativeTime;
 import 'saved_sidebar_entry.dart';
 import 'system_notification_center.dart';
 import 'workspace_browser.dart';
-import 'public_avatar_url.dart';
 import 'management_support.dart' show managementLaunch;
 import 'sender_avatar_projection.dart';
 import '../platform/app_services.dart';
@@ -89,6 +88,7 @@ import '../platform/native_notifications.dart';
 import '../platform/system_bars.dart';
 import '../platform/keyboard_inset_diagnostics.dart';
 import '../data/feature_flag_client_facts.dart';
+import 'public_avatar_url.dart';
 
 part 'workspace_view_sidebar_menus.dart';
 part 'mobile_workspace_route.dart';
@@ -640,7 +640,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
   /// presence patches never rebuild the shell.
   late WorkspaceEntitySelection shellIdentities;
   WorkspaceEntitySelection bindShellIdentities() =>
-      WorkspaceEntitySelection(w.entityDirectory, (d) => d.authorRevision);
+      WorkspaceEntitySelection(w.services.entityDirectory, (d) => d.authorRevision);
   void syncPresentation() {
     if (skipCoveredPage) return;
     unawaited(
@@ -713,7 +713,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
     HardwareKeyboard.instance.addHandler(globalShortcut);
     w.addListener(syncMobileAppBadge);
     syncMobileAppBadge();
-    activityUnread = w.activityUnread..addListener(activityUnreadChanged);
+    activityUnread = w.services.activityUnread..addListener(activityUnreadChanged);
     serverUnread = mobileHost?.serverUnread ?? SourceServerUnreadStore(w);
     serverUnread.addListener(serverUnreadChanged);
     serverMenu.addListener(serverMenuChanged);
@@ -853,7 +853,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
       w.addListener(syncMobileAppBadge);
       syncMobileAppBadge();
       activityUnread.removeListener(activityUnreadChanged);
-      activityUnread = w.activityUnread..addListener(activityUnreadChanged);
+      activityUnread = w.services.activityUnread..addListener(activityUnreadChanged);
       serverMenu.close();
       if (mobileHost == null) {
         oldWidget.controller.resumes.removeListener(appResumed);
@@ -2188,7 +2188,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
     final sourceChannel = w.threadSourceChannel;
     final threadId = w.threadChannelId;
     return ListenableBuilder(
-      listenable: w.threadFollowers,
+      listenable: w.services.threadFollowers,
       builder: (context, _) => RaftThreadHeader(
         key: Key(
           mobile ? 'workspace-mobile-detail-header' : 'workspace-thread-header',
@@ -2220,7 +2220,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
         followersVisible:
             threadId != null &&
             !unresolved &&
-            w.threadFollowers.visible(threadId),
+            w.services.threadFollowers.visible(threadId),
         actions: [
           if (!unresolved && parentId != null && parentChannelId != null)
             ThreadActions(
@@ -2725,8 +2725,8 @@ class _WorkspaceViewState extends State<WorkspaceView>
         computers: target.kind == DesktopContentKind.computer,
         initial:
             (target.kind == DesktopContentKind.computer
-                ? w.entityDirectory.computer(target.id)
-                : w.entityDirectory.agent(target.id)) ??
+                ? w.services.entityDirectory.computer(target.id)
+                : w.services.entityDirectory.agent(target.id)) ??
             {'id': target.id},
         onClose: !wide && target.kind == DesktopContentKind.computer
             ? dismissPanel
@@ -3406,13 +3406,13 @@ class _WorkspaceViewState extends State<WorkspaceView>
       ...(w.sidebarOrder['pinned'] as List? ?? []),
       ...(w.sidebarOrder['sectionPlacements'] as List? ?? []),
     ].any((r) => r is Map && r['kind'] == 'agent');
-    if (pinnedAgent) w.entityDirectory.ensureAuthors();
+    if (pinnedAgent) w.services.entityDirectory.ensureAuthors();
   }
 
   List<Map<String, dynamic>>? sidebarAgentSource;
   List<Map<String, dynamic>> sidebarAgentRows = const [];
   List<Map<String, dynamic>> get sidebarAgents {
-    final source = w.entityDirectory.authorAgents;
+    final source = w.services.entityDirectory.authorAgents;
     if (!identical(source, sidebarAgentSource)) {
       sidebarAgentSource = source;
       sidebarAgentRows = [
@@ -3568,12 +3568,8 @@ class _WorkspaceViewState extends State<WorkspaceView>
                 child: sectionLabel(group.label, group: group),
               ),
               if (sidebarDisclosure.collapsed[group.id] != true)
-                sidebarRowsSliver(
-                  group.entries,
-                  onReorder: sidebarReorderCallback(group, group.entries, w),
-                  row: (e, reorderable) =>
-                      sidebarEntry(e, custom: true, reorderable: reorderable),
-                ),
+                sidebarCustomRows(group, w, (e, reorderable) =>
+                    sidebarEntry(e, custom: true, reorderable: reorderable)),
               if (sidebarDisclosure.collapsed[group.id] != true &&
                   group.entries.isEmpty)
                 SliverToBoxAdapter(
@@ -3599,20 +3595,17 @@ class _WorkspaceViewState extends State<WorkspaceView>
 
   Widget sidebarGroupSliver(SidebarGroup group) {
     final entries = _shownEntries(group);
-    final reorder = sidebarReorderCallback(group, entries, w);
-    final pinned = group.id == 'system:pinned';
-    return RaftChatSidebarGroup.sliver(
-      key: ValueKey('sidebar-group-${group.id}'),
-      headerKey: ValueKey('sidebar-section-${group.id}'),
-      disclosureKey: ValueKey('sidebar-disclosure-${group.id}'),
+    return sidebarSystemGroupSliver(
+      group: group,
+      entries: entries,
+      w: w,
+      label: tr(group.label),
       kind: switch (group.id) {
         'system:pinned' => RaftChatSidebarGroupKind.pinned,
         'system:joint' => RaftChatSidebarGroupKind.joint,
         'system:dms' => RaftChatSidebarGroupKind.directMessages,
         _ => RaftChatSidebarGroupKind.channels,
       },
-      label: tr(group.label),
-      count: entries.length,
       expanded: sidebarDisclosure.collapsed[group.id] != true,
       hideEmpty: presentation.value.hideEmptySections,
       loading: w.loading,
@@ -3625,24 +3618,12 @@ class _WorkspaceViewState extends State<WorkspaceView>
           sidebarDisclosure.setExpanded(mobileAuthority, group.id, expanded),
       attention: groupAttention(group, entries),
       actions: sidebarGroupActions(group),
-      onContextMenu: (at) => openSectionMenu(at, group),
-      contextMenuOnLongPress: false,
-      wrapHeader: (header) => sidebarSectionDragHeader(
-        group: group,
-        w: w,
-        label: tr(group.label),
-        header: header,
-        onHeldInPlace: (at) => openSectionMenu(at, group),
+      onOpenMenu: (at) => openSectionMenu(at, group),
+      row: (entry, reorderable) => sidebarEntry(
+        entry,
+        pinned: group.id == 'system:pinned',
+        reorderable: reorderable,
       ),
-      itemBuilder: (context, index) => sidebarListRow(
-        entries,
-        index,
-        reorder,
-        (e, reorderable) =>
-            sidebarEntry(e, pinned: pinned, reorderable: reorderable),
-      ),
-      findChildIndexCallback: (key) => sidebarEntryIndex(entries, key),
-      onReorderItem: reorder,
     );
   }
 
@@ -3659,7 +3640,7 @@ class _WorkspaceViewState extends State<WorkspaceView>
   dmPeer(RaftChannel c, {double requestSize = 16}) {
     final agent = c.type == 'dm' && c.string('peerType') == 'agent';
     final profile = agent
-        ? w.entityDirectory.agent(c.string('peerId')) ??
+        ? w.services.entityDirectory.agent(c.string('peerId')) ??
               sidebarAgents
                   .where((a) => a['id'] == c.string('peerId'))
                   .firstOrNull
@@ -3954,15 +3935,13 @@ class _WorkspaceViewState extends State<WorkspaceView>
       onContextMenu: group == null ? null : (at) => openSectionMenu(at, group),
       contextMenuOnLongPress: group == null,
     );
-    return group == null
-        ? header
-        : sidebarSectionDragHeader(
-            group: group,
-            w: w,
-            label: label,
-            header: header,
-            onHeldInPlace: (at) => openSectionMenu(at, group),
-          );
+    return sidebarDragSectionHeader(
+      group: group,
+      w: w,
+      label: label,
+      header: header,
+      onOpenMenu: openSectionMenu,
+    );
   }
 
   List<RaftSidebarSectionAction> sidebarGroupActions(SidebarGroup group) {

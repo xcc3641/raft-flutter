@@ -39,7 +39,6 @@ import 'platform/session_store.dart';
 import 'platform/keyboard_inset_guard.dart';
 import 'platform/launch_theme.dart';
 import 'platform/linux_uri_scheme.dart';
-import 'platform/local_network_access.dart';
 import 'platform/session_persistence.dart';
 import 'platform/attachment_http.dart';
 import 'platform/native_sharing.dart';
@@ -871,7 +870,7 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
     final c = authClient(base, attempt);
     bool current() => mounted && attempt == authAttempt;
     try {
-      await const LocalNetworkAccess().ensure(base, request: true);
+      await widget.services.localNetwork.ensure(base, request: true);
       if (!current()) {
         await c.dispose();
         return;
@@ -1275,7 +1274,7 @@ class _RaftAppState extends State<RaftApp> with WidgetsBindingObserver {
       signedIn: signedIn,
       loadInfo: () async {
         final api = inviteApi();
-        await const LocalNetworkAccess().ensure(api.origin, request: true);
+        await widget.services.localNetwork.ensure(api.origin, request: true);
         return Map<String, dynamic>.from(
           await api.request(
             'GET',

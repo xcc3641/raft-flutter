@@ -108,7 +108,7 @@ class AttachmentTransfers {
     downloadFailed = false;
   }
 
-  Future<String> _resolve(String disposition) => controller.attachmentUrl(
+  Future<String> _resolve(String disposition) => controller.attachmentMedia.url(
     '${metadata['id']}',
     disposition: disposition,
     channelId: ownerChannel,
@@ -117,7 +117,7 @@ class AttachmentTransfers {
   /// The copy of this attachment the cache already holds: the original image
   /// bytes, or the preview file (pinned: release it). Null when there is none.
   Future<({Uint8List? bytes, AttachmentCachedFile? file})?> storedCopy() async {
-    final disk = controller.attachmentDiskCache;
+    final disk = controller.attachmentMedia.diskCache;
     if (disk == null) return null;
     try {
       if (isImage) {
@@ -126,7 +126,7 @@ class AttachmentTransfers {
         return bytes == null ? null : (bytes: bytes, file: null);
       }
       final cached = await disk.openFile(
-        controller.attachmentCacheKey(
+        controller.attachmentMedia.cacheKey(
           metadata,
           'file',
           channelId: ownerChannel,
@@ -153,7 +153,7 @@ class AttachmentTransfers {
       metadata: metadata,
       key: key,
     )(token);
-    final disk = controller.attachmentDiskCache;
+    final disk = controller.attachmentMedia.diskCache;
     if (disk != null) {
       try {
         await disk.write(key.source.storeKey, bytes);

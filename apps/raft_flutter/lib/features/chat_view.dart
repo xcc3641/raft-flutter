@@ -55,6 +55,7 @@ import 'composer_attachments_view.dart';
 import 'sender_avatar_projection.dart';
 import 'message_reaction_projection.dart';
 import 'message_agent_presentation.dart';
+import 'agent_message_collapse.dart';
 import 'agent_metadata_projection.dart';
 import 'agent_avatar_projection.dart';
 import 'profile_preview.dart';
@@ -82,8 +83,10 @@ class ChatViewportHandle {
 
 /// Opens a task from a message (footer chip, in-body `#N` reference) in the
 /// host's task slot; [refresh] re-reads the message's task facts afterwards.
-typedef ChatTaskOpener =
-    void Function(Map<String, dynamic> task, Future<void> Function() refresh);
+typedef ChatTaskOpener = void Function(
+  Map<String, dynamic> task,
+  Future<void> Function() refresh,
+);
 
 class RaftChatView extends StatefulWidget {
   const RaftChatView({
@@ -196,7 +199,7 @@ class _RaftChatViewState extends State<RaftChatView>
                   listRevision != inputs.$3) {
                 return;
               }
-              final translation = w.translations.present(message);
+              final translation = w.services.translations.present(message);
               if (translation.skeleton) return;
               MessagePresentation(
                 controller: w,
@@ -474,6 +477,7 @@ class _RaftChatViewState extends State<RaftChatView>
     }
     return w.timeline(thread: widget.thread);
   }
+
   @override
   void initState() {
     super.initState();
@@ -512,7 +516,7 @@ class _RaftChatViewState extends State<RaftChatView>
     taskProjection = MessageTaskProjection(w)..addListener(referencesChanged);
     selection = MessageSelection(w, thread: widget.thread)
       ..addListener(selectionChanged);
-    w.translations.addListener(referencesChanged);
+    w.services.translations.addListener(referencesChanged);
     bindThreadSearch();
     w.addListener(sync);
     sync();
@@ -538,8 +542,10 @@ class _RaftChatViewState extends State<RaftChatView>
       selection.dispose();
       if (controllerChanged) {
         oldWidget.controller.removeListener(sync);
-        oldWidget.controller.translations.removeListener(referencesChanged);
-        w.translations.addListener(referencesChanged);
+        oldWidget.controller.services.translations.removeListener(
+          referencesChanged,
+        );
+        w.services.translations.addListener(referencesChanged);
         taskProjection.dispose();
         composerDirectory.dispose();
         agentPresentation.dispose();
@@ -747,8 +753,7 @@ class _RaftChatViewState extends State<RaftChatView>
             context,
             userErrorText(
               e,
-              fallback:
-                  "One or more selected items can't be forwarded. Select regular messages instead.",
+              fallback: "One or more selected items can't be forwarded. Select regular messages instead.",
               where: 'forward selection',
             ),
           ),
@@ -869,8 +874,13 @@ class _RaftChatViewState extends State<RaftChatView>
 
   Future<void> returnToBottom() async {
     newMessageCount = 0;
-    returningLatest = widget.thread ? w.threadWindow?.hasNewer == true : w.hasNewer;
-    await w.returnToLatest(thread: widget.thread, navigate: w.section == 'chat');
+    returningLatest = widget.thread
+        ? w.threadWindow?.hasNewer == true
+        : w.hasNewer;
+    await w.returnToLatest(
+      thread: widget.thread,
+      navigate: w.section == 'chat',
+    );
     if (!mounted || returningLatest) return;
     showLatest();
     timelineScrolled();
@@ -913,14 +923,19 @@ class _RaftChatViewState extends State<RaftChatView>
   /// resumes there. Only readers above the latest end need it.
   void saveReadingAnchor() {
     final id = widget.thread ? w.threadChannelId : w.channel?.id;
-    if (!mounted || id == null || scope != id ||
-        adapterWindow != (widget.thread ? w.threadGeneration : w.channelGeneration) || !viewport.hasClients ||
+    if (!mounted ||
+        id == null ||
+        scope != id ||
+        adapterWindow !=
+            (widget.thread ? w.threadGeneration : w.channelGeneration) ||
+        !viewport.hasClients ||
         viewport.positions.length != 1) {
       return;
     }
     // A short restored context can end inside the viewport while newer rows
     // remain on disk. Only the conversation's latest end clears its anchor.
-    if (atBottom && !(widget.thread ? w.threadWindow?.hasNewer == true : w.hasNewer)) {
+    if (atBottom &&
+        !(widget.thread ? w.threadWindow?.hasNewer == true : w.hasNewer)) {
       w.messageWindows.clearReadingAnchor(id);
       MessageHistoryPositions.save(w, id, null);
     } else if (captureTimelineReadingAnchor(context) case final anchor?) {
@@ -932,6 +947,7 @@ class _RaftChatViewState extends State<RaftChatView>
   void dispose() {
     saveReadingAnchor();
     MessageHistoryMemory.cancelSample(w, this);
+    releaseAgentCollapse(this);
     if (reportedBottomId case final id?) w.setTimelineAtBottom(id, true);
     WidgetsBinding.instance.removeObserver(this);
     widget.viewportHandle?.release(this);
@@ -950,7 +966,7 @@ class _RaftChatViewState extends State<RaftChatView>
     composerDirectory.dispose();
     agentPresentation.dispose();
     referenceDirectory.dispose();
-    w.translations.removeListener(referencesChanged);
+    w.services.translations.removeListener(referencesChanged);
     w.removeListener(sync);
     adapter.dispose();
     viewport.dispose();
@@ -1046,7 +1062,11 @@ class _RaftChatViewState extends State<RaftChatView>
     }
     if (same) return false;
     final previousLast = current.lastOrNull?.id;
-    if (!atBottom && insertsBetweenRetainedRows(current.map((m) => m.id), next.map((m) => m.id)) ||
+    if (!atBottom &&
+            insertsBetweenRetainedRows(
+              current.map((m) => m.id),
+              next.map((m) => m.id),
+            ) ||
         centerFirst != null && !wanted.contains(centerFirst) ||
         centerAfter != null && !wanted.contains(centerAfter)) {
       saveReadingAnchor();
@@ -1092,7 +1112,7 @@ class _RaftChatViewState extends State<RaftChatView>
     }
     // Web useTranslationBatch: the panel loads the server's translation
     // settings once per server.
-    w.translations.ensureSettings();
+    w.services.translations.ensureSettings();
     // Upload drafts and composer authority are independent of the chat
     // adapter's message diff. Rebuild them on this view's own listener even
     // when an adaptive/setup parent retains the same child instance. A hidden
@@ -1206,7 +1226,9 @@ class _RaftChatViewState extends State<RaftChatView>
           projected,
           focus: pendingAcceptedMount ? null : target,
           resume:
-              (enteringScope || adapter.messages.isEmpty || adapterWindow != window) &&
+              (enteringScope ||
+                      adapter.messages.isEmpty ||
+                      adapterWindow != window) &&
                   target == null &&
                   !pendingAcceptedMount &&
                   id != null
@@ -1475,7 +1497,7 @@ class _RaftChatViewState extends State<RaftChatView>
                 (int.tryParse('${summary['replyCount']}') ?? 0) > 0)) ||
         message.json['threadChannelId'] != null;
     // Source MessageItem reads the server-scoped followed list synchronously.
-    final followedThreads = w.followedThreads;
+    final followedThreads = w.services.followedThreads;
     if (!hideThreadActions && hasThreadConversation) followedThreads.ensure();
     final followed = followedThreads.isFollowing(message.id);
     final task = taskProjection.taskFor(message);
@@ -1485,7 +1507,7 @@ class _RaftChatViewState extends State<RaftChatView>
         w.channel?.type != 'thread' &&
         message.string('senderType') != 'external_projection';
     final saved = SavedCountStore.of(w).isSaved(message.id);
-    final translation = w.translations.present(message);
+    final translation = w.services.translations.present(message);
     String? result;
     void pick(BuildContext menuContext, String value) {
       result = value;
@@ -1620,7 +1642,9 @@ class _RaftChatViewState extends State<RaftChatView>
       if (choice == 'copy-markdown') {
         await Clipboard.setData(ClipboardData(text: message.content));
       }
-      if (choice == 'translate') unawaited(w.translations.translate(message));
+      if (choice == 'translate') {
+        unawaited(w.services.translations.translate(message));
+      }
       if (choice == 'select') selection.enter(message.id);
       if (choice == 'thread') await w.openThread(message);
       if (choice == 'save') await saveMessage(message);
@@ -1906,7 +1930,7 @@ class _RaftChatViewState extends State<RaftChatView>
       gallery: images.isEmpty
           ? null
           : ShapedImageGallery(
-              sessions: w.playerSessions,
+              sessions: w.attachmentMedia.playerSessions,
               images: images,
               builder: (dimensions) => RaftAttachmentGallery(
                 dimensions: dimensions,
@@ -2597,7 +2621,8 @@ class _RaftChatViewState extends State<RaftChatView>
               ? 'Original shown. Show translation'
               : 'Translated. Show original',
         ),
-        onAction: () => w.translations.setShowOriginal(m.id, !original),
+        onAction: () =>
+            w.services.translations.setShowOriginal(m.id, !original),
       );
     } else if (entry.status == MessageTranslationStatus.pending) {
       status = RaftMessageTranslationStatus(
@@ -2612,7 +2637,7 @@ class _RaftChatViewState extends State<RaftChatView>
         message: unavailable,
         actionLabel: raftText(context, 'Retry'),
         tooltip: unavailable,
-        onAction: () => unawaited(w.translations.translate(m)),
+        onAction: () => unawaited(w.services.translations.translate(m)),
       );
     }
     return KeyedSubtree(
@@ -2622,13 +2647,13 @@ class _RaftChatViewState extends State<RaftChatView>
   }
 
   List<RaftMessageSemanticsAction> translationSemanticsActions(RaftMessage m) {
-    final translation = w.translations.present(m);
+    final translation = w.services.translations.present(m);
     final entry = translation.entry;
     return [
       if (translation.manualAction && !translation.manualPending)
         RaftMessageSemanticsAction(
           raftText(context, 'Translate'),
-          (_) => unawaited(w.translations.translate(m)),
+          (_) => unawaited(w.services.translations.translate(m)),
         ),
       if (entry != null && entry.hasContent)
         RaftMessageSemanticsAction(
@@ -2636,7 +2661,7 @@ class _RaftChatViewState extends State<RaftChatView>
             context,
             translation.showingOriginal ? 'Show translation' : 'Show original',
           ),
-          (_) => w.translations.setShowOriginal(
+          (_) => w.services.translations.setShowOriginal(
             m.id,
             !translation.showingOriginal,
           ),
@@ -2644,7 +2669,7 @@ class _RaftChatViewState extends State<RaftChatView>
       else if (entry?.status == MessageTranslationStatus.failed)
         RaftMessageSemanticsAction(
           raftText(context, 'Retry'),
-          (_) => unawaited(w.translations.translate(m)),
+          (_) => unawaited(w.services.translations.translate(m)),
         ),
     ];
   }
@@ -2667,16 +2692,26 @@ class _RaftChatViewState extends State<RaftChatView>
         timestamp: m.createdAt == null ? '' : clock(m.createdAt!),
       );
     }
+    final times = timeFormatter;
     final fontSize = PersonalPresentationScope.bodyFontSize(
       context,
       w.client.user?.string('preferredMessageBodyFontSize'),
     );
-    final translation = w.translations.present(m);
+    final translation = w.services.translations.present(m);
     // Web useTranslationBatch: auto mode asks for the rows in the built
     // window; the store batches them and skips cached / in-flight rows.
     if (translation.needsRequest && presentationActive) {
-      w.translations.want(m);
+      w.services.translations.want(m);
     }
+    final session = agentCollapseOf(this);
+    final choice = agentMessageOpens(
+      session,
+      parent,
+      senderIsAgent(m),
+      m,
+      w,
+      widget.thread,
+    );
     return RaftMessageTile(
       key: ValueKey('message-$key'),
       rowContext: widget.thread
@@ -2718,11 +2753,12 @@ class _RaftChatViewState extends State<RaftChatView>
       coarsePointer: RaftDensityScope.of(context) == RaftDensity.touch,
       popupOpen: pickerMessageId == m.id || menuMessageId == m.id,
       highlighted: w.highlightedMessageId == m.id || searchActive == m.id,
-      collapseLongMessages:
-          (m.json['actionMetadata'] is! Map ||
-              m.json['actionMetadata']['kind'] != 'action-card') &&
-          w.channel?.json['collapseLongMessages'] != false,
-      timestamp: m.createdAt == null ? '' : clock(m.createdAt!),
+      collapseLongMessages: choice.collapse,
+      initiallyExpanded: choice.open,
+      onMessageExpanded: (open) => session.choose(m.id, open),
+      timestamp: times.messageTime(m.createdAt),
+      continuationTimestamp: continuation ? times.clock(m.createdAt) : null,
+      timestampTooltip: continuation ? times.mediumDateTime(m.createdAt) : null,
       // Source renders a badge only for deactivated/departed identities.
       // Sender type is already represented by the scoped avatar, not an Agent badge.
       departureLabel: senderDepartureLabel(m),
@@ -2829,14 +2865,12 @@ class _RaftChatViewState extends State<RaftChatView>
         onLink: widget.onOpenChannelSettings,
       ),
       ChannelFooterKind.jointLocked => RaftChannelBannerFooter(
-        message:
-            "This Joint Channel is read-only because it has more than 2 free servers. It becomes writable again when one server's admin upgrades or a free server leaves.",
+        message: "This Joint Channel is read-only because it has more than 2 free servers. It becomes writable again when one server's admin upgrades or a free server leaves.",
         linkLabel: widget.onViewBilling == null ? null : 'View Billing',
         onLink: widget.onViewBilling,
       ),
       ChannelFooterKind.guestReadOnly => const RaftChannelBannerFooter(
-        message:
-            'Guest access is read-only. You can read and follow updates, but you cannot post or react.',
+        message: 'Guest access is read-only. You can read and follow updates, but you cannot post or react.',
       ),
       ChannelFooterKind.join => RaftChannelJoinFooter(
         channelName: channel.name,
@@ -2859,15 +2893,13 @@ class _RaftChatViewState extends State<RaftChatView>
     final guestJoinable = parent.json['guestJoinable'] == true;
     if (guest && (joined || !guestJoinable)) {
       return const RaftChannelBannerFooter(
-        message:
-            'Guest access is read-only. You can read and follow this thread, but you cannot reply or react.',
+        message: 'Guest access is read-only. You can read and follow this thread, but you cannot reply or react.',
       );
     }
     if (selection.active) return null;
     if (jointChannelReadOnly(parent.json, sourceTimeNow())) {
       return RaftChannelBannerFooter(
-        message:
-            "This Joint Channel is read-only because it has more than 2 free servers. It becomes writable again when one server's admin upgrades or a free server leaves.",
+        message: "This Joint Channel is read-only because it has more than 2 free servers. It becomes writable again when one server's admin upgrades or a free server leaves.",
         linkLabel: widget.onViewBilling == null ? null : 'View Billing',
         onLink: widget.onViewBilling,
       );
@@ -3308,8 +3340,12 @@ class _RaftChatViewState extends State<RaftChatView>
               centerIndex: centerIndex(),
               epoch: centerEpoch,
               indexOfId: windowIndexOf,
-              rowBuilder: (context, index) =>
-                  datedTile(source(messages[index])),
+              rowBuilder: (context, index) => HistoryGapPlaceholder(
+                controller: w,
+                thread: widget.thread,
+                newerId: source(messages[index]).id,
+                child: datedTile(source(messages[index])),
+              ),
               estimateRow: (index) => estimateRow(
                 measuredRows,
                 messages,
@@ -3327,8 +3363,12 @@ class _RaftChatViewState extends State<RaftChatView>
               onLoadOlder: presentationActive
                   ? () => w.older(thread: widget.thread)
                   : null,
-              hasNewer: widget.thread ? w.threadWindow?.hasNewer == true : w.hasNewer,
-              onLoadNewer: presentationActive ? () => w.newer(thread: widget.thread) : null,
+              hasNewer: widget.thread
+                  ? w.threadWindow?.hasNewer == true
+                  : w.hasNewer,
+              onLoadNewer: presentationActive
+                  ? () => w.newer(thread: widget.thread)
+                  : null,
               onRecenter: (index, alignment) =>
                   recenter(first: messages[index].id, alignment: alignment),
               empty: widget.thread
@@ -3369,6 +3409,7 @@ class _RaftChatViewState extends State<RaftChatView>
 
   @override
   Widget build(BuildContext context) {
+    bindAgentCollapse(this, w, widget.thread);
     final search = boundSearch;
     if (!widget.thread || search == null) return buildView(context);
     final apple =
@@ -3425,22 +3466,21 @@ class _RaftChatViewState extends State<RaftChatView>
               ? loadingBody
               : taskLoadingBody(loadingBody)
         : buildTimeline();
-    final historyWindow = widget.thread ? w.threadWindow?.hasNewer == true : w.hasNewer;
+    final historyWindow = widget.thread
+        ? w.threadWindow?.hasNewer == true
+        : w.hasNewer;
     final bottomCount = historyWindow
         ? (w.unread[w.channel?.id] ?? 0)
         : newMessageCount;
     final thread = widget.thread;
     final composeScope = w.draftScope(thread: thread),
         composeAuthority = workspaceAuthority(w);
-    var composeWindow = thread
-        ? w.threadGeneration
-        : w.channelGeneration;
+    var composeWindow = thread ? w.threadGeneration : w.channelGeneration;
     bool currentComposer() =>
         mounted &&
         composeScope == w.draftScope(thread: thread) &&
         composeAuthority == workspaceAuthority(w) &&
-        composeWindow ==
-            (thread ? w.threadGeneration : w.channelGeneration);
+        composeWindow == (thread ? w.threadGeneration : w.channelGeneration);
     final onlyOne = raftFormat(context, '[{count} attachment]', {'count': 1});
     final manyBody = raftText(context, '[{count} attachments]');
     String attachmentsOnlyBody(int count) =>
@@ -3514,16 +3554,14 @@ class _RaftChatViewState extends State<RaftChatView>
                   key: const ValueKey('current-timeline'),
                   child: currentTimeline,
                 ),
-                MessageHistoryGapBanner(controller: w, thread: widget.thread),
+                MessageHistoryGapMonitor(controller: w, thread: widget.thread),
                 if (historyWindow || !atBottom || newMessageCount > 0)
                   RaftTimelineBottomButton(
                     label: bottomCount > 0
                         ? raftFormat(
                             context,
                             // ThreadPanel.tsx:2619 uses its own shorter copy.
-                            thread
-                                ? '{count} new'
-                                : '{count} new messages',
+                            thread ? '{count} new' : '{count} new messages',
                             {'count': bottomCount},
                           )
                         : raftText(context, 'Back to bottom'),

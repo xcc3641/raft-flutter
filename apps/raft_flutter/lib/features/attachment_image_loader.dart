@@ -75,7 +75,7 @@ AttachmentImageLoader attachmentImageLoader({
         if (cancel.isCancelled || (status != 401 && status != 403)) rethrow;
       }
     }
-    final url = await controller.attachmentUrl(
+    final url = await controller.attachmentMedia.url(
       '$id',
       channelId: channelId,
       coalesce: true,
@@ -93,8 +93,8 @@ AttachmentImageLoader attachmentImageLoader({
       // ignore: raft_lints/avoid_caught_exception_text -- Reads the HTTP status to decide whether to re-sign a lapsed thumbnail or URL; no text reaches the UI.
       final status = error.response?.statusCode;
       if (cancel.isCancelled || (status != 401 && status != 403)) rethrow;
-      controller.invalidateAttachmentUrl('$id');
-      final fresh = await controller.attachmentUrl('$id', channelId: channelId);
+      controller.attachmentMedia.invalidateUrl('$id');
+      final fresh = await controller.attachmentMedia.url('$id', channelId: channelId);
       if (cancel.isCancelled) throw const StaleAttachmentImage();
       return files.image(
         fresh,

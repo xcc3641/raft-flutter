@@ -12,9 +12,6 @@ Future<void> settleRoute(WidgetTester t) async {
 }
 
 void main() {
-  setUp(MobileSettingsPreference.instance.resetForTest);
-  tearDown(MobileSettingsPreference.instance.resetForTest);
-
   testWidgets('phone settings reads the workspace on the first open', (
     t,
   ) async {
@@ -44,7 +41,6 @@ void main() {
   testWidgets(
     'direct phone settings ignores new messages and rebuilds when the role changes',
     (t) async {
-      MobileSettingsPreference.instance.setEnabled(true);
       MobileSettingsDirectPage.builds = 0;
       final f = RootFixture();
       await f.mount(
@@ -82,7 +78,6 @@ void main() {
   );
 
   testWidgets('a wide window has no phone settings switch', (t) async {
-    MobileSettingsPreference.instance.setEnabled(true);
     final f = RootFixture();
     await f.mount(
       t,

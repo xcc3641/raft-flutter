@@ -161,11 +161,11 @@ class _ComposerShared extends ChangeNotifier {
           return;
         }
         if (w.can('viewMachines')) {
-          final computers = w.entityDirectory.state(
+          final computers = w.services.entityDirectory.state(
             WorkspaceEntityKind.computers,
           );
           if (!computers.loaded) {
-            await w.entityDirectory.refresh(WorkspaceEntityKind.computers);
+            await w.services.entityDirectory.refresh(WorkspaceEntityKind.computers);
             if (!current()) return;
           }
         }
@@ -194,7 +194,7 @@ final _sharedComposerData = Expando<_ComposerShared>('composer directory');
 /// first frame (the settings drawer's members strip). Null until read.
 ({List<Map<String, dynamic>> humans, List<Map<String, dynamic>> agents})?
 cachedChannelRoster(WorkspaceController w, String channelId) {
-  final roster = _sharedComposerData[w.entityDirectory]?.rosters[channelId];
+  final roster = _sharedComposerData[w.services.entityDirectory]?.rosters[channelId];
   return roster == null ? null : (humans: roster.humans, agents: roster.agents);
 }
 
@@ -208,7 +208,7 @@ void rememberChannelRoster(
   required List<Map<String, dynamic>> humans,
   required List<Map<String, dynamic>> agents,
 }) {
-  final shared = _sharedComposerData[w.entityDirectory] ??= _ComposerShared();
+  final shared = _sharedComposerData[w.services.entityDirectory] ??= _ComposerShared();
   shared.sync(directoryAuthority(w));
   shared.rosters[channel.id] = _ComposerRoster(
     _channelAuthority(channel),
@@ -228,9 +228,9 @@ void rememberChannelRoster(
 /// the real server flag before either computers or installed apps are shown.
 class ComposerDirectory extends ChangeNotifier {
   ComposerDirectory(this.w, {this.agentPresentation, this.thread = false})
-    : _shared = _sharedComposerData[w.entityDirectory] ??= _ComposerShared() {
+    : _shared = _sharedComposerData[w.services.entityDirectory] ??= _ComposerShared() {
     w.addListener(changed);
-    w.entityDirectory.addListener(changed);
+    w.services.entityDirectory.addListener(changed);
     _shared.addListener(changed);
     events = w.client.events.listen(event);
     changed();
@@ -299,8 +299,8 @@ class ComposerDirectory extends ChangeNotifier {
       channel?.id,
       channel?.type,
       w.client.user?.json['name'],
-      w.entityDirectory.authorRevision,
-      w.entityDirectory.computerRevision,
+      w.services.entityDirectory.authorRevision,
+      w.services.entityDirectory.computerRevision,
       _shared.revision,
       resources,
       w.can('viewMachines'),
@@ -309,14 +309,14 @@ class ComposerDirectory extends ChangeNotifier {
     if (inputs == checked) return;
     checked = inputs;
     final computers = resources && w.can('viewMachines')
-        ? w.entityDirectory.rows(WorkspaceEntityKind.computers)
+        ? w.services.entityDirectory.rows(WorkspaceEntityKind.computers)
         : const <Map<String, dynamic>>[];
     final next = (
       authority,
       channel?.id,
       channel?.type,
       w.client.user?.json['name'],
-      w.entityDirectory.authorRevision,
+      w.services.entityDirectory.authorRevision,
       _shared.revision,
       resources,
       Object.hashAll([for (final c in computers) '${c['id']}:${c['name']}']),
@@ -468,8 +468,8 @@ class ComposerDirectory extends ChangeNotifier {
           describe: false,
         );
       }
-      add(w.entityDirectory.authorMembers, 'user', describe: false);
-      add(w.entityDirectory.authorAgents, 'agent');
+      add(w.services.entityDirectory.authorMembers, 'user', describe: false);
+      add(w.services.entityDirectory.authorAgents, 'agent');
     }
     if (roster != null) {
       add(roster.humans, 'user');
@@ -525,7 +525,7 @@ class ComposerDirectory extends ChangeNotifier {
     people = [];
     events?.cancel();
     w.removeListener(changed);
-    w.entityDirectory.removeListener(changed);
+    w.services.entityDirectory.removeListener(changed);
     _shared.removeListener(changed);
     super.dispose();
   }

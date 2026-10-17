@@ -7,6 +7,7 @@ import 'package:raft_ui/raft_ui.dart' show RaftIdleTimer;
 
 import '../data/message_history.dart';
 import '../data/history_read_policy.dart';
+import '../data/history_range_digest.dart';
 import '../data/history_capacity.dart';
 import '../data/history_memory.dart';
 import '../data/reading_positions.dart';
@@ -16,6 +17,7 @@ import 'history_positions.dart';
 import 'history_gaps.dart';
 import 'history_shadows.dart';
 import 'history_committed_reads.dart';
+import 'history_summaries.dart';
 import 'device_storage.dart';
 
 typedef HistoryOperationOrder = Future<T> Function<T>(
@@ -32,6 +34,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
     required this.writeLegacy,
     this.historyBudget = 2 << 30,
     this.automaticMaintenance = true,
+    this.hardLimitEnabled = true,
     this.historyAvailableSpace,
     DateTime Function()? now,
   }) : now = now ?? DateTime.now;
@@ -43,7 +46,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
   writeLegacy;
   final DateTime Function() now;
   final int historyBudget;
-  final bool automaticMaintenance;
+  final bool automaticMaintenance, hardLimitEnabled;
   final Future<int?> Function(String)? historyAvailableSpace;
   final _memoryZone = Zone.current;
   late final _positions = SqliteHistoryPositions(db, order, ready: _ready,
@@ -90,6 +93,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
   late final SqliteHistoryCapacity capacity = SqliteHistoryCapacity(
     db, order, ready: _ready, advance: (s) => _revision(s, advance: true),
     now: now, defaultBudget: historyBudget, automatic: automaticMaintenance,
+    hardLimitEnabled: hardLimitEnabled,
     pending: () => receiver.protectedRows,
     availableSpace: historyAvailableSpace ?? availableDeviceStorage,
     coverageChanged: () => gaps.changed(null),
@@ -193,6 +197,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
       origin TEXT NOT NULL, principal TEXT NOT NULL, server TEXT NOT NULL,
       channel TEXT NOT NULL, request TEXT NOT NULL, verified INTEGER NOT NULL,
       PRIMARY KEY(origin,principal,server,channel,request))''');
+    await SqliteHistorySummaries.create(db);
     await db.customStatement('''CREATE TRIGGER IF NOT EXISTS raft_history_position_purge
       AFTER DELETE ON workspace_cache WHEN OLD.kind='message-history'
       BEGIN
@@ -410,6 +415,20 @@ class SqliteMessageHistory implements MessageHistoryStorage {
     );
     return await _denial(scope) >= 0 ? null : scope;
   });
+
+  @override
+  Future<List<(MessageHistoryScope, BigInt)>> savedRanges(String origin, String principal, String server) async {
+    final candidates = await order(() async {
+      await _ready();
+      return _query('SELECT channel,min(seq_key) AS oldest FROM raft_history_rows WHERE origin=? AND principal=? AND server=? AND tombstone=0 GROUP BY channel', [origin, principal, server]);
+    });
+    final result = <(MessageHistoryScope, BigInt)>[];
+    for (final row in candidates) {
+      final scope = await knownScope(origin, principal, server, row.read<String>('channel'));
+      if (scope != null) result.add((scope, BigInt.parse(row.read<String>('oldest'))));
+    }
+    return result;
+  }
 
   @override
   Future<BigInt> resumeSequence(MessageHistoryScope scope) => order(() async {
@@ -713,7 +732,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
       added +=
           sizes[i] - (existing[accepted[i]['id']]?.read<int>('byte_size') ?? 0);
     }
-    capacity.admitNow(scope, added);
+    await capacity.admitNow(scope, added);
     final touched = now().millisecondsSinceEpoch;
     await db.batch((batch) {
       for (var i = 0; i < accepted.length; i++) {
@@ -747,6 +766,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
     Iterable<Map<String, dynamic>> rows, {
     bool updateOnly = false,
     int? requestedRevision,
+    bool live = false,
   }) => order(() async {
     await _ready();
     return db.transaction(() async {
@@ -781,9 +801,16 @@ class SqliteMessageHistory implements MessageHistoryStorage {
       }
       if (!updateOnly && materialized.length != values.length) return false;
       await _put(scope, materialized, revision, updateOnly: updateOnly);
+      var tail = BigInt.tryParse('${marker['tailSequence']}') ?? BigInt.zero;
+      final follow = live && !updateOnly && marker['windowKind'] == 'tail';
       for (final row in materialized) {
-        final seq = historySequenceKey(row['seq']);
-        await _range(scope, seq, seq);
+        final next = BigInt.parse('${row['seq']}');
+        if (follow && next > tail) {
+          tail = await _extendTail(scope, tail, row);
+        } else {
+          final key = historySequenceKey(next);
+          await _range(scope, key, key);
+        }
       }
       if (!updateOnly && materialized.isNotEmpty) {
         final highest = materialized
@@ -804,6 +831,35 @@ class SqliteMessageHistory implements MessageHistoryStorage {
       return true;
     });
   });
+
+  /// A row that arrives live after the saved tail. Sequences are server-wide,
+  /// so a channel's own numbers are sparse, and its live room delivers every
+  /// one of its messages in order: when the tail is proved through its own
+  /// row, nothing else can sit between it and the new row, so the proof grows
+  /// to cover it instead of leaving a gap for history to fill.
+  Future<BigInt> _extendTail(
+    MessageHistoryScope scope,
+    BigInt tail,
+    Map<String, dynamic> row,
+  ) async {
+    final next = BigInt.parse('${row['seq']}');
+    // A row the device declined to keep cannot be covered by the proof.
+    final flush =
+        (await _query(
+          'SELECT 1 FROM raft_history_rows WHERE $_where AND message_id=? AND tombstone=0',
+          [...scope.key, row['id']],
+        )).isNotEmpty &&
+        (await _query(
+          'SELECT 1 FROM raft_history_ranges WHERE $_where AND upper_key=?',
+          [...scope.key, historySequenceKey(tail)],
+        )).isNotEmpty;
+    await _range(
+      scope,
+      historySequenceKey(flush ? tail + BigInt.one : next),
+      historySequenceKey(next),
+    );
+    return next;
+  }
 
   Future<void> _range(
     MessageHistoryScope scope,
@@ -897,6 +953,11 @@ class SqliteMessageHistory implements MessageHistoryStorage {
           if (older == null) targetRow else ...older.rows,
           ...?newer?.rows,
         ],
+        'threadSummariesByParentMessageId': {
+          ...await _summaries(scope, [targetRow]),
+          ...?older?.summaries,
+          ...?newer?.summaries,
+        },
         'targetMessageId': messageId,
         'channelId': scope.channel,
         'hasOlder': older?.hasMore ?? true,
@@ -1008,6 +1069,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
             (rows.length > limit || !complete),
         historyLimited: marker['historyLimited'] == true,
         verifiedAt: DateTime.fromMillisecondsSinceEpoch(stamp),
+        summaries: await _summaries(scope, decoded),
       );
     }
     // Stored intervals are disjoint and non-adjacent. The nearest preceding
@@ -1060,8 +1122,39 @@ class SqliteMessageHistory implements MessageHistoryStorage {
       hasMore: hasMore,
       historyLimited: marker['historyLimited'] == true,
       verifiedAt: DateTime.fromMillisecondsSinceEpoch(verified),
+      summaries: await _summaries(scope, decoded),
     );
   }
+
+  /// Reply previews of the parents among [rows], read with the rows.
+  Future<Map<String, dynamic>> _summaries(
+    MessageHistoryScope scope,
+    Iterable<Map<String, dynamic>> rows,
+  ) => SqliteHistorySummaries.read(
+    db,
+    scope.origin,
+    scope.principal,
+    scope.server,
+    scope.channel,
+    rows.map((row) => row['id']),
+  );
+
+  @override
+  Future<void> saveSummaries(
+    MessageHistoryScope scope,
+    Map<String, dynamic> summaries,
+  ) => order(() async {
+    await _ready();
+    final marker = await _marker(scope);
+    if (marker == null ||
+        marker['authority'] != scope.authority ||
+        await _denial(scope) >= 0) {
+      return;
+    }
+    await db.transaction(
+      () => SqliteHistorySummaries.write(db, scope, summaries),
+    );
+  });
 
   Future<void> _touchRows(MessageHistoryScope scope, List<Map<String, dynamic>> rows) async {
     if (rows.isEmpty) return;
@@ -1215,6 +1308,12 @@ class SqliteMessageHistory implements MessageHistoryStorage {
           !page.focused && page.before == null && page.after == null
           ? historyMaxSequence
           : upper;
+      final localRange = limited ? const <QueryRow>[] : await _query(
+        'SELECT payload FROM raft_history_rows WHERE $_where AND tombstone=0 AND seq_key>=? AND seq_key<=? ORDER BY seq_key LIMIT ?',
+        [...scope.key, historySequenceKey(lower), historySequenceKey(deleteUpper), rows.length + 1],
+      );
+      final localBodies = await decodeWorkspaceTranslations(localRange.map((r) => r.read<String>('payload')).toList());
+      final unchanged = !limited && HistoryRangeDigest(rows).matches(HistoryRangeDigest(localBodies));
       if (limited) {
         await db.customStatement(
           'DELETE FROM raft_history_rows WHERE $_where',
@@ -1224,7 +1323,7 @@ class SqliteMessageHistory implements MessageHistoryStorage {
           'DELETE FROM raft_history_ranges WHERE $_where',
           scope.key,
         );
-      } else {
+      } else if (!unchanged) {
         final ids = rows.map((m) => m['id'] as String).toList();
         final except = ids.isEmpty
             ? ''
@@ -1241,14 +1340,26 @@ class SqliteMessageHistory implements MessageHistoryStorage {
           ],
         );
       }
-      await _put(
-        scope,
-        rows,
-        revision,
-        maximumPreviousRevision: limited ? null : page.revision,
-        complete: true,
-      );
-      await HistoryShadows(db).refresh(scope);
+      if (!unchanged) {
+        await _put(
+          scope, rows, revision,
+          maximumPreviousRevision: limited ? null : page.revision,
+          complete: true,
+        );
+        await HistoryShadows(db).refresh(scope);
+      }
+      // The page is the authority for the parents it carries: a parent
+      // without a summary here has none now. A response without the field
+      // (older server) says nothing either way.
+      final wireSummaries = remote['threadSummariesByParentMessageId'];
+      if (wireSummaries is Map && scope.parentMessage == null) {
+        await SqliteHistorySummaries.write(
+          db,
+          scope,
+          wireSummaries,
+          absent: [for (final row in rows) row['id'] as String],
+        );
+      }
       if (lower <= upper) {
         await _range(
           scope,
@@ -1357,14 +1468,27 @@ class SqliteMessageHistory implements MessageHistoryStorage {
         await _revision(scope, advance: true),
         onlyNew: true,
       );
-      await _setMarker(scope, {
-        ...?marker,
-        ...snapshot,
-        'messages': <dynamic>[],
-        'windowSize': raw.length.clamp(50, 500),
-        'channelId': channel,
-        if (kind == 'thread-window') 'parentMessageId': id,
-      });
+      // Reply previews live beside their parent rows, not in the marker.
+      // A marker from before the table moves its previews over first.
+      if (kind == 'window') {
+        for (final held in [
+          marker?['threadSummaries'],
+          snapshot['threadSummaries'],
+        ]) {
+          if (held is Map) await SqliteHistorySummaries.write(db, scope, held);
+        }
+      }
+      await _setMarker(
+        scope,
+        {
+          ...?marker,
+          ...snapshot,
+          'messages': <dynamic>[],
+          'windowSize': raw.length.clamp(50, 500),
+          'channelId': channel,
+          if (kind == 'thread-window') 'parentMessageId': id,
+        }..remove('threadSummaries'),
+      );
     });
     return true;
   }
@@ -1482,6 +1606,13 @@ class SqliteMessageHistory implements MessageHistoryStorage {
               'messages': local.rows,
               'hasMore': local.hasMore,
               'historyLimited': local.historyLimited,
+              // Markers written before previews had their own table still
+              // carry them; the table wins where it has the parent.
+              'threadSummaries': {
+                if (marker['threadSummaries'] case final Map old)
+                  ...Map<String, dynamic>.from(old),
+                ...local.summaries,
+              },
             };
     }
 

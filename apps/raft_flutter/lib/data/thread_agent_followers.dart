@@ -1,8 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:raft_client/raft_client.dart';
 
-import 'workspace_controller.dart';
+/// Current-server transport and identity needed by thread follower rosters.
+abstract interface class ThreadAgentFollowersAuthority {
+  RaftClient get client;
+  RaftRecord? get server;
+}
 
 /// Web `ThreadAgentFollower`: one agent following a thread.
 @immutable
@@ -64,7 +69,7 @@ class ThreadAgentFollowerRoster {
 /// following a thread, loaded in one bulk request and reset on a server switch.
 class ThreadAgentFollowers extends ChangeNotifier {
   ThreadAgentFollowers(this.w);
-  final WorkspaceController w;
+  final ThreadAgentFollowersAuthority w;
   final Map<String, ThreadAgentFollowerRoster> _rosters = {};
   String? _serverId;
   bool _disposed = false;

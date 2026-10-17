@@ -224,7 +224,7 @@ class _AgentDetailPanelState extends State<AgentDetailPanel> {
   /// directory row, else the created-agent row's own status.
   AgentAmbientDisplay _createdAgentDisplay(Map c) {
     final now = (widget.clock ?? DateTime.now)();
-    final live = widget.controller.entityDirectory.agent('${c['id']}');
+    final live = widget.controller.services.entityDirectory.agent('${c['id']}');
     if (live != null) return agentRowAmbientDisplay(live, now: now);
     return resolveAgentAmbientDisplay(
       identity: AgentPresentationIdentity(

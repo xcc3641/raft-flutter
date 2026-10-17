@@ -116,7 +116,7 @@ class MacOSDockUnread {
   void _sync() {
     if (_closed) return;
     final w = _workspace;
-    final activity = w?.activityUnreadIfBound;
+    final activity = w?.services.activityUnreadIfBound;
     if (!identical(activity, _activity)) {
       _activity?.removeListener(_publish);
       _activity = activity?..addListener(_publish);

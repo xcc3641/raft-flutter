@@ -21,17 +21,18 @@ final _openers = RegExp(
   r'RaftAgentDialogCard\(',
 );
 
-Iterable<File> _dartFiles(String dir) => Directory(dir)
-    .listSync(recursive: true)
-    .whereType<File>()
-    .where(
-      (f) =>
-          f.path.endsWith('.dart') &&
-          !f.path.endsWith('_previews.dart') &&
-          !f.path.endsWith('.g.dart') &&
-          !f.path.contains('/l10n/') &&
-          !f.path.contains('/previews'),
-    );
+Iterable<File> _dartFiles(String dir) =>
+    Directory(dir)
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where(
+          (f) =>
+              f.path.endsWith('.dart') &&
+              !f.path.endsWith('_previews.dart') &&
+              !f.path.endsWith('.g.dart') &&
+              !f.path.contains('/l10n/') &&
+              !f.path.contains('/previews'),
+        );
 
 String _normalize(String path) =>
     path.startsWith('../../packages/') ? path : path;
@@ -67,7 +68,8 @@ void main() {
         expect(
           File(f).existsSync(),
           isTrue,
-          reason: '${s.id}: $f does not exist (paths are relative to apps/raft_flutter)',
+          reason:
+              '${s.id}: $f does not exist (paths are relative to apps/raft_flutter)',
         );
       }
     }
@@ -101,7 +103,8 @@ void main() {
     final doc = File('../../docs/close-affordances.md');
     expect(doc.existsSync(), isTrue);
     final text = doc.readAsStringSync();
-    const start = '<!-- close-table:start -->', end = '<!-- close-table:end -->';
+    const start = '<!-- close-table:start -->',
+        end = '<!-- close-table:end -->';
     final table = renderCloseTable(surfaces);
     if (Platform.environment['UPDATE_CLOSE_DOCS'] == '1') {
       final head = text.substring(0, text.indexOf(start) + start.length);
@@ -131,6 +134,7 @@ String _set(Set<Affordance> a) {
     Affordance.esc,
     Affordance.scrim,
     Affordance.systemBack,
+    Affordance.drag,
   ];
   const label = {
     Affordance.x: 'x',
@@ -138,8 +142,12 @@ String _set(Set<Affordance> a) {
     Affordance.esc: 'esc',
     Affordance.scrim: 'scrim',
     Affordance.systemBack: 'sysback',
+    Affordance.drag: 'drag',
   };
-  return [for (final k in order) if (a.contains(k)) label[k]].join(' ');
+  return [
+    for (final k in order)
+      if (a.contains(k)) label[k],
+  ].join(' ');
 }
 
 String renderCloseTable(List<CloseSurface> surfaces) {

@@ -289,7 +289,7 @@ class _ProfilePreviewContentState extends State<ProfilePreviewContent> {
   @override
   void initState() {
     super.initState();
-    w.entityDirectory.addListener(changed);
+    w.services.entityDirectory.addListener(changed);
     events = w.client.events.listen(event);
     // A revisited card shows the activity it already read at its first frame.
     if (widget.agent && private) {
@@ -304,7 +304,7 @@ class _ProfilePreviewContentState extends State<ProfilePreviewContent> {
   @override
   void dispose() {
     events?.cancel();
-    w.entityDirectory.removeListener(changed);
+    w.services.entityDirectory.removeListener(changed);
     super.dispose();
   }
 
@@ -313,8 +313,8 @@ class _ProfilePreviewContentState extends State<ProfilePreviewContent> {
   }
 
   Map<String, dynamic>? get profile => widget.agent
-      ? w.entityDirectory.agent(widget.id) ?? fetched ?? widget.fallback
-      : w.entityDirectory.member(widget.id) ?? widget.fallback;
+      ? w.services.entityDirectory.agent(widget.id) ?? fetched ?? widget.fallback
+      : w.services.entityDirectory.member(widget.id) ?? widget.fallback;
 
   /// canViewAgentPrivateSurfaces: agent editors, or the human creator.
   bool get private {
@@ -465,9 +465,9 @@ class _ProfilePreviewContentState extends State<ProfilePreviewContent> {
       translate: (source, values) => raftFormat(context, source, values),
     );
     final machineId = row['machineId'];
-    final computers = w.entityDirectory.state(WorkspaceEntityKind.computers);
+    final computers = w.services.entityDirectory.state(WorkspaceEntityKind.computers);
     final machine = machineId is String
-        ? w.entityDirectory.computer(machineId)
+        ? w.services.entityDirectory.computer(machineId)
         : null;
     final String? computer = external
         ? raftText(context, 'External runtime')

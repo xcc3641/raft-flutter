@@ -189,7 +189,7 @@ class _AttachmentViewState extends State<AttachmentView> {
       // No size in the message: the one learnt before (this session or on
       // disk) gives the card its box in the first frames; else it is learnt
       // from the preview's decode.
-      w.playerSessions.shapeChanges.addListener(shapeLearnt);
+      w.attachmentMedia.playerSessions.shapeChanges.addListener(shapeLearnt);
       unawaited(
         readStoredShape(
           w,
@@ -421,7 +421,7 @@ class _AttachmentViewState extends State<AttachmentView> {
     if (!authorized) return false;
     final WorkspaceAttachmentImageLease? lease;
     try {
-      lease = w.peekAttachmentImage(imageKey, authorized: () => authorized);
+      lease = w.attachmentMedia.peekImage(imageKey, authorized: () => authorized);
     } catch (_) {
       return false;
     }
@@ -533,7 +533,7 @@ class _AttachmentViewState extends State<AttachmentView> {
     hiddenTimer?.cancel();
     hiddenTimer = null;
     w.removeListener(scopeChanged);
-    w.playerSessions.shapeChanges.removeListener(shapeLearnt);
+    w.attachmentMedia.playerSessions.shapeChanges.removeListener(shapeLearnt);
     imageCancel.cancel();
     transfers.abort();
     imageLease?.release();
@@ -562,7 +562,7 @@ class _AttachmentViewState extends State<AttachmentView> {
     try {
       imageLease?.release();
       final key = imageKey;
-      final lease = w.acquireAttachmentImage(
+      final lease = w.attachmentMedia.acquireImage(
         key,
         authorized: current,
         load: loaderFor(key),

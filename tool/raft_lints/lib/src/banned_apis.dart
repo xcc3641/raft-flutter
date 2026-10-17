@@ -86,6 +86,7 @@ const sliderRule = 'avoid_material_slider';
 const feedbackRule = 'avoid_material_feedback';
 const idleRule = 'avoid_unreviewed_idle_work';
 const selectionRule = 'avoid_bare_selection_area';
+const sheetRule = 'avoid_raw_bottom_sheet';
 
 String _ignore(String rule) =>
     "add '// ignore: raft_lints/$rule -- <why this site is exempt>'";
@@ -214,6 +215,27 @@ final bannedApis = <BannedApi>[
         'clears the selection), or ${_ignore(selectionRule)}.',
     typeReferences: true,
     refs: const [ApiRef('package:flutter/', 'SelectionArea')],
+  ),
+  BannedApi(
+    rule: sheetRule,
+    message:
+        'A framework bottom sheet has its own look and gestures per platform; '
+        'floating windows share one form decision and one sheet.',
+    correction:
+        'Open a window with showRaftPresented / raftPresentedRoute and a '
+        'RaftPresentationPolicy, and build the sheet content with RaftSheet '
+        '(raft_ui presentation.dart, sheet.dart), or ${_ignore(sheetRule)}.',
+    typeReferences: true,
+    refs: const [
+      ApiRef('package:flutter/', null, 'showModalBottomSheet'),
+      ApiRef('package:flutter/', null, 'showBottomSheet'),
+      ApiRef('package:flutter/', null, 'showCupertinoSheet'),
+      ApiRef('package:flutter/', null, 'showCupertinoModalPopup'),
+      ApiRef('package:flutter/', 'ModalBottomSheetRoute'),
+      ApiRef('package:flutter/', 'BottomSheet'),
+      ApiRef('package:flutter/', 'DraggableScrollableSheet'),
+      ApiRef('package:flutter/', 'CupertinoSheetRoute'),
+    ],
   ),
   BannedApi(
     rule: sliderRule,

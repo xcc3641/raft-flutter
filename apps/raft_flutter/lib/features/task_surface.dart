@@ -78,7 +78,7 @@ class _SourceTaskSurfaceState extends State<SourceTaskSurface> {
   /// Web TaskProperties resolves creator/assignee display names from the
   /// channel members; the workspace directory carries the same names.
   String? displayName(String type, String id) {
-    final directory = o.parent.entityDirectory;
+    final directory = o.parent.services.entityDirectory;
     final row = type == 'agent'
         ? directory
               .rows(WorkspaceEntityKind.agents)

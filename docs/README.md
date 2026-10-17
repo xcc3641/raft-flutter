@@ -5,6 +5,7 @@ Every file or directory under `docs/` is listed here (path — what it is — wh
 ## Start here
 
 - `architecture.md` — layers, ownership, navigation, stable rules (logout policy, edge-to-edge, retained pages) — before changing structure or session/navigation behavior.
+- `controller-clusters.md` — field/member clusters of `WorkspaceController` with proposed repository owners, extraction order and the first slice plan (generated inputs: `tool/controller_clusters.py`) — before splitting the controller or adding state to it.
 - `development.md` — setup, run, test, merge gate, behaviour-parity checklists, branches — before your first change.
 - `parity.md` — visual parity harness and every intended difference from Web — before touching pixels or a parity case.
 - `parity-ext-quickstart.md` — add or fix an extension parity case — when working in `tool/parity-ext`.

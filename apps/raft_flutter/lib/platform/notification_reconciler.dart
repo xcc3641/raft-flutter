@@ -68,7 +68,7 @@ class NotificationReconciler {
   void _attach() {
     final w = _workspace;
     if (_closed || w == null) return;
-    final bound = w.activityUnreadIfBound;
+    final bound = w.services.activityUnreadIfBound;
     if (!identical(bound, _store)) {
       _store?.removeListener(_changed);
       _store = bound?..addListener(_changed);
@@ -122,7 +122,7 @@ class NotificationReconciler {
         _closed ||
         epoch != _epoch ||
         !identical(_workspace, w) ||
-        !identical(w.activityUnreadIfBound, store) ||
+        !identical(w.services.activityUnreadIfBound, store) ||
         scope != store.scope ||
         authority != store.authorityEpoch ||
         !store.hasAcceptedWindow;
@@ -234,8 +234,8 @@ class NotificationReconciler {
   Future<String?> _pushMode(WorkspaceController w) async {
     Object currentScope() => (
       notificationScope(w.client),
-      w.activityUnreadIfBound?.scope,
-      w.activityUnreadIfBound?.authorityEpoch,
+      w.services.activityUnreadIfBound?.scope,
+      w.services.activityUnreadIfBound?.authorityEpoch,
     );
     final scope = currentScope();
     final cached = _settings;

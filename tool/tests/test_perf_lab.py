@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import select
 import shutil
 import subprocess
 import sys
@@ -826,6 +827,99 @@ class AndroidRunSafetyTest(unittest.TestCase):
             self.assertIn('protectedAppError', env)
 
 
+_MANAGED_LIFETIME_SCRIPT = """
+import json,os,signal,subprocess,sys,time
+child = subprocess.Popen([sys.executable, '-c',
+    'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'],
+    start_new_session=sys.argv[2].startswith('detached'),
+    env={k:v for k,v in os.environ.items() if k != 'RAFT_LAB_PROCESS_OWNER'}
+        if sys.argv[2].startswith('sanitized') else None)
+time.sleep(.1)
+# The consumer treats existence as readiness, including on normal leader exit.
+# Publish only after close, on the same filesystem, so no partial JSON is visible.
+pending = sys.argv[1] + '.partial'
+with open(pending, 'w') as stream:
+    json.dump({'leader': os.getpid(), 'child': child.pid, 'group': os.getpgrp()}, stream)
+os.replace(pending, sys.argv[1])
+if sys.argv[2].endswith('interrupt'): time.sleep(60)
+"""
+
+
+@unittest.skipUnless(os.name == 'posix', 'POSIX process lifecycle fixture')
+class DetectionReadinessPublicationTest(unittest.TestCase):
+    def test_partial_identity_is_not_published_as_ready(self):
+        # Pause the exact native fixture midway through json.dump. Readiness
+        # must remain absent until a whole identity can be consumed, regardless
+        # of host load or whether the managed leader is about to exit.
+        held_writer = """
+import json,os,sys
+_real_dump = json.dump
+def held_dump(identity, stream):
+    stream.write('{"leader":')
+    stream.flush()
+    os.write(int(sys.argv[3]), (str(identity['child']) + '\\n').encode())
+    os.read(int(sys.argv[4]), 1)
+    stream.seek(0)
+    stream.truncate()
+    _real_dump(identity, stream)
+json.dump = held_dump
+"""
+        for mode in ('interrupt', 'normal', 'detached-interrupt', 'detached-normal',
+                     'sanitized-interrupt', 'sanitized-normal'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                state = Path(directory) / 'state.json'
+                ready_read, ready_write = os.pipe()
+                release_read, release_write = os.pipe()
+                process = None
+                child = None
+                released = False
+                try:
+                    process = subprocess.Popen([sys.executable, '-c',
+                        held_writer + _MANAGED_LIFETIME_SCRIPT,
+                        str(state), mode, str(ready_write), str(release_read)],
+                        pass_fds=(ready_write, release_read), start_new_session=True,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    os.close(ready_write)
+                    ready_write = None
+                    os.close(release_read)
+                    release_read = None
+                    self.assertTrue(select.select([ready_read], [], [], 5)[0],
+                                    'managed fixture never reached the partial-write barrier')
+                    identity_bytes = os.read(ready_read, 128)
+                    self.assertTrue(identity_bytes.endswith(b'\n'), identity_bytes)
+                    child = int(identity_bytes)
+                    if state.exists():
+                        # On the old fixture this raises the same JSONDecodeError
+                        # as the full check, rather than hiding it with retries.
+                        json.loads(state.read_text())
+                    self.assertFalse(state.exists(), 'partial identity was published')
+                    os.write(release_write, b'1')
+                    released = True
+                    deadline = time.monotonic() + 5
+                    while not state.exists() and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    self.assertTrue(state.exists(), 'complete identity was never published')
+                    identity = json.loads(state.read_text())
+                    self.assertEqual(identity, {
+                        'leader': process.pid, 'child': child, 'group': process.pid})
+                    if mode.endswith('normal'):
+                        self.assertEqual(process.wait(timeout=5), 0)
+                finally:
+                    if not released:
+                        with contextlib.suppress(BrokenPipeError):
+                            os.write(release_write, b'1')
+                    if process is not None:
+                        with contextlib.suppress(ProcessLookupError):
+                            os.killpg(process.pid, signal.SIGKILL)
+                        if child is not None:
+                            with contextlib.suppress(ProcessLookupError):
+                                os.kill(child, signal.SIGKILL)
+                        process.wait(timeout=5)
+                    for fd in (ready_read, ready_write, release_read, release_write):
+                        if fd is not None:
+                            os.close(fd)
+
+
 @unittest.skipUnless(sys.platform.startswith('linux'), 'Linux private display sessions')
 class DetectionLifetimeTest(unittest.TestCase):
     def test_collected_scope_disappearing_before_stop_is_checked_as_empty(self):
@@ -892,18 +986,7 @@ class DetectionLifetimeTest(unittest.TestCase):
             self.skipTest('No reachable user systemd manager; native scope cleanup was not run.')
         # A descendant ignores TERM. Cleanup must escalate for that same group
         # while leaving a separately launched sentinel alive.
-        managed = """
-import json,os,signal,subprocess,sys,time
-child = subprocess.Popen([sys.executable, '-c',
-    'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'],
-    start_new_session=sys.argv[2].startswith('detached'),
-    env={k:v for k,v in os.environ.items() if k != 'RAFT_LAB_PROCESS_OWNER'}
-        if sys.argv[2].startswith('sanitized') else None)
-time.sleep(.1)
-with open(sys.argv[1], 'w') as stream:
-    json.dump({'leader': os.getpid(), 'child': child.pid, 'group': os.getpgrp()}, stream)
-if sys.argv[2].endswith('interrupt'): time.sleep(60)
-"""
+        managed = _MANAGED_LIFETIME_SCRIPT
         wrapper = """
 import importlib.util,os,subprocess,sys
 spec=importlib.util.spec_from_file_location('lab',sys.argv[1])

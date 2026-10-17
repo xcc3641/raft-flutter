@@ -91,7 +91,7 @@ class SourceChannelFilesActions {
     bool download = false,
   }) async {
     if (!current(file)) return null;
-    final value = await controller.attachmentUrl(
+    final value = await controller.attachmentMedia.url(
       file.id,
       disposition: download ? 'attachment' : null,
       channelId: file.channelId,

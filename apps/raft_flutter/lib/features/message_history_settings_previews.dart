@@ -20,14 +20,17 @@ Widget _preview(_Capacity capacity) => SingleChildScrollView(
   child: MessageHistorySettings(
     capacity: capacity,
     account: const HistoryAccount('https://preview.invalid', 'preview'),
-    server: 'server',
-    channel: 'channel',
-    refresh: () async => false,
   ),
 );
 
 /// Synthetic state only; the preview never opens a database or a connection.
 class _Capacity implements HistoryCapacity {
+  @override
+  Future<void> opened(
+    HistoryAccount account,
+    String server,
+    String channel,
+  ) async {}
   _Capacity({this.full = false, this.failed = false});
   bool full, failed, kept = false;
   int budget = 1 << 30;

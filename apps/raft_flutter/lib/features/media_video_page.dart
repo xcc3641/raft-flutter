@@ -93,7 +93,7 @@ class MediaVideoStage extends ChangeNotifier {
   final HdrDetector? hdrDetector;
   final Duration settle, grace;
 
-  PlayerSessions get sessions => controller.playerSessions;
+  PlayerSessions get sessions => controller.attachmentMedia.playerSessions;
   String get key => attachmentMediaKey(metadata);
   String? get owner => channelId ?? metadata['channelId'] as String?;
   int? get sizeBytes => (metadata['sizeBytes'] as num?)?.toInt();
@@ -338,7 +338,7 @@ class MediaVideoStage extends ChangeNotifier {
     final known = verdicts[key];
     if (known != null) return known;
     final url = AttachmentFiles.attachmentUri(
-      await controller.attachmentUrl(
+      await controller.attachmentMedia.url(
         '${metadata['id']}',
         channelId: owner,
         coalesce: true,

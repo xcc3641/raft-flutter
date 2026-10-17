@@ -141,7 +141,7 @@ class _AdminsSection extends StatefulWidget {
 
 class _AdminsSectionState extends State<_AdminsSection> {
   WorkspaceController get w => widget.w;
-  WorkspaceEntityDirectory get directory => w.entityDirectory;
+  WorkspaceEntityDirectory get directory => w.services.entityDirectory;
   // ignore: raft_lints/avoid_imperative_notice_state -- error clears when the next role change starts (Web setError('') in handlePromote/handleDemote); the section is remounted on server/account change.
   String? selectedKey, savingKey, error;
   String selectedRole = 'admin';
@@ -899,8 +899,8 @@ class _OnboardingState extends State<_OnboardingSection>
   @override
   void initState() {
     super.initState();
-    w.entityDirectory.addListener(_changed);
-    w.entityDirectory.ensure(const [WorkspaceEntityKind.agents]);
+    w.services.entityDirectory.addListener(_changed);
+    w.services.entityDirectory.ensure(const [WorkspaceEntityKind.agents]);
     final snapshot = readSnapshot();
     if (snapshot != null) {
       agentId = savedAgentId = snapshot['agentId'] as String;
@@ -932,7 +932,7 @@ class _OnboardingState extends State<_OnboardingSection>
 
   @override
   void dispose() {
-    w.entityDirectory.removeListener(_changed);
+    w.services.entityDirectory.removeListener(_changed);
     super.dispose();
   }
 
@@ -998,7 +998,7 @@ class _OnboardingState extends State<_OnboardingSection>
   @override
   Widget build(BuildContext context) {
     final agents = [
-      for (final a in w.entityDirectory.authorAgents)
+      for (final a in w.services.entityDirectory.authorAgents)
         if (a['deletedAt'] == null && a['id'] is String)
           (
             a['id'] as String,
@@ -1049,7 +1049,7 @@ class _TranslationSection extends StatefulWidget {
 
 class _TranslationState extends State<_TranslationSection> with _SavedFlash {
   WorkspaceController get w => widget.w;
-  late bool accepted = w.translations.settings.serverEnabled;
+  late bool accepted = w.services.translations.settings.serverEnabled;
   late bool enabled = accepted;
   bool saving = false;
   // ignore: raft_lints/avoid_imperative_notice_state -- Each section's error clears when its next save/action starts, on a successful load, and when the real server state it describes changes (_resync); sections are remounted on server/account change.
@@ -1058,20 +1058,20 @@ class _TranslationState extends State<_TranslationSection> with _SavedFlash {
   @override
   void initState() {
     super.initState();
-    w.translations.addListener(_resync);
-    w.translations.ensureSettings();
+    w.services.translations.addListener(_resync);
+    w.services.translations.ensureSettings();
   }
 
   @override
   void dispose() {
-    w.translations.removeListener(_resync);
+    w.services.translations.removeListener(_resync);
     super.dispose();
   }
 
   /// Re-sync when the accepted server gate changes.
   void _resync() {
     if (!mounted) return;
-    final next = w.translations.settings.serverEnabled;
+    final next = w.services.translations.settings.serverEnabled;
     setState(() {
       if (next != accepted) {
         accepted = next;
@@ -1095,7 +1095,7 @@ class _TranslationState extends State<_TranslationSection> with _SavedFlash {
         data: {'translationEnabled': enabled},
       );
       // Message rows follow the accepted gate without a reload.
-      w.translations.adoptServerSettings(response);
+      w.services.translations.adoptServerSettings(response);
       if (!mounted) return;
       flashSaved(const Duration(seconds: 2));
     } catch (e) {
@@ -1114,7 +1114,7 @@ class _TranslationState extends State<_TranslationSection> with _SavedFlash {
 
   @override
   Widget build(BuildContext context) {
-    final store = w.translations, settings = store.settings;
+    final store = w.services.translations, settings = store.settings;
     final loading = store.settingsLoading;
     final canManage = settings.canManage;
     final failure = error ?? store.settingsError;

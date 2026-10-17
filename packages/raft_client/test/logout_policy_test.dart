@@ -637,7 +637,7 @@ void main() {
 
   // --------------------------------------------------------------- socket
   group('websocket authentication', () {
-    test('an expired token is refreshed and the handshake retried', () async {
+    test('[BP-RT-064] an expired token is refreshed and the handshake retried', () async {
       final server = await _EngineServer.start();
       addTearDown(server.close);
       server.script = (n, auth) => auth['token'] == 'fixture-access-2'

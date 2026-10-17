@@ -4,13 +4,16 @@
 1. fetch origin and rebase the current branch onto origin/cindy/integration, so
    the integrator can fast-forward and the integration history stays linear
    (stops on conflicts so the branch owner resolves them, not the integrator);
-2. run tool/check-project under the shared gate lock (waiting, holder, start,
+2. run tool/preflight (about a minute: audits, guard tests, analyze/lint/format and the
+   affected tests of the changed files) and stop with its summary if it fails, so a cheap
+   failure does not take the shared gate lock for a full run; --skip-preflight skips it;
+3. run tool/check-project under the shared gate lock (waiting, holder, start,
    first failure, abort and result are appended to /tmp/raft-flutter-gate-events.log;
    check-project stops early on compile errors, repeated failures or a stall);
-3. print one line to paste into the handoff message: branch, commit, base,
+4. print one line to paste into the handoff message: branch, commit, base,
    source hash and the gate result.
 
-4. with --pr (after a passing gate only): push the branch to origin and create or
+5. with --pr (after a passing gate only): push the branch to origin and create or
    update its pull request against cindy/integration with `gh`, using the body file
    from --pr-body plus the gate result line. The push is a normal push; only when the
    branch was rebased past what origin has is it force-with-lease, and only for the
@@ -18,7 +21,7 @@
    script says so and exits non-zero before fetching, rebasing or running anything;
    it never logs in or uses another credential.
 
-Usage: tool/prepare-handoff [--base origin/cindy/integration] [--no-check] [--all-themes]
+Usage: tool/prepare-handoff [--base origin/cindy/integration] [--no-check] [--skip-preflight] [--all-themes]
                             [--pr --pr-body FILE [--pr-title TITLE]]
 
 Default gate runs the sampled theme matrix; --all-themes (or RAFT_TEST_ALL_THEMES=1)
@@ -125,6 +128,12 @@ def publish_pr(branch, body_file, result_line, title=None):
         print(done.stdout.strip() or f'PR for {branch} updated')
 
 
+def run_preflight(base):
+    """tool/preflight against `base`, output streaming to the terminal; True when it passed."""
+    command = [sys.executable, str(root / 'tool/preflight'), '--base', base]
+    return subprocess.run(command, cwd=root).returncode == 0
+
+
 def holder_text(lock):
     """What the current lock holder wrote (branch, pid, start), flagged when its pid is gone."""
     try:
@@ -207,6 +216,8 @@ def main():
     parser.add_argument('--base', default='origin/cindy/integration')
     parser.add_argument('--all-themes', action='store_true',
                         help='run the full theme matrix (also set by RAFT_TEST_ALL_THEMES=1)')
+    parser.add_argument('--skip-preflight', action='store_true',
+                        help='go straight to the full check without running tool/preflight first')
     parser.add_argument('--no-check', action='store_true',
                         help='merge only (docs-only branches)')
     parser.add_argument('--pr', action='store_true',
@@ -242,6 +253,9 @@ def main():
     if args.no_check:
         print(f'handoff: {branch} {head} (contains {args.base} {base}); gate skipped')
         return
+    if not args.skip_preflight and not run_preflight(args.base):
+        sys.exit('preflight failed (summary above): fix it and run tool/prepare-handoff again; '
+                 'the full check was not started. --skip-preflight bypasses this.')
     emit.branch, emit.sha = gate_events.identity(root)  # after the rebase
     state = {'child': False}
     gate_events.raise_on_signals()

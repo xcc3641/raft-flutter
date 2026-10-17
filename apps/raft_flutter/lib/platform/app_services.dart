@@ -1,16 +1,23 @@
 import 'package:flutter/widgets.dart';
 
 import 'app_update.dart';
+import 'local_network_access.dart';
 
 /// Stable application services. Account and server state have their own owners.
 @immutable
 class AppServices {
-  const AppServices.withUpdates(AppUpdateService update) : appUpdate = update;
+  const AppServices.withUpdates(
+    AppUpdateService update, {
+    this.localNetwork = const LocalNetworkAccess(),
+  }) : appUpdate = update;
 
   /// Explicit opt-out for isolated component tests and previews.
-  const AppServices.updatesDisabledForTestOrPreview() : appUpdate = null;
+  const AppServices.updatesDisabledForTestOrPreview({
+    this.localNetwork = const LocalNetworkAccess(),
+  }) : appUpdate = null;
 
   final AppUpdateService? appUpdate;
+  final LocalNetworkAccess localNetwork;
 }
 
 /// Place above Navigator so routes, dialogs and overlays share the same values.
@@ -26,6 +33,10 @@ class AppServicesScope extends InheritedWidget {
   static AppServices? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppServicesScope>()?.services;
 
+  /// Reads stable services in initState and callbacks without subscribing.
+  static AppServices? maybeReadOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<AppServicesScope>()?.services;
+
   static AppServices of(BuildContext context) {
     final services = maybeOf(context);
     if (services == null) {
@@ -39,7 +50,8 @@ class AppServicesScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(AppServicesScope oldWidget) =>
-      !identical(services.appUpdate, oldWidget.services.appUpdate);
+      !identical(services.appUpdate, oldWidget.services.appUpdate) ||
+      !identical(services.localNetwork, oldWidget.services.localNetwork);
 }
 
 /// The root may own the update service; borrowed roots and pages never release it.

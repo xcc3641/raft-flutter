@@ -44,19 +44,19 @@ class _AddComputerDialogState extends State<AddComputerDialog> {
   @override
   void initState() {
     super.initState();
-    w.entityDirectory.addListener(_directoryChanged);
+    w.services.entityDirectory.addListener(_directoryChanged);
   }
 
   @override
   void dispose() {
-    w.entityDirectory.removeListener(_directoryChanged);
+    w.services.entityDirectory.removeListener(_directoryChanged);
     super.dispose();
   }
 
   /// useComputerConnectionWatch: the registered row coming online.
   void _directoryChanged() {
     if (!mounted || connected != null || registeredId == null) return;
-    final row = w.entityDirectory.computer(registeredId!);
+    final row = w.services.entityDirectory.computer(registeredId!);
     if (row != null && row['status'] == 'online') {
       setState(() => connected = row);
     }
@@ -110,7 +110,7 @@ class _AddComputerDialogState extends State<AddComputerDialog> {
       } catch (_) {}
     }
     unawaited(
-      w.entityDirectory.refresh(WorkspaceEntityKind.computers, force: true),
+      w.services.entityDirectory.refresh(WorkspaceEntityKind.computers, force: true),
     );
   }
 

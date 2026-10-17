@@ -1,5 +1,23 @@
 // Native account-wide message history settings.
 const Map<String, String> zhCatalogMessageHistory = <String, String>{
+  'Unable to load messages.': '无法加载消息。',
+  'Sign in to load messages.': '请登录后加载消息。',
+  'You do not have permission to load these messages.': '你没有权限加载这些消息。',
+  "Storage limit reached. New messages are not being saved offline; existing messages and drafts are kept.":
+      "已超出，新消息暂不离线保存；已有消息和草稿仍保留。",
+  "Messages will fill in automatically when connected.": "联网后自动补齐消息。",
+  "Loading missing messages…": "正在补齐消息…",
+  "Device message storage is full. Increase the message history limit in Storage settings.":
+      "此设备的消息存储已满。请在存储设置中提高历史消息容量。",
+  "Storage estimate unavailable": "暂时无法估算存储占用",
+  "Messages are managed automatically across this account. Recently opened and important conversations stay available offline. Attachments and previews use the separate cache below.":
+      "此账号的消息会自动管理。近期打开和重要会话保留在本机，可离线查看。附件和预览使用下方独立缓存。",
+  "Older unused messages are removed first. Conversations opened in the last seven days, pinned conversations, drafts, uploads, unread messages, mentions and open windows are protected, even when they exceed this limit.":
+      "优先移除较早且未使用的消息。最近七天打开过、已置顶、有草稿或上传、有未读或提及，以及窗口中打开的会话都会保留，即使超过此容量。",
+  "Protected conversations exceed the selected limit. They stay available offline; only older unused messages are removed.":
+      "受保护会话已超过所选容量，仍会保留供离线查看；仅移除较早且未使用的消息。",
+  "Older unused messages may be removed and need a connection to open again. Conversations opened in the last seven days, pinned conversations, drafts, uploads, unread messages, mentions and open windows are protected.":
+      "较早且未使用的消息可能被移除，再次打开需要网络连接。最近七天打开过、已置顶、有草稿或上传、有未读或提及，以及窗口中打开的会话都会保留。",
   "Couldn't check saved history.": "无法检查已保存的历史消息。",
   "There may be more messages between saved sections.": "已保存的消息片段之间可能还有消息。",
   "Load this gap": "补载这段消息",

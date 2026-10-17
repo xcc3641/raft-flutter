@@ -14,9 +14,22 @@ import 'package:flutter/rendering.dart';
 /// Measures rendered content, including images and Markdown, against the
 /// reference Web's 320 logical pixel limit. Width changes are remeasured.
 class RaftCollapsible extends StatefulWidget {
-  const RaftCollapsible({super.key, required this.child, this.enabled = true});
+  const RaftCollapsible({
+    super.key,
+    required this.child,
+    this.enabled = true,
+    this.initiallyExpanded = false,
+    this.onExpandedChanged,
+  });
   final Widget child;
   final bool enabled;
+
+  /// Applied when the row is first mounted. A later value does not move a
+  /// message the reader is already looking at.
+  final bool initiallyExpanded;
+
+  /// A manual toggle or a focus reveal. The initial value does not call this.
+  final ValueChanged<bool>? onExpandedChanged;
   @override
   State<RaftCollapsible> createState() => _RaftCollapsibleState();
 }
@@ -34,6 +47,7 @@ class _RaftCollapsibleState extends State<RaftCollapsible> {
   @override
   void initState() {
     super.initState();
+    expanded = widget.initiallyExpanded;
     FocusManager.instance.addListener(focusChanged);
   }
 
@@ -72,13 +86,19 @@ class _RaftCollapsibleState extends State<RaftCollapsible> {
     final clippedBottom =
         content.localToGlobal(Offset.zero).dy +
         MessageContentPrimitive.collapseHeight;
-    if (bottom > clippedBottom) setState(() => expanded = true);
+    if (bottom > clippedBottom) hold(true);
   }
 
   // Stable tear-offs: a new closure per build would relayout the message.
   void measured(Size size) => natural = size.height;
   bool currentOverflow() => widget.enabled && overflow;
-  void toggle() => setState(() => expanded = !expanded);
+  void hold(bool value) {
+    if (expanded == value) return;
+    setState(() => expanded = value);
+    widget.onExpandedChanged?.call(expanded);
+  }
+
+  void toggle() => hold(!expanded);
 
   /// Visible share of the content while collapsed, for a compact message
   /// row's label; null when everything is shown.

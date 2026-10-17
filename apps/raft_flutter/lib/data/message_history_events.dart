@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:raft_client/raft_client.dart';
 
 import 'message_history.dart';
+import 'history_capacity.dart';
 import 'history_read_policy.dart';
 import 'message_history_pages.dart';
+import 'message_history_verification.dart';
 import 'workspace_controller.dart';
 import 'workspace_message_windows.dart';
 
@@ -12,7 +14,7 @@ import 'workspace_message_windows.dart';
 /// resolves its parent through existing, authorized read routes.
 class MessageHistoryEvents {
   static void _saveFailed(WorkspaceController w, Object cause) {
-    if (w.error != null) return;
+    if (w.error != null || cause is HistoryCapacityExceeded) return;
     w.error = MessageHistoryPages.saveError(cause);
     w.notifyListeners();
   }
@@ -29,7 +31,7 @@ class MessageHistoryEvents {
         server = w.client.serverId,
         role = w.server?.string('role');
     return () =>
-        w.cacheWritable &&
+        w.deviceStore.writable &&
         seal == w.messageHistoryTicket('') &&
         tickets.entries.every(
           (e) => e.value == w.messageHistoryTicket(e.key),
@@ -56,7 +58,7 @@ class MessageHistoryEvents {
     Map<String, dynamic> row, {
     bool updateOnly = false,
   }) {
-    final db = MessageHistoryPages.storage(w.cache);
+    final db = MessageHistoryPages.storage(w.deviceStore.cache);
     if (db == null || w.client.user == null || w.client.serverId == null) {
       return;
     }
@@ -68,6 +70,7 @@ class MessageHistoryEvents {
     final probe = _probe(w);
     final channel = '${row['channelId']}', id = '${row['id']}';
     final unheld = !w.ledger.contains(channel, id);
+    final live = !updateOnly && w.connected;
     final rowReceipt = db.receiver.beginRow(probe, channel, id);
     final receipt = updateOnly ? null : db.receiver.begin(probe, [row]);
     Future<void> apply(Map<String, dynamic> value, int revision) async {
@@ -80,6 +83,7 @@ class MessageHistoryEvents {
           [value],
           current,
           updateOnly: updateOnly,
+          live: live,
           requestedRevision: revision,
           written: () => receipt?.finish(true, resolved: true),
           unresolved: () => unresolved = true,
@@ -253,6 +257,7 @@ class MessageHistoryEvents {
     List<Map<String, dynamic>> rows,
     bool Function() current, {
     bool updateOnly = false,
+    bool live = false,
     BigInt? through,
     required int requestedRevision,
     required void Function() written,
@@ -287,6 +292,7 @@ class MessageHistoryEvents {
         scope,
         entry.value,
         updateOnly: updateOnly,
+        live: live,
         requestedRevision: requestedRevision,
       )) {
         return false;
@@ -313,8 +319,9 @@ class MessageHistoryEvents {
   /// Resume uses committed progress, so a device write failure cannot cause a
   /// later reconnect to skip messages that exist only in memory.
   static Future<void> resume(WorkspaceController w) async {
+    MessageHistoryVerification.reconnect(w);
     if (w.client.user == null || w.client.serverId == null) return;
-    final db = MessageHistoryPages.storage(w.cache), current = _current(w);
+    final db = MessageHistoryPages.storage(w.deviceStore.cache), current = _current(w);
     if (db == null) {
       if (w.ledger.watermark > BigInt.zero) w.client.resume(w.ledger.watermark);
       return;
@@ -343,7 +350,7 @@ class MessageHistoryEvents {
     required void Function() refreshUnread,
   }) async {
     if (w.client.user == null || w.client.serverId == null) return;
-    final db = MessageHistoryPages.storage(w.cache);
+    final db = MessageHistoryPages.storage(w.deviceStore.cache);
     final rows = (payload['messages'] as List? ?? const [])
         .whereType<Map>()
         .map((m) => Map<String, dynamic>.from(m))

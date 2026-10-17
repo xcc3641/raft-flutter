@@ -52,7 +52,7 @@ void main() {
     return at;
   }
 
-  testWidgets('Activity menu opens at the pointer with Mark as Read and Done', (
+  testWidgets('[BP-READ-036] Activity menu opens at the pointer with Mark as Read and Done', (
     tester,
   ) async {
     final dynamic state = await mount(tester, 'activity');
@@ -77,7 +77,7 @@ void main() {
     expect(row['unreadCount'], 0);
   });
 
-  testWidgets('a read Activity row offers Mark as Unread (POST /unread)', (
+  testWidgets('[BP-READ-036] a read Activity row offers Mark as Unread (POST /unread)', (
     tester,
   ) async {
     await mount(tester, 'activity');

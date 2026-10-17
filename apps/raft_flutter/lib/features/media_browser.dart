@@ -318,7 +318,7 @@ class MediaBrowserState extends State<MediaBrowser>
           metadata: meta,
           rendition: 'thumbnail',
         );
-        final lease = w.acquireAttachmentImage(
+        final lease = w.attachmentMedia.acquireImage(
           key,
           authorized: widget.authorized,
           load: attachmentImageLoader(
@@ -381,7 +381,7 @@ class MediaBrowserState extends State<MediaBrowser>
             devicePixelRatio: dpr,
           ),
         );
-        final lease = w.acquireAttachmentImage(
+        final lease = w.attachmentMedia.acquireImage(
           key,
           authorized: widget.authorized,
           load: attachmentImageLoader(
@@ -816,7 +816,7 @@ class MediaBrowserState extends State<MediaBrowser>
             // Speculative neighbours must yield to a page explicitly opened
             // by the user, including the outgoing page during a swipe.
             _releasePreloads();
-            return w.acquireAttachmentImage(
+            return w.attachmentMedia.acquireImage(
             original,
             authorized: widget.authorized,
             load: attachmentImageLoader(
@@ -892,7 +892,7 @@ class MediaBrowserState extends State<MediaBrowser>
   /// The size a video was read to have (its first-frame read), when the
   /// message does not say.
   Size? _rememberedSize(int i) {
-    final shape = w.playerSessions.shapes[attachmentMediaKey(item(i))];
+    final shape = w.attachmentMedia.playerSessions.shapes[attachmentMediaKey(item(i))];
     return shape == null
         ? null
         : Size(shape.width.toDouble(), shape.height.toDouble());

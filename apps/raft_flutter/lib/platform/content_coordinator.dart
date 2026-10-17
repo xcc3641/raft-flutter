@@ -403,7 +403,7 @@ class NativeContentCoordinator with WidgetsBindingObserver {
       // announces it. Read the Activity window now (in parallel with the
       // checks below) so that opening the app from this alert finds the
       // conversation current; the alert itself never waits past the cap.
-      final fresh = w.activityUnreadIfBound?.reach(
+      final fresh = w.services.activityUnreadIfBound?.reach(
         // A thread reply's row is the thread's own channel.
         channelId: p['channelId'] as String,
         messageId: p['messageId'] as String,
@@ -434,7 +434,7 @@ class NativeContentCoordinator with WidgetsBindingObserver {
       // The conversation's Activity count after the window reached this
       // message: the number the in-app badge and the launcher badge show.
       final unread = activityRowUnread(
-        w.activityUnreadIfBound?.acceptedRows ?? const [],
+        w.services.activityUnreadIfBound?.acceptedRows ?? const [],
         p['channelId'] as String,
       );
       await notifications.show(

@@ -1,7 +1,7 @@
 # Raft Flutter 工程约定
 
 - 本仓库为独立 Flutter 客户端；Web参照版本记录于 docs/source-reference.json。实现前阅读 docs/architecture.md 和当前用户指令。
-- 合入与 PR：每个分支开 PR 指向 cindy/integration。PR 描述写清改了什么、怎么验证的（命令与结果、设备、哪些没验证）和 `tool/prepare-handoff` 输出的全量检查结果行；验证证据只放 PR 描述，不进 docs/（docs/README.md 是索引，新文档必须登记，见 tool/tests/test_docs_index.py）。仓库是公开的：PR 里不放私有 URL、服务器名、token、用户数据；真实 workspace 的截图/录屏留在 Raft。线性合入：rebase 到 origin/cindy/integration，跑全量检查，fast-forward 推送到 cindy/integration（GitHub 自动标记 PR 已合并）。`tool/prepare-handoff --pr --pr-body <文件>` 可在检查通过后推分支并创建/更新 PR。
+- 合入与 PR：每个分支开 PR 指向 cindy/integration。PR 描述写清改了什么、怎么验证的（命令与结果、设备、哪些没验证）和 `tool/prepare-handoff` 输出的全量检查结果行；验证证据只放 PR 描述，不进 docs/（docs/README.md 是索引，新文档必须登记，见 tool/tests/test_docs_index.py）。仓库是公开的：PR 里不放私有 URL、服务器名、token、用户数据；真实 workspace 的截图/录屏留在 Raft。线性合入：rebase 到 origin/cindy/integration，跑全量检查，fast-forward 推送到 cindy/integration（GitHub 自动标记 PR 已合并）。外部贡献者（fork）的 PR：先请对方开「允许维护者修改」，变基与修复推回其 PR 分支再 fast-forward；对方没开时，修复请对方在 PR 内改或另开 PR 叠在其后，其 PR 用 GitHub「Rebase and merge」合入（基线与检查时一致），不要只合入我们这边的副本而关闭原 PR。`tool/prepare-handoff --pr --pr-body <文件>` 可在检查通过后推分支并创建/更新 PR。
 - 设备/原生/播放器问题要在模拟器或真机复现并验证（widget 测试不算）；新增回归测试先在旧代码上跑红；结论只写测到的范围。
 - 对没 @ 你的请求先读话题，看有没有人认领；打 tag、发布、推共享分支前先在话题里认领。
 - raft_ui 只拥有设计tokens与交互组件，不依赖API/数据库/原生系统服务。每个新组件同时提供 SDK Widget Preview 和适用的主题、状态、键盘、语义验收。
@@ -39,4 +39,6 @@
 - 只有 Kevin 明确要求时才用 Opus 5.5。
 - subagent 只跑与改动相关的测试、`tool/flutter analyze`、设计系统审计和 `tool/raft-lints --changed`（每轮编辑后跑，几秒出结果），不跑全量检查。
 - 每个 clone 首次使用时运行一次 `tool/install-git-hooks`：提交前自动 lint 暂存的 lib 文件，pull / rebase / 切分支后自动按 pubspec.lock 重跑 `pub get`。
-- 全量检查每个分支一次：负责人审核后用 `tool/prepare-handoff`（rebase + `tool/check-project`），通过后 fast-forward 推送到 cindy/integration，不再攒批次分支整批检查。
+- 申请全量检查前先跑 `tool/preflight`（约 1 分钟：结构/设计系统审计、守卫测试、改动文件的 analyze/lint/format、受影响测试、跨平台路径扫描），把它输出的 `preflight:` 汇总行贴进 PR；`tool/prepare-handoff` 会先跑它，失败即停。
+- 全量检查每个分支一次：负责人审核后用 `tool/prepare-handoff`（rebase + `tool/check-project`），通过后 fast-forward 推送到 cindy/integration。例外：小的机械性 PR（如同一迁移的多个批次）可以叠成一串只跑一次全量检查，通过后按顺序逐个 fast-forward；失败时按失败位置只打回对应的那个。
+- `tool/check-project` 只在失败项全是 Dart 测试文件（不超过 6 个）时，单独重跑这些文件最多 3 次（`RAFT_CHECK_RETRIES=0` 关闭）；重跑通过的算 flaky，列在最终 JSON 的 `flaky` 里，运行可通过。同一棵树（`git rev-parse HEAD^{tree}`）在干净工作区通过后会被记录，`tool/check-project --reuse` 对相同的干净树直接复用，不重跑。

@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 
 import '../data/message_history.dart';
 import '../data/workspace_cache_codec.dart';
+import 'history_summaries.dart';
 
 class CommittedHistoryWindow {
   CommittedHistoryWindow(
@@ -142,6 +143,16 @@ class SqliteCommittedHistoryReads {
       payloads.take(size).toList().reversed.toList(),
     );
     final empty = rows.first.read<int>('empty') == 1;
+    // Reply previews are read right after the rows, from the read executor;
+    // a parent evicted in between simply has no preview.
+    final summaries = await SqliteHistorySummaries.read(
+      db,
+      origin,
+      principal,
+      server,
+      marker['channelId'] as String,
+      messages.map((row) => row['id']),
+    );
     return CommittedHistoryWindow(
       MessageHistoryScope(
         origin: origin,
@@ -154,6 +165,13 @@ class SqliteCommittedHistoryReads {
       {
         ...Map<String, dynamic>.from(marker),
         'messages': messages,
+        // Markers written before previews had their own table still carry
+        // them; the table wins where it has the parent.
+        'threadSummaries': {
+          if (marker['threadSummaries'] case final Map old)
+            ...Map<String, dynamic>.from(old),
+          ...summaries,
+        },
         'hasMore':
             !empty &&
             marker['historyLimited'] != true &&

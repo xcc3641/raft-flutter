@@ -97,7 +97,7 @@ mixin InlineMediaLoader<T extends StatefulWidget> on State<T> {
   @override
   void initState() {
     super.initState();
-    final sessions = controller.playerSessions;
+    final sessions = controller.attachmentMedia.playerSessions;
     // A card built again for an attachment prepared earlier shows its last
     // picture and where it stopped, and prepares on a tap (see
     // PlayerSessions.prepared), never by itself.
@@ -160,7 +160,7 @@ mixin InlineMediaLoader<T extends StatefulWidget> on State<T> {
       // One player per attachment for the session, shared with the viewer: a
       // clip scrolled out of view and back, or opened full screen, continues
       // from its own stream.
-      final acquired = controller.playerSessions.acquire(
+      final acquired = controller.attachmentMedia.playerSessions.acquire(
         mediaKey,
         scope: controller.attachmentImageScope,
         channelId: owner,
@@ -172,7 +172,7 @@ mixin InlineMediaLoader<T extends StatefulWidget> on State<T> {
           start: resumeAt,
         ),
       );
-      controller.playerSessions.prepared.add(mediaKey);
+      controller.attachmentMedia.playerSessions.prepared.add(mediaKey);
       hold = acquired;
       acquired.onEvicted = () => unawaited(releasePlayer(PlayerRelease.evicted));
       player = acquired.player;
@@ -286,7 +286,7 @@ mixin InlineMediaLoader<T extends StatefulWidget> on State<T> {
   /// attachment): a card disposed with its player alive (a list drops rows far
   /// from the viewport) still has a picture when it is built again.
   void keepFirstStill() {
-    final sessions = controller.playerSessions;
+    final sessions = controller.attachmentMedia.playerSessions;
     if (stillQueued || sessions.hasStill(mediaKey)) return;
     stillQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -355,7 +355,7 @@ mixin InlineMediaLoader<T extends StatefulWidget> on State<T> {
       return;
     }
     resumeAt = reason == PlayerRelease.ended ? Duration.zero : last.position;
-    final sessions = controller.playerSessions;
+    final sessions = controller.attachmentMedia.playerSessions;
     sessions.resumeAt[mediaKey] = resumeAt;
     if (captured != null) sessions.keepStill(mediaKey, captured);
     final events = playbackEvents;
@@ -400,7 +400,7 @@ mixin InlineMediaLoader<T extends StatefulWidget> on State<T> {
     settleTimer?.cancel();
     graceTimer?.cancel();
     if (hold != null && !pending) {
-      controller.playerSessions.resumeAt[mediaKey] = playbackEnded(playback)
+      controller.attachmentMedia.playerSessions.resumeAt[mediaKey] = playbackEnded(playback)
           ? Duration.zero
           : playback.position;
     }

@@ -172,7 +172,7 @@ class _HtmlPreviewState extends State<HtmlAttachmentPreviewDialog> {
 
   /// Only a document that passed the sandbox check is ever stored, so a hit
   /// needs no new request to be as safe as the first open.
-  AttachmentImageStoreKey get sourceKey => widget.controller.attachmentCacheKey(
+  AttachmentImageStoreKey get sourceKey => widget.controller.attachmentMedia.cacheKey(
     widget.metadata,
     'html',
     channelId:
@@ -180,7 +180,7 @@ class _HtmlPreviewState extends State<HtmlAttachmentPreviewDialog> {
   );
 
   Future<String?> storedSource() async {
-    final cache = widget.controller.attachmentDiskCache;
+    final cache = widget.controller.attachmentMedia.diskCache;
     if (cache == null) return null;
     try {
       final bytes = await cache.readPreview(sourceKey);
@@ -191,7 +191,7 @@ class _HtmlPreviewState extends State<HtmlAttachmentPreviewDialog> {
   }
 
   Future<void> storeSource(String source) async {
-    final cache = widget.controller.attachmentDiskCache;
+    final cache = widget.controller.attachmentMedia.diskCache;
     if (cache == null) return;
     try {
       await cache.writePreview(

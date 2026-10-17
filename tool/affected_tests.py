@@ -92,6 +92,20 @@ def affected(changed, graph):
     return seen
 
 
+def distances(changed, graph):
+    """`{file: import steps from a changed file}` for every file that reaches a changed file (changed files are 0)."""
+    reverse = reverse_graph(graph)
+    found = {name: 0 for name in changed}
+    queue = collections.deque(sorted(changed))
+    while queue:
+        current = queue.popleft()
+        for parent in sorted(reverse.get(current, ())):
+            if parent not in found:
+                found[parent] = found[current] + 1
+                queue.append(parent)
+    return found
+
+
 def is_test_file(path):
     return path.endswith('_test.dart') and bool(TEST_DIR.search(path))
 
@@ -100,6 +114,12 @@ def affected_tests(changed, sources, package_roots):
     """Sorted test files (`*_test.dart` under a `test/` directory) that reach a changed file."""
     graph = build_graph(sources, package_roots)
     return sorted(f for f in affected(changed, graph) if is_test_file(f))
+
+
+def ranked_affected_tests(changed, sources, package_roots):
+    """`[(distance, test file)]`, closest first: a changed test is 0, a test importing the changed file is 1, and so on."""
+    found = distances(changed, build_graph(sources, package_roots))
+    return sorted((distance, name) for name, distance in found.items() if is_test_file(name))
 
 
 def tracked_dart_sources(root):

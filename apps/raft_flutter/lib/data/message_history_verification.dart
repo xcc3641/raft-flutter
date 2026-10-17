@@ -1,27 +1,229 @@
-import 'package:raft_client/raft_client.dart';
-import 'package:raft_sync/raft_sync.dart' show mergeMessageProjection;
+import 'dart:async';
+
+import 'package:raft_ui/raft_ui.dart' show RaftIdleTimer;
 
 import 'history_read_policy.dart';
+import 'history_range_reads.dart';
+import 'message_history_reconciliation.dart';
+import 'history_gap_recovery.dart';
 import 'message_history.dart';
 import 'message_history_pages.dart';
 import 'workspace_controller.dart';
 import 'workspace_message_windows.dart';
 
-/// Rechecks only a displayed saved range. No timer scans hidden history.
+/// Reconciles authorized saved ranges while preserving accepted projections.
 class MessageHistoryVerification {
-  static void tail(WorkspaceController w, MessageWindowRequest request, MessageHistoryScope scope) {
-    final storage = MessageHistoryPages.storage(w.cache);
+  static final _jobs = Expando<_HistoryVerificationJob>();
+
+  /// One event-driven pass over saved ranges, including hidden conversations.
+  /// Existing authorized pages supply the digest; no unsupported endpoint or
+  /// wall-clock freshness can make a missed old edit appear verified.
+  static void reconnect(WorkspaceController w) {
+    HistoryRangeReads.of(w).restart();
+    HistoryGapRecovery.reconnect(w);
+    _resume(w);
+  }
+
+  static void _resume(WorkspaceController w) {
+    final db = MessageHistoryPages.storage(w.deviceStore.cache);
+    if (db == null ||
+        !w.foreground ||
+        !w.deviceStore.writable ||
+        w.client.user == null ||
+        w.client.serverId == null) {
+      return;
+    }
+    final job = _jobs[w] ??= _HistoryVerificationJob();
+    if (job.running) {
+      job.again = true;
+      return;
+    }
+    job.retry.cancel();
+    job.running = true;
+    db.reads.background(() async {
+      var complete = false;
+      try {
+        do {
+          job.again = false;
+          complete = await _saved(w);
+        } while (job.again &&
+            w.deviceStore.writable &&
+            w.foreground &&
+            !db.reads.closed);
+      } finally {
+        job.running = false;
+        if (identical(_jobs[w], job)) {
+          if (complete || !w.deviceStore.writable || db.reads.closed) {
+            job.retry.cancel();
+            _jobs[w] = null;
+          } else if (w.connected && w.foreground) {
+            final seconds = 2 << job.attempt.clamp(0, 5);
+            job.attempt++;
+            job.zone.run(
+              () =>
+                  job.retry.start(Duration(seconds: seconds), () => _resume(w)),
+            );
+          }
+        }
+      }
+    });
+  }
+
+  static void cancel(WorkspaceController w) {
+    _jobs[w]?.retry.cancel();
+    _jobs[w] = null;
+    HistoryRangeReads.of(w).restart();
+  }
+
+  static Object _context(WorkspaceController w, MessageHistoryStorage db) => (
+    w.client.origin,
+    w.client.user?.id,
+    w.client.serverId,
+    w.ledger.generation,
+    w.messageHistoryTicket(''),
+    w.navigationRevision,
+    w.channelGeneration,
+    w.threadGeneration,
+    w.foreground,
+    db.gaps.retirement,
+  );
+
+  /// Both automatic consumers use the same full acceptance and its metadata.
+  /// Navigating away retires even disk-backed proof; online-only acceptance
+  /// can never be mistaken for durable coverage on a later window visit.
+  static HistoryRangeRead ranges(
+    WorkspaceController w,
+    MessageHistoryScope scope,
+  ) {
+    final db = MessageHistoryPages.storage(w.deviceStore.cache)!;
+    return HistoryRangeReads.of(w).scope(_context(w, db), (
+      scope.origin,
+      scope.principal,
+      scope.server,
+      scope.channel,
+      scope.authority,
+      scope.parentChannel,
+      scope.parentMessage,
+      w.messageHistoryTicket(scope.parentChannel),
+    ));
+  }
+
+  static Future<HistoryRangeProof?> readRange(
+    WorkspaceController w,
+    MessageWindowRequest request,
+    MessageHistoryScope scope, {
+    BigInt? before,
+    required HistoryReadReason reason,
+    void Function(Object cause)? failed,
+  }) {
+    final db = MessageHistoryPages.storage(w.deviceStore.cache)!;
+    final context = _context(w, db), range = ranges(w, scope);
+    final ticket = w.messageHistoryTicket(scope.parentChannel);
+    final guarded = w.messageWindows.request(
+      allowed: () =>
+          request.current && range.current && context == _context(w, db),
+    );
+    return range.read(before, () async {
+      Map<String, dynamic>? response;
+      final accepted = await MessageHistoryReconciliation.read(
+        w,
+        guarded,
+        scope,
+        ticket,
+        before: before,
+        reason: reason,
+        wireTicket: (ticket, range.token),
+        allowOnlineOnly: true,
+        received: (page) => response = page,
+        failed: failed,
+      );
+      return accepted && guarded.current && response != null
+          ? HistoryRangeProof.page(response!, before)
+          : null;
+    });
+  }
+
+  static Future<bool> _saved(WorkspaceController w) async {
+    final db = MessageHistoryPages.storage(w.deviceStore.cache)!;
+    final user = w.client.user!.id,
+        server = w.client.serverId!,
+        origin = w.client.origin;
+    final context = _context(w, db), reads = HistoryRangeReads.of(w);
+    reads.bind(context);
+    final pass = reads.generation;
+    final ticket = w.messageHistoryTicket(''), generation = w.ledger.generation;
+    bool current() =>
+        w.deviceStore.writable &&
+        !db.reads.closed &&
+        w.foreground &&
+        w.client.user?.id == user &&
+        w.client.serverId == server &&
+        w.client.origin == origin &&
+        context == _context(w, db) &&
+        pass == reads.generation &&
+        w.ledger.generation == generation &&
+        w.messageHistoryTicket('') == ticket;
+    var complete = true;
+    final ranges = await db.savedRanges(origin, user, server);
+    for (final range in ranges) {
+      if (!current()) return false;
+      final known = range.$1;
+      final scope = MessageHistoryPages.scope(
+        w,
+        known.channel,
+        parent: known.parentChannel,
+        parentMessage: known.parentMessage,
+      );
+      if (scope == null || scope.authority != known.authority) continue;
+      final seal = w.messageHistoryTicket(scope.parentChannel);
+      final request = w.messageWindows.request(
+        allowed: () =>
+            current() && seal == w.messageHistoryTicket(scope.parentChannel),
+      );
+      BigInt? before;
+      while (request.current) {
+        final proof = await readRange(
+          w,
+          request,
+          scope,
+          before: before,
+          reason: HistoryReadReason.reconnect,
+        );
+        if (proof == null) {
+          complete = false;
+          break;
+        }
+        if (proof.limited ||
+            proof.lower <= range.$2 ||
+            before != null && proof.lower >= before) {
+          break;
+        }
+        before = proof.lower;
+      }
+    }
+    return complete && current();
+  }
+
+  static void tail(
+    WorkspaceController w,
+    MessageWindowRequest request,
+    MessageHistoryScope scope,
+  ) {
+    final storage = MessageHistoryPages.storage(w.deviceStore.cache);
     if (storage == null) return;
     final ticket = w.messageHistoryTicket(scope.parentChannel);
-    storage.reads.background(() => _verify(w,request,scope,ticket,reason:HistoryReadReason.tail));
+    storage.reads.background(
+      () => _verify(w, request, scope, ticket, reason: HistoryReadReason.tail),
+    );
   }
+
   static void schedule(
     WorkspaceController w,
     MessageWindowRequest request,
     MessageHistoryPage page,
   ) {
-    final db = MessageHistoryPages.storage(w.cache);
-    if (db == null || !request.current || !w.foreground || !w.cacheWritable) {
+    final db = MessageHistoryPages.storage(w.deviceStore.cache);
+    if (db == null || !request.current || !w.foreground || !w.deviceStore.writable) {
       return;
     }
     final ticket = w.messageHistoryTicket(page.scope.parentChannel);
@@ -47,7 +249,7 @@ class MessageHistoryVerification {
     MessageWindowRequest request,
     MessageHistoryPage fresh,
   ) {
-    final db = MessageHistoryPages.storage(w.cache);
+    final db = MessageHistoryPages.storage(w.deviceStore.cache);
     if (db == null || !request.current || !w.foreground) return;
     final raw = (fresh.remotePage?['messages'] as List? ?? const []);
     if (raw.isEmpty || fresh['historyLimited'] == true) return;
@@ -91,7 +293,7 @@ class MessageHistoryVerification {
     String id,
     String target,
   ) {
-    final db = MessageHistoryPages.storage(w.cache);
+    final db = MessageHistoryPages.storage(w.deviceStore.cache);
     final scope = MessageHistoryPages.scope(w, id);
     if (db == null || scope == null || !request.current) return;
     db.reads.background(() async {
@@ -124,8 +326,8 @@ class MessageHistoryVerification {
   /// Refreshes the visible saved rows and the latest page while preserving
   /// the existing timeline and context. Gap repair keeps its existing route.
   static Future<bool> refresh(WorkspaceController w) async {
-    final db = MessageHistoryPages.storage(w.cache);
-    if (db == null || !w.cacheWritable) return false;
+    final db = MessageHistoryPages.storage(w.deviceStore.cache);
+    if (db == null || !w.deviceStore.writable) return false;
     await w.syncVisibleScopes();
     var complete = true;
     for (final thread in [false, true]) {
@@ -142,7 +344,7 @@ class MessageHistoryVerification {
       final request = w.messageWindows.request(
         thread: thread,
         allowed: () =>
-            w.cacheWritable &&
+            w.deviceStore.writable &&
             ticket == w.messageHistoryTicket(scope.parentChannel) &&
             w.messageWindows.notRevoked(id) &&
             w.messageWindows.notRevoked(scope.parentChannel) &&
@@ -186,154 +388,22 @@ class MessageHistoryVerification {
     String? target,
     int limit = 50,
     required HistoryReadReason reason,
-  }) async {
-    final db = MessageHistoryPages.storage(w.cache);
-    if (db == null) return false;
-    bool current() =>
-        request.current &&
-        w.cacheWritable &&
-        !db.reads.closed &&
-        ticket == w.messageHistoryTicket(scope.parentChannel) &&
-        w.messageWindows.notRevoked(scope.channel) &&
-        w.messageWindows.notRevoked(scope.parentChannel);
-    if (!current()) return false;
-    final initial = {
-      for (final row in w.ledger.messages(scope.channel))
-        row['id'] as String: row,
-    };
-    final shown = w.messageWindows.rows(scope.channel);
-    final lower = shown.isEmpty ? null : shown.first.seq;
-    final upper = shown.isEmpty ? null : shown.last.seq;
-    try {
-      final page = await MessageHistoryPages.load(
-        cache: w.cache,
-        scope: scope,
-        current: current,
-        held: () => w.ledger.messages(scope.channel),
-        ticket: ticket,
-        before: before,
-        after: after,
-        target: target,
-        focused: target != null,
-        limit: limit,
-        localFirst: false,
-        reason: reason,
-        remote: () async => target == null
-            ? w.client.messagePage(
-                scope.channel,
-                before: before,
-                after: after,
-                limit: limit,
-              )
-            : Map<String, dynamic>.from(
-                await w.client.get(
-                  '/messages/context/$target',
-                  query: {'channelId': scope.channel},
-                ),
-              ),
-      );
-      if (!current() || page is! MessageHistoryPage) return false;
-      await db.acceptPage(page);
-      if (!current()) return false;
-      final raw = (page.remotePage?['messages'] as List? ?? const []);
-      final ids = {...initial.keys, for (final row in raw) row['id'] as String};
-      final stored = await db.projections(scope, ids);
-      if (!current()) return false;
-      final accepted = <Map<String, dynamic>>[];
-      final limited = page['historyLimited'] == true;
-      final allowed = {for (final row in raw) row['id'] as String};
-      for (final id in ids) {
-        final pending = db.receiver.pendingUpdate(scope, id);
-        if (db.receiver.hasRow(scope, id) && pending == null ||
-            !identical(initial[id], w.ledger.message(scope.channel, id))) {
-          continue;
-        }
-        if (stored.containsKey(id) && stored[id] == null ||
-            limited && !allowed.contains(id)) {
-          w.ledger.remove(scope.channel, id);
-          w.visibleIds[scope.channel]?.remove(id);
-          continue;
-        }
-        final row = stored[id];
-        if (row == null) continue;
-        final seq = BigInt.parse('${row['seq']}');
-        if (initial.containsKey(id) ||
-            lower != null && upper != null && seq >= lower && seq <= upper) {
-          accepted.add(pending == null ? row : mergeMessageProjection(row, pending));
-        }
-      }
-      w.messageWindows.acceptRows(
-        request,
-        scope.channel,
-        accepted,
-        authoritative: true,
-        visible: accepted
-            .where(
-              (row) =>
-                  w.visibleIds[scope.channel]?.contains(row['id']) == true ||
-                  !initial.containsKey(row['id']) &&
-                      lower != null &&
-                      upper != null &&
-                      BigInt.parse('${row['seq']}') >= lower &&
-                      BigInt.parse('${row['seq']}') <= upper,
-            )
-            .map((row) => row['id'] as String),
-      );
-      w.messageSync.replaceBodies(scope.channel, accepted);
-      final sequences = raw.map((row) => BigInt.parse('${row['seq']}')).toList()
-        ..sort();
-      final coversOldest =
-          after == null &&
-          (sequences.isEmpty || lower == null || sequences.first <= lower);
-      final boundary = coversOldest && target == null
-          ? await db.readPage(scope, before: before, limit: limit)
-          : null;
-      if (!current()) return false;
-      final more = limited
-          ? false
-          : target != null && coversOldest
-          ? page['hasOlder'] as bool?
-          : boundary?.hasMore;
-      if (w.threadChannelId == scope.channel) {
-        w.threadHistoryLimited = limited;
-        if (more != null) w.threadHasMore = more;
-      } else if (w.channel?.id == scope.channel) {
-        w.historyLimited = limited;
-        if (more != null) w.hasMore = more;
-      }
-      w.notifyListeners();
-      await w.saveHistoryWindow(
-        scope.channel,
-        thread: w.threadChannelId == scope.channel,
-      );
-      return current();
-    } on RaftApiException catch (error) {
-      if (!current()) return false;
-      if (target != null && error.status == 404) {
-        // A missing target is not proof that its entire channel is revoked.
-        // A complete page around its saved seq can confirm the deletion.
-        final held = initial[target],
-            sequence = BigInt.tryParse('${initial[target]?['seq']}');
-        if (held != null && sequence != null) {
-          return _verify(
-            w,
-            request,
-            scope,
-            ticket,
-            before: sequence + BigInt.one,
-            reason: reason,
-          );
-        }
-      } else if (error.status == 403 || error.status == 404) {
-        w.rejectHistoryRead(scope.channel);
-        await w.flushCache();
-      }
-      db.reads.count(HistoryReadReason.failed);
-      return false;
-    } catch (_) {
-      // A transient read failure leaves the accepted local range on screen.
-      if (current()) db.reads.count(HistoryReadReason.failed);
-      return false;
-    }
-  }
+  }) => MessageHistoryReconciliation.read(
+    w,
+    request,
+    scope,
+    ticket,
+    before: before,
+    after: after,
+    target: target,
+    limit: limit,
+    reason: reason,
+  );
+}
+
+class _HistoryVerificationJob {
+  bool again = false, running = false;
+  int attempt = 0;
+  final zone = Zone.current;
+  final retry = RaftIdleTimer(yieldToAnimation: false);
 }

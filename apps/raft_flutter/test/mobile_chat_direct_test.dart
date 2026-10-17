@@ -2,7 +2,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_flutter/features/chat_view.dart';
-import 'package:raft_flutter/features/mobile_settings_owner.dart';
 
 import 'app_global_server_selector_test.dart' show RootFixture;
 
@@ -93,8 +92,6 @@ bool channelMessageGet(RequestOptions call, {required bool older}) {
 }
 
 void main() {
-  tearDown(MobileSettingsPreference.instance.resetForTest);
-
   testWidgets('phone channel scroll and first frame stay put', (t) async {
     final f = RootFixture();
     useChannelHistory(f, count: 40);
@@ -152,7 +149,6 @@ void main() {
   });
 
   testWidgets('a covered direct chat does not read, focus, or tick', (t) async {
-    MobileSettingsPreference.instance.setEnabled(true);
     final f = RootFixture();
     await f.mount(
       t,
@@ -298,7 +294,6 @@ void main() {
   testWidgets(
     'the phone thread opened from the channel uses the shared window',
     (t) async {
-      MobileSettingsPreference.instance.setEnabled(true);
       final f = RootFixture();
       f.overrides['GET /messages/context/ma'] = (_) => {
         'messages': [
@@ -343,7 +338,6 @@ void main() {
   );
 
   testWidgets('a wide channel keeps the classic timeline', (t) async {
-    MobileSettingsPreference.instance.setEnabled(true);
     final f = RootFixture();
     await f.mount(
       t,

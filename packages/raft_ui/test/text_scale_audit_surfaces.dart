@@ -20,6 +20,7 @@ import 'package:raft_ui/channel_management_previews.dart';
 import 'package:raft_ui/channel_resolution_previews.dart';
 import 'package:raft_ui/chat_composition_previews.dart';
 import 'package:raft_ui/combobox_previews.dart';
+import 'package:raft_ui/composer_expand_previews.dart';
 import 'package:raft_ui/conversation_card_previews.dart';
 import 'package:raft_ui/css_recipe_radius_previews.dart';
 import 'package:raft_ui/desktop_title_bar_previews.dart';
@@ -54,6 +55,7 @@ import 'package:raft_ui/quick_reaction_picker_previews.dart';
 import 'package:raft_ui/quick_switcher_previews.dart';
 import 'package:raft_ui/search_surface_previews.dart';
 import 'package:raft_ui/section_pager_previews.dart';
+import 'package:raft_ui/sheet_previews.dart';
 import 'package:raft_ui/selection_popover_previews.dart';
 import 'package:raft_ui/selection_toolbar_previews.dart';
 import 'package:raft_ui/settings_administration_previews.dart';
@@ -376,6 +378,39 @@ final auditSurfaces = <AuditSurface>[
     'Combobox panel',
     comboboxPreview,
     Size(300, 320),
+  ),
+  AuditSurface(
+    'composerExpandButtonPreview',
+    'Composer expand button',
+    composerExpandButtonPreview,
+    Size(640, 260),
+    representative: true,
+  ),
+  AuditSurface(
+    'expandedComposerDesktopPreview',
+    'Expanded composer desktop',
+    expandedComposerDesktopPreview,
+    Size(1100, 820),
+    representative: true,
+  ),
+  AuditSurface(
+    'expandedComposerPhonePreview',
+    'Expanded composer phone',
+    expandedComposerPhonePreview,
+    Size(412, 860),
+    representative: true,
+  ),
+  AuditSurface(
+    'sheetScrollingPreview',
+    'Sheet with a scrolling body',
+    sheetScrollingPreview,
+    Size(412, 760),
+  ),
+  AuditSurface(
+    'sheetShortPreview',
+    'Sheet at its medium detent',
+    sheetShortPreview,
+    Size(412, 520),
   ),
   AuditSurface(
     'conversationActivationPreview',

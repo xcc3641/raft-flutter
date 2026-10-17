@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 import 'package:raft_ui/raft_ui.dart';
-import '../data/device_preferences.dart';
+
 import '../data/mobile_tabbar_preferences.dart';
 import '../data/personal_presentation.dart';
 import '../data/raft_location.dart';
@@ -15,24 +15,6 @@ import '../platform/app_services.dart';
 import '../platform/native_notifications.dart';
 import 'workspace_mode_settings_card.dart';
 import 'workspace_settings.dart';
-
-/// Phone settings, tasks, saved, and chat always read the workspace.
-/// The key remains so older installs and tests still compile.
-class MobileSettingsPreference extends ChangeNotifier {
-  MobileSettingsPreference._();
-  static final instance = MobileSettingsPreference._();
-  static const preferenceKey = 'raft.mobileSettingsDirect';
-
-  bool get enabled => true;
-
-  void setEnabled(bool next) {}
-
-  void resetForTest() {
-    try {
-      DevicePreferences.current?.remove(preferenceKey);
-    } catch (_) {}
-  }
-}
 
 /// Notifies only when the settings page's workspace inputs change.
 class MobileSettingsSelection extends ChangeNotifier {
@@ -272,5 +254,3 @@ void _openSettingsTab({
   );
   controller.notifyListeners();
 }
-
-

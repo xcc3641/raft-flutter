@@ -9,8 +9,6 @@ import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:raft_ui/test_themes.dart';
 
-import 'package:raft_flutter/features/mobile_settings_owner.dart';
-
 import 'desktop_footer_sidebar_page_test.dart' show shellFonts;
 import 'workspace_shell_contract_test.dart' show mountShell, retire;
 import 'workspace_source_location_contract_test.dart' show pageFixture, frames;
@@ -20,10 +18,6 @@ import 'support/app_services_fixture.dart';
 // composition. Its content header begins in the top row of the desktop pane;
 // WorkspaceView must not prepend another full-width Settings page header.
 void main() {
-  for (final direct in [false, true]) {
-    group(direct ? 'direct settings' : 'current settings', () {
-      setUp(() => MobileSettingsPreference.instance.setEnabled(direct));
-      tearDown(MobileSettingsPreference.instance.resetForTest);
   for (final (family, dark) in raftThemeMatrix([
     (RaftFamily.brutal, false),
     (RaftFamily.elegant, false),
@@ -163,7 +157,5 @@ void main() {
       },
       variant: TargetPlatformVariant({TargetPlatform.linux}),
     );
-  }
-    });
   }
 }

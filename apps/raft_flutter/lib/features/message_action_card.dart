@@ -174,7 +174,7 @@ class _MessageActionCardState extends State<MessageActionCard> {
     super.initState();
     w.addListener(changed);
     // Names in the summary resolve through the server directories.
-    w.entityDirectory.addListener(changed);
+    w.services.entityDirectory.addListener(changed);
   }
 
   @override
@@ -206,7 +206,7 @@ class _MessageActionCardState extends State<MessageActionCard> {
   @override
   void dispose() {
     w.removeListener(changed);
-    w.entityDirectory.removeListener(changed);
+    w.services.entityDirectory.removeListener(changed);
     final stale = ownedDialog;
     if (stale != null && stale.isActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -283,7 +283,7 @@ class _MessageActionCardState extends State<MessageActionCard> {
   Future<List<Map<String, dynamic>>> people() async {
     // The workspace directory already holds both lists (same endpoints), so
     // the form opens at once; only a directory that never loaded is fetched.
-    final directory = w.entityDirectory;
+    final directory = w.services.entityDirectory;
     final loaded =
         directory.state(WorkspaceEntityKind.members).loaded &&
         directory.state(WorkspaceEntityKind.agents).loaded;
@@ -583,13 +583,13 @@ class _MessageActionCardState extends State<MessageActionCard> {
   String _short(String id) => id.length > 8 ? id.substring(0, 8) : id;
 
   String _memberName(String id) {
-    final m = w.entityDirectory.member(id);
+    final m = w.services.entityDirectory.member(id);
     final name = m?['displayName'] ?? m?['name'];
     return name is String && name.isNotEmpty ? name : _short(id);
   }
 
   String _agentName(String id) {
-    final a = w.entityDirectory.agent(id);
+    final a = w.services.entityDirectory.agent(id);
     final name = a?['displayName'] ?? a?['name'];
     return name is String && name.isNotEmpty ? name : _short(id);
   }
@@ -718,7 +718,7 @@ class _MessageActionCardState extends State<MessageActionCard> {
         final computer =
             action['requiredComputer'] ?? action['suggestedComputer'];
         final machine = computer is String
-            ? w.entityDirectory.computer(computer)
+            ? w.services.entityDirectory.computer(computer)
             : null;
         final description = action['description'];
         return [

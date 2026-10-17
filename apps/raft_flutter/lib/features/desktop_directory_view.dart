@@ -86,7 +86,7 @@ class _DesktopDirectoryViewState extends State<DesktopDirectoryView> {
     _listened?.removeListener(workspaceChanged);
     _directory?.removeListener(directoryChanged);
     _listened = w..addListener(workspaceChanged);
-    _directory = w.entityDirectory..addListener(directoryChanged);
+    _directory = w.services.entityDirectory..addListener(directoryChanged);
     _events?.cancel();
     liveActivity.clear();
     _liveSeq.clear();
@@ -103,7 +103,7 @@ class _DesktopDirectoryViewState extends State<DesktopDirectoryView> {
       if (seq != null) _liveSeq[id] = seq;
       setState(() => liveActivity[id] = activity as String);
     });
-    w.entityDirectory.ensure(waitKinds, retryFailed: true);
+    w.services.entityDirectory.ensure(waitKinds, retryFailed: true);
   }
 
   void workspaceChanged() {
@@ -119,7 +119,7 @@ class _DesktopDirectoryViewState extends State<DesktopDirectoryView> {
     _authority = authority;
     agentMenu.close();
     collapsedMachineGroups.clear();
-    w.entityDirectory.ensure(waitKinds);
+    w.services.entityDirectory.ensure(waitKinds);
   }
 
   void directoryChanged() {
@@ -147,11 +147,11 @@ class _DesktopDirectoryViewState extends State<DesktopDirectoryView> {
   }
 
   List<Map<String, dynamic>> rows(WorkspaceEntityKind kind) =>
-      w.server == null ? const [] : w.entityDirectory.rows(kind);
+      w.server == null ? const [] : w.services.entityDirectory.rows(kind);
 
   /// After the user's own creation the affected list is re-read in place.
   Future<void> reload(WorkspaceEntityKind kind) =>
-      w.entityDirectory.refresh(kind, force: true);
+      w.services.entityDirectory.refresh(kind, force: true);
 
   Future<void> refreshDirectory() =>
       Future.wait([for (final kind in waitKinds) reload(kind)]);
@@ -290,7 +290,7 @@ class _DesktopDirectoryViewState extends State<DesktopDirectoryView> {
   Widget computerRow(Map<String, dynamic> m) {
     final id = m['id'];
     if (id is! String) return const SizedBox.shrink();
-    final latest = w.entityDirectory.latestComputerVersion;
+    final latest = w.services.entityDirectory.latestComputerVersion;
     final available = computerAvailableVersion(m, latest);
     final (label, offline) = computerRunLabel(m);
     final target = DesktopContentTarget(DesktopContentKind.computer, id);
@@ -321,9 +321,9 @@ class _DesktopDirectoryViewState extends State<DesktopDirectoryView> {
   /// rows (attached-by-me first, like sidebarMachineOrder.ts), and the
   /// skeleton / "No computers yet" states.
   Widget computersList(RaftTokens t, List<Map<String, dynamic>> rows) {
-    final loading = !w.entityDirectory.settled(WorkspaceEntityKind.computers);
+    final loading = !w.services.entityDirectory.settled(WorkspaceEntityKind.computers);
     final error =
-        w.entityDirectory.state(WorkspaceEntityKind.computers).error != null;
+        w.services.entityDirectory.state(WorkspaceEntityKind.computers).error != null;
     final ordered = [
       ...rows.where((m) => m['computerAttachedByCurrentUser'] == true),
       ...rows.where((m) => m['computerAttachedByCurrentUser'] != true),
@@ -407,7 +407,7 @@ class _DesktopDirectoryViewState extends State<DesktopDirectoryView> {
   @override
   Widget build(BuildContext context) {
     final t = RaftTokens.of(context);
-    final directory = w.entityDirectory;
+    final directory = w.services.entityDirectory;
     final loading = waitKinds.any((kind) => !directory.settled(kind));
     final computers = w.can('viewMachines')
         ? rows(WorkspaceEntityKind.computers)

@@ -11,6 +11,7 @@ import '../data/workspace_cache_codec.dart';
 import 'message_history.dart' show HistoryOperationOrder;
 import 'history_size_counters.dart';
 import 'history_evictions.dart';
+import 'history_retention.dart';
 import 'device_storage.dart';
 
 /// Retention shares the message connection, permission purges and revision
@@ -25,6 +26,7 @@ class SqliteHistoryCapacity implements HistoryCapacity {
     required this.now,
     required this.defaultBudget,
     this.automatic = true,
+    this.hardLimitEnabled = true,
     this.pending,
     this.availableSpace = availableDeviceStorage,
     this.coverageChanged,
@@ -35,10 +37,11 @@ class SqliteHistoryCapacity implements HistoryCapacity {
   final Future<int> Function(MessageHistoryScope) advance;
   final DateTime Function() now;
   final int defaultBudget;
-  final bool automatic;
+  final bool automatic, hardLimitEnabled;
   final Future<int?> Function(String path) availableSpace;
   final void Function()? coverageChanged;
   late final _counters = HistorySizeCounters(db);
+  late final _retention = HistoryRetention(db, now);
   Future<void>? _initializing;
   final _retries = <HistoryAccount, int>{};
   final _retryTimers = <HistoryAccount, RaftIdleTimer>{};
@@ -47,6 +50,8 @@ class SqliteHistoryCapacity implements HistoryCapacity {
   final _pending = <HistoryAccount>{};
   final _dirty = <HistoryAccount, int>{};
   final _blocked = <HistoryAccount>{};
+  final _hardFull = <HistoryAccount>{};
+  final _refusedBytes = <HistoryAccount, int>{};
   final _unavailable = <HistoryAccount>{};
   final _maintenance = <HistoryAccount, Future<HistoryDiskUsage>>{};
   // Writes call changed() from a Drift transaction zone. A timer created in
@@ -71,6 +76,7 @@ class SqliteHistoryCapacity implements HistoryCapacity {
     await db.customStatement('PRAGMA wal_autocheckpoint=256');
     await db.customStatement('PRAGMA journal_size_limit=$walLimit');
     await _counters.openNow();
+    await _retention.migrateNow();
     await db.customStatement(
       '''CREATE TEMP TABLE IF NOT EXISTS history_protected (
       server TEXT NOT NULL, channel TEXT NOT NULL, id TEXT NOT NULL,
@@ -114,6 +120,8 @@ class SqliteHistoryCapacity implements HistoryCapacity {
     _pending.clear();
     _dirty.clear();
     _blocked.clear();
+    _hardFull.clear();
+    _refusedBytes.clear();
     _unavailable.clear();
     _maintenance.clear();
     _retries.clear();
@@ -128,6 +136,8 @@ class SqliteHistoryCapacity implements HistoryCapacity {
     _pending.remove(account);
     _dirty.remove(account);
     _blocked.remove(account);
+    _hardFull.remove(account);
+    _refusedBytes.remove(account);
     _unavailable.remove(account);
     _maintenance.remove(account);
     _retries.remove(account);
@@ -135,10 +145,36 @@ class SqliteHistoryCapacity implements HistoryCapacity {
     if (_pending.isEmpty) _timer.cancel();
   }
 
-  void admitNow(MessageHistoryScope scope, int addedBytes) {
+  Future<void> admitNow(MessageHistoryScope scope, int addedBytes) async {
+    if (hardLimitEnabled && addedBytes > 0) {
+      final account = HistoryAccount(scope.origin, scope.principal);
+      final usage = await _usageNow(account, physical: false);
+      final free = await availableSpace(await _pathNow());
+      if (usage.budget > 0 &&
+              usage.retainedCharge + (addedBytes * 3 + 1) ~/ 2 >
+                  usage.budget * 3 ~/ 2 ||
+          free != null && free - addedBytes < (1 << 30)) {
+        _hardFull.add(account);
+        _refusedBytes[account] = addedBytes;
+        throw const HistoryCapacityExceeded();
+      }
+      _hardFull.remove(account);
+      _refusedBytes.remove(account);
+    }
     if (addedBytes > 0 &&
         _blocked.contains(HistoryAccount(scope.origin, scope.principal))) {
-      _retryLater(HistoryAccount(scope.origin, scope.principal));
+      final a = HistoryAccount(scope.origin, scope.principal);
+      final liveHold = [..._owners.values, ?pending].any(
+        (read) => read().any(
+          (s) =>
+              s.account == a &&
+              s.server == scope.server &&
+              s.channel == scope.channel &&
+              s.wholeChannel,
+        ),
+      );
+      if (liveHold || await _retention.holdsNow(scope)) return;
+      _retryLater(a);
       throw const HistoryCapacityExceeded();
     }
   }
@@ -225,6 +261,13 @@ class SqliteHistoryCapacity implements HistoryCapacity {
   }
 
   @override
+  Future<void> opened(HistoryAccount a, String server, String channel) =>
+      order(() async {
+        await ready();
+        await _retention.openedNow(a, server, channel);
+      });
+
+  @override
   Future<bool> isKept(HistoryAccount a, String server, String channel) =>
       order(() async {
         await ready();
@@ -257,7 +300,19 @@ class SqliteHistoryCapacity implements HistoryCapacity {
   @override
   Future<HistoryDiskUsage> usage(HistoryAccount a) async {
     await _initialize();
-    return order(() => _usageNow(a));
+    final facts = await order(
+      () async => (await _usageNow(a), await _pathNow()),
+    );
+    if (!hardLimitEnabled) return facts.$1;
+    final free = await availableSpace(facts.$2);
+    final refused = _refusedBytes[a] ?? 0;
+    final full =
+        facts.$1.budget > 0 &&
+            facts.$1.retainedCharge + (refused * 3 + 1) ~/ 2 >=
+                facts.$1.budget * 3 ~/ 2 ||
+        free != null && free - refused < (1 << 30);
+    if (!full) _hardFull.remove(a);
+    return facts.$1.withProtectedFull(facts.$1.protectedFull, hardFull: full);
   }
 
   Future<HistoryDiskUsage> _usageNow(
@@ -309,6 +364,7 @@ class SqliteHistoryCapacity implements HistoryCapacity {
       rows: sizes.isEmpty ? 0 : sizes.single.read<int>('rows'),
       pendingCompaction: free > 0,
       protectedFull: protectedFull || _blocked.contains(a),
+      hardFull: _hardFull.contains(a),
     );
   }
 
@@ -547,7 +603,7 @@ class SqliteHistoryCapacity implements HistoryCapacity {
       await db.customStatement('DELETE FROM history_protected');
       await db.customStatement('DELETE FROM history_protected_scopes');
       final held = <(String, String, String)>{};
-      final entire = <(String, String)>{};
+      final entire = await _retention.protectedNow(a);
       for (final read in [..._owners.values, ?pending]) {
         for (final scope in read()) {
           if (scope.account != a) continue;

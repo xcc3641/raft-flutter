@@ -91,18 +91,18 @@ class _AddMembersDialogState extends State<AddMembersDialog> {
     adoptRoster(cachedChannelRoster(w, widget.channelId));
     adoptDirectory();
     seed();
-    w.entityDirectory.addListener(directoryChanged);
+    w.services.entityDirectory.addListener(directoryChanged);
     load();
   }
 
   @override
   void dispose() {
-    w.entityDirectory.removeListener(directoryChanged);
+    w.services.entityDirectory.removeListener(directoryChanged);
     super.dispose();
   }
 
   bool get directoryLoaded {
-    final d = w.entityDirectory;
+    final d = w.services.entityDirectory;
     return d.state(WorkspaceEntityKind.agents).loaded &&
         d.state(WorkspaceEntityKind.members).loaded;
   }
@@ -121,7 +121,7 @@ class _AddMembersDialogState extends State<AddMembersDialog> {
 
   void adoptDirectory() {
     if (!directoryLoaded) return;
-    final d = w.entityDirectory;
+    final d = w.services.entityDirectory;
     members = d.rows(WorkspaceEntityKind.members);
     agents = d.rows(WorkspaceEntityKind.agents);
     peopleKnown = agentsKnown = true;

@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_flutter/features/auth_view.dart';
 import 'package:raft_flutter/features/chat_view.dart';
 import 'package:raft_flutter/features/global_server_selector.dart';
-import 'package:raft_flutter/features/mobile_settings_owner.dart';
 import 'package:raft_flutter/features/workspace_view.dart';
 import 'package:raft_flutter/platform/background_notifications.dart';
 import 'package:raft_client/raft_client.dart';
@@ -129,22 +128,15 @@ Future<RootCache> _cachedBeta(WidgetTester t) async {
   return first.cache;
 }
 
-void _phoneDirect(bool direct) {
-  MobileSettingsPreference.instance.setEnabled(direct);
-  addTearDown(MobileSettingsPreference.instance.resetForTest);
-}
-
 void main() {
-  for (final direct in [false, true]) {
   for (final width in [390.0, 1280.0]) {
     for (final (route, server, channel, message) in [
       ('/s/alpha/channel/beta', 'a', 'beta', 'Message beta'),
       ('/s/beta/channel/cb', 'b', 'cb', 'Accepted b'),
     ]) {
-      testWidgets(
-        'late cold-start Alpha cannot replace $route at $width when direct is $direct',
-        (t) async {
-        _phoneDirect(direct);
+      testWidgets('late cold-start Alpha cannot replace $route at $width', (
+        t,
+      ) async {
         final cache = await _cachedBeta(t);
         final f = _twoChannelFixture(cache: cache);
         final alpha = Completer<dynamic>();
@@ -195,9 +187,8 @@ void main() {
     }
     for (final status in [403, 404]) {
       testWidgets(
-        'cold-start denied Alpha stays unavailable instead of cached Beta $width/$status when direct is $direct',
+        'cold-start denied Alpha stays unavailable instead of cached Beta $width/$status',
         (t) async {
-          _phoneDirect(direct);
           final cache = await _cachedBeta(t);
           final f = _twoChannelFixture(cache: cache);
           f.overrides['GET /messages/channel/alpha'] = (_) => {
@@ -232,14 +223,11 @@ void main() {
       );
     }
   }
-  }
-  for (final direct in [false, true]) {
   for (final width in [390.0, 1280.0]) {
     for (final cachedSession in [false, true]) {
       testWidgets(
-        'cold start routes Alpha over cached Beta $width/cached=$cachedSession when direct is $direct',
+        'cold start routes Alpha over cached Beta $width/cached=$cachedSession',
         (t) async {
-          _phoneDirect(direct);
           final first = _twoChannelFixture();
           await first.mount(t, 'elegant-light', 1280);
           await t.tap(find.byKey(const ValueKey('global-server-a')));
@@ -283,7 +271,6 @@ void main() {
         },
       );
     }
-  }
   }
 
   testWidgets(
@@ -446,73 +433,72 @@ void main() {
   );
 
   for (final direct in [false, true]) {
-  testWidgets(
-    'restart paints cached sidebar and window at the first frame when direct is $direct, then revalidates in place',
-    (t) async {
-      _phoneDirect(direct);
-      final (cache, uri) = await _firstProcess(t);
-      final f = await _restart(t, cache, uri, width: direct ? 390 : 1280);
-      expect(
-        find.byType(MobileChatDirectRead),
-        direct ? findsWidgets : findsNothing,
-      );
-      // No startup response has arrived; every painted frame was already the
-      // workspace with its cached sidebar row and message window.
-      expect(f.surfaces, everyElement('workspace'));
-      expect(f.router(t).currentConfiguration.toString(), uri);
-      expect(find.byType(GlobalServerSelector), findsNothing);
-      expect(find.text('general-a'), findsWidgets);
-      expect(find.text('Accepted a'), findsOneWidget);
-      expect(find.text('Alice'), findsWidgets);
-      expect(f.workspace(t).server!.id, 'a');
-      // A disk-only tail may be stale: no read receipt until revalidated.
-      expect(
-        f.adapter.calls.where((c) => c.path == '/channels/ca/read'),
-        isEmpty,
-      );
-      // Revalidation adds a newer row; the cached row never blanks.
-      final cached =
-          await cache.read(_origin, 'alice', 'a', 'window', 'ca') as Map;
-      // The request may already be in flight over the cached first frame.
-      // Complete that held response instead of replacing its handler later.
-      f.holds['GET /messages/channel/ca']!.complete({
-        'messages': [
-          ...cached['messages'] as List,
-          {
-            'id': 'ma2',
-            'channelId': 'ca',
-            'seq': '2',
-            'senderId': 'alice',
-            'senderName': 'Alice',
-            'content': 'Fresh a',
-            'createdAt': '2026-10-10T00:01:00Z',
-          },
-        ],
-        'hasMore': false,
-        'hasNewer': false,
-      });
-      var blanked = false;
-      f.onFrame = () {
-        if (find.text('Accepted a').evaluate().isEmpty) blanked = true;
-      };
-      await _release(t, f);
-      await f.flush(t);
-      expect(
-        f.adapter.calls.where((c) => c.path == '/messages/channel/ca'),
-        isNotEmpty,
-        reason: 'the cached window is revalidated, not trusted',
-      );
-      expect(
-        f.adapter.calls.where((c) => c.path == '/channels/ca/read'),
-        isNotEmpty,
-      );
-      expect(blanked, isFalse);
-      expect(find.text('Accepted a'), findsOneWidget);
-      expect(find.text('Fresh a'), findsOneWidget);
-      expect(f.surfaces, everyElement('workspace'));
-      await f.close(t);
-    },
-  );
+    testWidgets(
+      'restart paints cached sidebar and window at the first frame when direct is $direct, then revalidates in place',
+      (t) async {
+        final (cache, uri) = await _firstProcess(t);
+        final f = await _restart(t, cache, uri, width: direct ? 390 : 1280);
+        expect(
+          find.byType(MobileChatDirectRead),
+          direct ? findsWidgets : findsNothing,
+        );
+        // No startup response has arrived; every painted frame was already the
+        // workspace with its cached sidebar row and message window.
+        expect(f.surfaces, everyElement('workspace'));
+        expect(f.router(t).currentConfiguration.toString(), uri);
+        expect(find.byType(GlobalServerSelector), findsNothing);
+        expect(find.text('general-a'), findsWidgets);
+        expect(find.text('Accepted a'), findsOneWidget);
+        expect(find.text('Alice'), findsWidgets);
+        expect(f.workspace(t).server!.id, 'a');
+        // A disk-only tail may be stale: no read receipt until revalidated.
+        expect(
+          f.adapter.calls.where((c) => c.path == '/channels/ca/read'),
+          isEmpty,
+        );
+        // Revalidation adds a newer row; the cached row never blanks.
+        final cached =
+            await cache.read(_origin, 'alice', 'a', 'window', 'ca') as Map;
+        // The request may already be in flight over the cached first frame.
+        // Complete that held response instead of replacing its handler later.
+        f.holds['GET /messages/channel/ca']!.complete({
+          'messages': [
+            ...cached['messages'] as List,
+            {
+              'id': 'ma2',
+              'channelId': 'ca',
+              'seq': '2',
+              'senderId': 'alice',
+              'senderName': 'Alice',
+              'content': 'Fresh a',
+              'createdAt': '2026-10-10T00:01:00Z',
+            },
+          ],
+          'hasMore': false,
+          'hasNewer': false,
+        });
+        var blanked = false;
+        f.onFrame = () {
+          if (find.text('Accepted a').evaluate().isEmpty) blanked = true;
+        };
+        await _release(t, f);
+        await f.flush(t);
+        expect(
+          f.adapter.calls.where((c) => c.path == '/messages/channel/ca'),
+          isNotEmpty,
+          reason: 'the cached window is revalidated, not trusted',
+        );
+        expect(
+          f.adapter.calls.where((c) => c.path == '/channels/ca/read'),
+          isNotEmpty,
+        );
+        expect(blanked, isFalse);
+        expect(find.text('Accepted a'), findsOneWidget);
+        expect(find.text('Fresh a'), findsOneWidget);
+        expect(f.surfaces, everyElement('workspace'));
+        await f.close(t);
+      },
+    );
   }
 
   testWidgets('another account on the device never sees the cached window', (

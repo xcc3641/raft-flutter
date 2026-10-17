@@ -534,8 +534,8 @@ class _RuntimeFormDialogState extends State<RuntimeFormDialog> {
     }
     if (widget.onboarding) {
       // The directory's computers paint at once; the read revalidates them.
-      if (w.entityDirectory.state(WorkspaceEntityKind.computers).loaded) {
-        onboardingMachines = w.entityDirectory.rows(
+      if (w.services.entityDirectory.state(WorkspaceEntityKind.computers).loaded) {
+        onboardingMachines = w.services.entityDirectory.rows(
           WorkspaceEntityKind.computers,
         );
       }

@@ -22,6 +22,7 @@ class DriftWorkspaceCache extends GeneratedDatabase
     this.translationRetention = 2000,
     this.historyClock,
     this.historyBudget,
+    this.historyHardLimitEnabled = true,
     this.historyAvailableSpace,
     this.automaticHistoryMaintenance = true,
     this.messageHistoryEnabled = const bool.fromEnvironment(
@@ -33,6 +34,8 @@ class DriftWorkspaceCache extends GeneratedDatabase
   final DateTime Function()? historyClock;
   /// An explicit budget also permits small, real-file capacity fixtures.
   final int? historyBudget;
+  @visibleForTesting
+  final bool historyHardLimitEnabled;
   final Future<int?> Function(String)? historyAvailableSpace;
   @visibleForTesting
   final bool automaticHistoryMaintenance;
@@ -52,6 +55,7 @@ class DriftWorkspaceCache extends GeneratedDatabase
           _ => 2 << 30,
         }),
     automaticMaintenance: automaticHistoryMaintenance,
+    hardLimitEnabled: historyHardLimitEnabled,
     historyAvailableSpace: historyAvailableSpace,
   );
 

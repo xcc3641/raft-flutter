@@ -722,7 +722,7 @@
    "status": "covered",
    "webEntry": "CollapsibleMessageContent button",
    "gate": "preference collapseLongMessages (channel settings)",
-   "flutterEntry": "raft_ui collapsible.dart used by message rows; preference in channel_settings.dart",
+   "flutterEntry": "raft_ui collapsible.dart used by message rows; preference in channel_settings.dart; channel_repository.dart applies versioned display preferences through the controller facade",
    "flutterRefs": [
     {
      "file": "packages/raft_ui/lib/src/collapsible.dart",
@@ -731,6 +731,10 @@
     {
      "file": "apps/raft_flutter/lib/features/channel_settings.dart",
      "needle": "collapseLongMessages"
+    },
+    {
+     "file": "apps/raft_flutter/lib/data/channel_repository.dart",
+     "needle": "void consumeMessageDisplayPrefs(dynamic payload)"
     }
    ],
    "justification": "",
@@ -2155,11 +2159,15 @@
    "status": "covered",
    "webEntry": "channelStore.loadChannels on bootstrap/server switch/realtime resync (background)",
    "gate": "",
-   "flutterEntry": "workspace_controller / RaftClient.channels() with archived=include",
+   "flutterEntry": "workspace_controller.dart server selection / channel_repository.dart refreshChannels() via controller facade; RaftClient.channels() with archived=include",
    "flutterRefs": [
     {
      "file": "packages/raft_client/lib/src/client.dart",
      "needle": "query: dm ? null : {'archived': 'include'}"
+    },
+    {
+     "file": "apps/raft_flutter/lib/data/channel_repository.dart",
+     "needle": "client.channels(),"
     }
    ],
    "justification": "",
@@ -2175,10 +2183,14 @@
    "status": "covered",
    "webEntry": "channelStore.ensureChannel (ChannelRoute, notification click, search result) | readReceiptStore.fetchScope (background)",
    "gate": "",
-   "flutterEntry": "workspace_controller.dart channel refresh / app_root.dart deep link resolve",
+   "flutterEntry": "channel_repository.dart refreshChannel() via controller facade; workspace_controller.dart resolveConversationChannel() for unknown/deep-link channels",
    "flutterRefs": [
     {
      "file": "apps/raft_flutter/lib/data/workspace_controller.dart",
+     "needle": "final data = await client.get('/channels/$id');"
+    },
+    {
+     "file": "apps/raft_flutter/lib/data/channel_repository.dart",
      "needle": "final data = await client.get('/channels/$id');"
     }
    ],
@@ -2759,7 +2771,7 @@
    "status": "partial",
    "webEntry": "Sidebar.tsx ChannelRow / DmRow / AgentDmRow",
    "gate": "",
-   "flutterEntry": "workspace_view.dart channel row passes unread, joined, activityMuted, hasDraft, mention; agent presence on avatar",
+   "flutterEntry": "workspace_view.dart channel row passes unread, joined, activityMuted, hasDraft, mention; agent presence on avatar; channel_repository.dart owns the directory and channel mute projections",
    "flutterRefs": [
     {
      "file": "apps/raft_flutter/lib/features/workspace_view.dart",
@@ -2768,6 +2780,10 @@
     {
      "file": "apps/raft_flutter/lib/features/workspace_view.dart",
      "needle": "hasDraft: (w.drafts[c.id] ?? '').isNotEmpty"
+    },
+    {
+     "file": "apps/raft_flutter/lib/data/channel_repository.dart",
+     "needle": "void setActivityMuteState(String id, Map<String, dynamic> state)"
     }
    ],
    "justification": "No Slack provider badge on bridged channel rows (c.bridge.provider is not read).",
@@ -2903,11 +2919,15 @@
    "status": "covered",
    "webEntry": "channelStore.loadDMChannels / addOrRefreshDM (background)",
    "gate": "",
-   "flutterEntry": "RaftClient.channels(dm: true)",
+   "flutterEntry": "workspace_controller.dart server selection / channel_repository.dart refreshChannels() via controller facade; RaftClient.channels(dm: true)",
    "flutterRefs": [
     {
      "file": "packages/raft_client/lib/src/client.dart",
      "needle": "dm ? '/channels/dm' : '/channels',"
+    },
+    {
+     "file": "apps/raft_flutter/lib/data/channel_repository.dart",
+     "needle": "client.channels(dm: true),"
     }
    ],
    "justification": "",
@@ -10553,15 +10573,15 @@
    "status": "covered",
    "webEntry": "ImageLightbox > Download icon | ChannelFilesPanel > 'Download file' / file preview | MessageItem attachment card > 'Download {filename}' icon, inline video/audio players (background URL load) | openDocumentPreview/openMediaPreview (PDF, CSV, XLSX, markdown, text, HTML, video, audio preview shell > Download)",
    "gate": "any member who can read the channel; guests read-only",
-   "flutterEntry": "workspace_controller.dart attachmentUrl() used by attachment_view.dart (card download/inline media), source_channel_files_view.dart ('Download file'), attachment_preview_dialog.dart, media_image_page.dart (Download)",
+   "flutterEntry": "attachment_media.dart url(); attachment_transfers.dart calls controller.attachmentMedia.url(); used by attachment_view.dart (card download/inline media), source_channel_files_view.dart ('Download file'), attachment_preview_dialog.dart, media_image_page.dart (Download)",
    "flutterRefs": [
     {
-     "file": "apps/raft_flutter/lib/data/workspace_controller.dart",
+     "file": "apps/raft_flutter/lib/data/attachment_media.dart",
      "needle": "'/attachments/${Uri.encodeComponent(id)}/url'"
     },
     {
      "file": "apps/raft_flutter/lib/features/attachment_transfers.dart",
-     "needle": "controller.attachmentUrl("
+     "needle": "controller.attachmentMedia.url("
     },
     {
      "file": "apps/raft_flutter/lib/features/source_channel_files_view.dart",
@@ -10664,10 +10684,10 @@
    "status": "covered",
    "webEntry": "attachmentPreviewGate load() before opening previews",
    "gate": "none",
-   "flutterEntry": "workspace_controller.dart attachmentPreviewEnabled() (2-minute memory)",
+   "flutterEntry": "workspace_controller.dart attachmentPreviewEnabled() delegates to attachment_media.dart previewEnabled() (2-minute memory)",
    "flutterRefs": [
     {
-     "file": "apps/raft_flutter/lib/data/workspace_controller.dart",
+     "file": "apps/raft_flutter/lib/data/attachment_media.dart",
      "needle": "'/messages/attachment-preview/enabled'"
     }
    ],
@@ -10768,10 +10788,10 @@
    "status": "covered",
    "webEntry": "inlineAttachmentUrlCache fetchInlineAttachmentUrls (automatic when rows render)",
    "gate": "none",
-   "flutterEntry": "workspace_controller.dart _fetchAttachmentUrls (coalesced foreground / background prefetch)",
+   "flutterEntry": "attachment_media.dart _fetchAttachmentUrls (coalesced foreground / background prefetch)",
    "flutterRefs": [
     {
-     "file": "apps/raft_flutter/lib/data/workspace_controller.dart",
+     "file": "apps/raft_flutter/lib/data/attachment_media.dart",
      "needle": "'/attachments/urls'"
     }
    ],
@@ -11010,7 +11030,7 @@
    ],
    "justification": "Intentional difference (owner decision 2026-10-14, docs/parity.md 'Video cards'): on a phone the message card has no inline player; it shows the poster at the video's real shape with a play button and the length, and a tap anywhere opens the media viewer, which plays. Desktop keeps Web's inline player.",
    "impact": "Phone users start a video with one tap into the viewer instead of playing in the message list; no player (decoder) is held while scrolling.",
-   "size":"S"
+   "size": "S"
   },
   {
    "kind": "ui",
@@ -11507,11 +11527,15 @@
    "status": "covered",
    "webEntry": "ChatPanel effect on channel open (background hydrate; badge 'Activity muted' in header and Mute switch in settings drawer)",
    "gate": "joined channel/private/joint",
-   "flutterEntry": "channel_settings.dart loads it when the settings sheet opens; row/header mute state comes from the channel list activityMuted flag",
+   "flutterEntry": "channel_settings.dart loads it when the settings sheet opens; row/header mute state comes from the channel list activityMuted flag; channel_repository.dart applies accepted channel notification preference state",
    "flutterRefs": [
     {
      "file": "apps/raft_flutter/lib/features/channel_settings.dart",
      "needle": "/channels/$id/notification-settings"
+    },
+    {
+     "file": "apps/raft_flutter/lib/data/channel_repository.dart",
+     "needle": "bool applyNotificationPrefs(Map<String, dynamic> accepted)"
     }
    ],
    "justification": "",
@@ -11625,10 +11649,10 @@
    "status": "covered",
    "webEntry": "messageStore.loadUnreadCounts (bootstrap/focus/resync, background)",
    "gate": "",
-   "flutterEntry": "workspace_controller.dart refreshUnread",
+   "flutterEntry": "conversation_read_repository.dart refreshUnread() via workspace_controller.dart facade",
    "flutterRefs": [
     {
-     "file": "apps/raft_flutter/lib/data/workspace_controller.dart",
+     "file": "apps/raft_flutter/lib/data/conversation_read_repository.dart",
      "needle": "'/channels/unread'"
     }
    ],
@@ -11669,10 +11693,10 @@
    "status": "covered",
    "webEntry": "messageStore.flushPendingRead (background while viewing a channel)",
    "gate": "",
-   "flutterEntry": "workspace_controller.dart read-receipt flush after rendering rows",
+   "flutterEntry": "conversation_read_repository.dart markRead via workspace_controller.dart receiver dispatch",
    "flutterRefs": [
     {
-     "file": "apps/raft_flutter/lib/data/workspace_controller.dart",
+     "file": "apps/raft_flutter/lib/data/conversation_read_repository.dart",
      "needle": "'/channels/$id/read'"
     }
    ],

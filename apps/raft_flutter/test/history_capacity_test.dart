@@ -124,6 +124,7 @@ void main() {
     final cache = DriftWorkspaceCache(
       NativeDatabase.createInBackground(file),
       historyBudget: 512 << 10,
+      historyHardLimitEnabled: false,
       automaticHistoryMaintenance: false,
     );
     addTearDown(() async {
@@ -230,10 +231,11 @@ void main() {
     expect(result.walBytes, 0);
   });
 
-  test('a fully protected budget rejects growth, retains readable rows and recovers after release', () async {
+  test('a protected conversation can grow above the target while unprotected growth waits', () async {
     final cache = DriftWorkspaceCache(
       NativeDatabase.memory(),
       historyBudget: 128 << 10,
+      historyHardLimitEnabled: false,
       automaticHistoryMaintenance: false,
     );
     addTearDown(cache.close);
@@ -254,8 +256,10 @@ void main() {
     final full = await cap.maintain(account);
     expect(full.protectedFull, isTrue);
     expect(full.rows, 200);
+    await db.acceptEvents(scope('chat'), rows('chat', 201, 201));
+    expect(await db.readContext(scope('chat'), 'chat-201', radius: 0), isNotNull);
     await expectLater(
-      db.acceptEvents(scope('chat'), rows('chat', 201, 201)),
+      db.acceptEvents(scope('other'), rows('other', 1, 1)),
       throwsA(isA<HistoryCapacityExceeded>()),
     );
     expect((await db.readPage(scope('chat')))!.rows, hasLength(50));
@@ -276,6 +280,7 @@ void main() {
       final cache = DriftWorkspaceCache(
         NativeDatabase.memory(),
         historyBudget: 1 << 20,
+        historyHardLimitEnabled: false,
         historyClock: () => now,
         automaticHistoryMaintenance: false,
       );
@@ -323,6 +328,7 @@ void main() {
       final cache = DriftWorkspaceCache(
         NativeDatabase.memory(),
         historyBudget: 128 << 10,
+        historyHardLimitEnabled: false,
         automaticHistoryMaintenance: false,
       );
       addTearDown(cache.close);
@@ -355,6 +361,7 @@ void main() {
     final cache = DriftWorkspaceCache(
       NativeDatabase.memory(),
       historyBudget: 128 << 10,
+      historyHardLimitEnabled: false,
       automaticHistoryMaintenance: false,
     );
     addTearDown(cache.close);
@@ -497,6 +504,7 @@ void main() {
       final cache = DriftWorkspaceCache(
         NativeDatabase.memory(),
         historyBudget: 128 << 10,
+        historyHardLimitEnabled: false,
         automaticHistoryMaintenance: false,
       );
       addTearDown(cache.close);
@@ -547,6 +555,7 @@ void main() {
           NativeDatabase(file),
           automaticHistoryMaintenance: false,
           historyAvailableSpace: (_) async => free,
+          historyHardLimitEnabled: false,
         );
         addTearDown(() async {
           await cache.close();
@@ -589,6 +598,7 @@ void main() {
       final cache = DriftWorkspaceCache(
         NativeDatabase.memory(),
         historyBudget: 128 << 10,
+        historyHardLimitEnabled: false,
         automaticHistoryMaintenance: false,
       );
       addTearDown(cache.close);

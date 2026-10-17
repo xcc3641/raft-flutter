@@ -139,7 +139,7 @@ FutureOr<List<IncomingShareTarget>?> cachedShareTargets(
   RaftRecord server,
 ) {
   List<Map> rows(WorkspaceEntityKind kind) =>
-      w.entityDirectory.rows(kind).cast<Map>();
+      w.services.entityDirectory.rows(kind).cast<Map>();
   if (server.id == w.server?.id) {
     final channels = [...w.channels, ...w.dms];
     if (channels.isEmpty) return null;

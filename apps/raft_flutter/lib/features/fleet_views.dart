@@ -240,7 +240,7 @@ class _FleetViewState extends State<FleetView> {
   /// clears itself on identity change and patches realtime events in place.
   List<Map<String, dynamic>> get rows => [
     if (w.server != null && w.client.user != null)
-      for (final row in w.entityDirectory.rows(kind))
+      for (final row in w.services.entityDirectory.rows(kind))
         if (!widget.attentionOnly ||
             widget.computers &&
                 row['isComputer'] == true &&
@@ -254,7 +254,7 @@ class _FleetViewState extends State<FleetView> {
     scope.revoked = true;
     scope = _FleetScope(w);
     if (w.server != null && w.client.user != null) {
-      w.entityDirectory.ensure([kind]);
+      w.services.entityDirectory.ensure([kind]);
     }
     setState(() => actionError = null);
   }
@@ -267,7 +267,7 @@ class _FleetViewState extends State<FleetView> {
     _listened?.removeListener(authorityChanged);
     _directory?.removeListener(directoryChanged);
     _listened = w..addListener(authorityChanged);
-    _directory = w.entityDirectory..addListener(directoryChanged);
+    _directory = w.services.entityDirectory..addListener(directoryChanged);
   }
 
   @override
@@ -276,7 +276,7 @@ class _FleetViewState extends State<FleetView> {
     scope = _FleetScope(w);
     bind();
     if (w.server != null && w.client.user != null) {
-      w.entityDirectory.ensure([kind], retryFailed: true);
+      w.services.entityDirectory.ensure([kind], retryFailed: true);
     }
   }
 
@@ -288,7 +288,7 @@ class _FleetViewState extends State<FleetView> {
       scope.revoked = true;
       scope = _FleetScope(w);
       actionError = null;
-      w.entityDirectory.ensure([kind]);
+      w.services.entityDirectory.ensure([kind]);
     }
   }
 
@@ -303,7 +303,7 @@ class _FleetViewState extends State<FleetView> {
   /// Explicit refresh and the user's own mutations re-read the list in place.
   Future<void> load() async {
     if (!current(scope) || w.server == null || w.client.user == null) return;
-    await w.entityDirectory.refresh(kind, force: true);
+    await w.services.entityDirectory.refresh(kind, force: true);
   }
 
   Future<void> create() async {
@@ -339,8 +339,8 @@ class _FleetViewState extends State<FleetView> {
   @override
   Widget build(BuildContext context) {
     final rows = this.rows;
-    final state = w.entityDirectory.state(kind);
-    final loading = !w.entityDirectory.settled(kind);
+    final state = w.services.entityDirectory.state(kind);
+    final loading = !w.services.entityDirectory.settled(kind);
     final error =
         actionError ??
         (state.error == null
@@ -403,13 +403,13 @@ class _FleetViewState extends State<FleetView> {
               offline: computerRunLabel(row).$2,
               availableVersion: computerAvailableVersion(
                 row,
-                w.entityDirectory.latestComputerVersion,
+                w.services.entityDirectory.latestComputerVersion,
               ),
               diskLow: computerDiskLow(row) != null,
               dot:
                   computerAvailableVersion(
                         row,
-                        w.entityDirectory.latestComputerVersion,
+                        w.services.entityDirectory.latestComputerVersion,
                       ) !=
                       null
                   ? RaftComputerDot.upgrade
@@ -690,8 +690,8 @@ class _FleetDetailState extends State<FleetDetail> {
   bool listed = false;
 
   Map<String, dynamic>? get directoryRow => widget.computers
-      ? w.entityDirectory.computer(id)
-      : w.entityDirectory.agent(id);
+      ? w.services.entityDirectory.computer(id)
+      : w.services.entityDirectory.agent(id);
 
   /// The visible row never blanks: without any accepted source it keeps the
   /// row it already shows.
@@ -704,7 +704,7 @@ class _FleetDetailState extends State<FleetDetail> {
 
   void directoryChanged() {
     if (!current) return;
-    final directory = w.entityDirectory;
+    final directory = w.services.entityDirectory;
     final failure = directory.state(kind).error;
     if (failure is RaftApiException && [401, 403].contains(failure.status)) {
       closeProfile();
@@ -745,14 +745,14 @@ class _FleetDetailState extends State<FleetDetail> {
       if (cached is Map<String, dynamic>) detail = cached;
     }
     row = compose();
-    if (w.entityDirectory.state(WorkspaceEntityKind.computers).loaded) {
-      machines = w.entityDirectory.rows(WorkspaceEntityKind.computers);
+    if (w.services.entityDirectory.state(WorkspaceEntityKind.computers).loaded) {
+      machines = w.services.entityDirectory.rows(WorkspaceEntityKind.computers);
     }
-    w.entityDirectory.addListener(directoryChanged);
+    w.services.entityDirectory.addListener(directoryChanged);
     w.addListener(authorityChanged);
     // The shared directory is read only when this scope has not settled it;
     // a revisit renders the accepted rows with no list request.
-    w.entityDirectory.ensure([
+    w.services.entityDirectory.ensure([
       kind,
       if (!widget.computers) WorkspaceEntityKind.computers,
     ], retryFailed: true);
@@ -798,7 +798,7 @@ class _FleetDetailState extends State<FleetDetail> {
     scope.revoked = true;
     ++request;
     w.removeListener(authorityChanged);
-    w.entityDirectory.removeListener(directoryChanged);
+    w.services.entityDirectory.removeListener(directoryChanged);
     timer?.cancel();
     subscription?.cancel();
     super.dispose();
@@ -860,13 +860,13 @@ class _FleetDetailState extends State<FleetDetail> {
   /// list in place and, for agents, the detail fields.
   Future<void> load() async {
     if (!current) return;
-    final list = w.entityDirectory.refresh(kind, force: true);
+    final list = w.services.entityDirectory.refresh(kind, force: true);
     await Future.wait([list, if (!widget.computers) loadDetail()]);
     if (!current) return;
-    final failure = w.entityDirectory.state(kind).error;
+    final failure = w.services.entityDirectory.state(kind).error;
     if (widget.computers &&
         failure == null &&
-        w.entityDirectory.state(kind).loaded &&
+        w.services.entityDirectory.state(kind).loaded &&
         directoryRow == null) {
       closeProfile();
       return;
@@ -1334,7 +1334,7 @@ class _FleetDetailState extends State<FleetDetail> {
           if (!valid()) return;
           setState(() => row = next);
           unawaited(
-            w.entityDirectory.refresh(WorkspaceEntityKind.agents, force: true),
+            w.services.entityDirectory.refresh(WorkspaceEntityKind.agents, force: true),
           );
         },
       ),
@@ -1446,7 +1446,7 @@ class _FleetDetailState extends State<FleetDetail> {
       !widget.computers &&
       (gone ||
           row['deletedAt'] != null ||
-          (w.entityDirectory.state(kind).loaded && directoryRow == null));
+          (w.services.entityDirectory.state(kind).loaded && directoryRow == null));
 
   @override
   Widget build(BuildContext context) => !current

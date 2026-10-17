@@ -245,7 +245,7 @@ class _ChannelMembersState extends State<ChannelMembers> {
 
   /// Agent rows (presence, profile seed) from the workspace directory.
   Map<String, Map<String, dynamic>> get agentRows => {
-    for (final a in w.entityDirectory.rows(WorkspaceEntityKind.agents))
+    for (final a in w.services.entityDirectory.rows(WorkspaceEntityKind.agents))
       '${a['id']}': a,
   };
   Set<String> get _inChannel => {
@@ -292,7 +292,7 @@ class _ChannelMembersState extends State<ChannelMembers> {
       rosterKnown = true;
     }
     _feed.addListener(_directoryChanged);
-    w.entityDirectory.addListener(_directoryChanged);
+    w.services.entityDirectory.addListener(_directoryChanged);
     load();
     loadRoleActionsFlag();
   }
@@ -330,7 +330,7 @@ class _ChannelMembersState extends State<ChannelMembers> {
   void dispose() {
     _feed.removeListener(_directoryChanged);
     _feed.dispose();
-    w.entityDirectory.removeListener(_directoryChanged);
+    w.services.entityDirectory.removeListener(_directoryChanged);
     search.dispose();
     super.dispose();
   }
@@ -578,7 +578,7 @@ class _ChannelMembersState extends State<ChannelMembers> {
         avatarUrl: m['avatarUrl'] as String?,
       );
       final display = kind == 'agent'
-          ? channelMemberAgentDisplay(m, directory: w.entityDirectory.agent(id))
+          ? channelMemberAgentDisplay(m, directory: w.services.entityDirectory.agent(id))
           : null;
       final presence = display == null
           ? null
@@ -599,9 +599,9 @@ class _ChannelMembersState extends State<ChannelMembers> {
         secondary: display != null
             ? agentDisplayText(
                 display,
-                lastSeenAt: w.entityDirectory.agent(id)?['lastSeenAt'] is String
+                lastSeenAt: w.services.entityDirectory.agent(id)?['lastSeenAt'] is String
                     ? DateTime.tryParse(
-                        w.entityDirectory.agent(id)!['lastSeenAt'] as String,
+                        w.services.entityDirectory.agent(id)!['lastSeenAt'] as String,
                       )
                     : m['lastSeenAt'] is String
                     ? DateTime.tryParse(m['lastSeenAt'] as String)
@@ -678,7 +678,7 @@ class _ChannelMembersState extends State<ChannelMembers> {
             ? channelMemberPresence(
                 // ignore: raft_lints/avoid_render_index_assertion -- Guarded by `agentRows[c.id] != null` on the line above.
                 agentRows[c.id]!,
-                directory: w.entityDirectory.agent(c.id),
+                directory: w.services.entityDirectory.agent(c.id),
               )
             : null,
       ),

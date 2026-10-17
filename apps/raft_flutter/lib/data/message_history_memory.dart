@@ -11,10 +11,10 @@ class MessageHistoryMemory {
     Object owner,
     void Function() capture,
   ) =>
-      MessageHistoryPages.storage(w.cache)?.memory
+      MessageHistoryPages.storage(w.deviceStore.cache)?.memory
           .samplePosition(owner, capture);
   static void cancelSample(WorkspaceController w, Object owner) =>
-      MessageHistoryPages.storage(w.cache)?.memory.cancelSample(owner);
+      MessageHistoryPages.storage(w.deviceStore.cache)?.memory.cancelSample(owner);
   static void attach(WorkspaceController w, MessageHistoryStorage storage) {
     if (w.presentationSource != null) return;
     storage.memory.register(
@@ -37,7 +37,7 @@ class MessageHistoryMemory {
           w.threadLoading,
           w.messageWindows.accepted[w.channel?.id],
           w.messageWindows.accepted[w.threadChannelId],
-          w.cacheWritable,
+          w.deviceStore.writable,
           w.highlightedMessageId,
         ),
         capture: () => capture(w, storage),
@@ -58,7 +58,7 @@ class MessageHistoryMemory {
         main = w.channel?.id,
         thread = w.threadChannelId;
     bool current() =>
-        w.cacheWritable &&
+        w.deviceStore.writable &&
         generation == w.ledger.generation &&
         origin == w.client.origin &&
         principal == w.client.user?.id &&

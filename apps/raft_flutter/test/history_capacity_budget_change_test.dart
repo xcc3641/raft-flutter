@@ -19,6 +19,7 @@ void main() {
     final db = DriftWorkspaceCache(
       NativeDatabase.memory(),
       historyBudget: 128 << 10,
+      historyHardLimitEnabled: false,
       automaticHistoryMaintenance: false,
     );
     addTearDown(db.close);

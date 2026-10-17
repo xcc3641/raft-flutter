@@ -240,8 +240,8 @@ class _ComputerDetailPanelState extends State<ComputerDetailPanel> {
   @override
   void initState() {
     super.initState();
-    w.entityDirectory.addListener(_changed);
-    w.entityDirectory.ensure([WorkspaceEntityKind.agents]);
+    w.services.entityDirectory.addListener(_changed);
+    w.services.entityDirectory.ensure([WorkspaceEntityKind.agents]);
   }
 
   @override
@@ -255,7 +255,7 @@ class _ComputerDetailPanelState extends State<ComputerDetailPanel> {
 
   @override
   void dispose() {
-    w.entityDirectory.removeListener(_changed);
+    w.services.entityDirectory.removeListener(_changed);
     super.dispose();
   }
 
@@ -279,7 +279,7 @@ class _ComputerDetailPanelState extends State<ComputerDetailPanel> {
   }
 
   List<Map<String, dynamic>> get agents => [
-    for (final a in w.entityDirectory.rows(WorkspaceEntityKind.agents))
+    for (final a in w.services.entityDirectory.rows(WorkspaceEntityKind.agents))
       if (a['deletedAt'] == null && a['machineId'] == id) a,
   ];
 
@@ -385,7 +385,7 @@ class _ComputerDetailPanelState extends State<ComputerDetailPanel> {
   RaftComputerDetailData data() {
     final fact = computerVersionFact(
       m,
-      w.entityDirectory.latestComputerVersion,
+      w.services.entityDirectory.latestComputerVersion,
     );
     final runtimes = [
       for (final r in (m['runtimes'] as List? ?? const [])) '$r',
@@ -467,7 +467,7 @@ class _ComputerDetailPanelState extends State<ComputerDetailPanel> {
   }
 
   Future<void> _refreshComputers() =>
-      w.entityDirectory.refresh(WorkspaceEntityKind.computers, force: true);
+      w.services.entityDirectory.refresh(WorkspaceEntityKind.computers, force: true);
 
   Future<void> _patch(Map<String, dynamic> body) async {
     await w.command('PATCH', '/servers/$serverId/machines/$id', data: body);

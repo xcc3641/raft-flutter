@@ -17,7 +17,7 @@ import 'private_route_guard.dart';
 /// the same identity count as settled data (painted at the first frame and
 /// revalidated in place); see [WorkspaceEntityDirectory].
 class MessageReferenceDirectory extends ChangeNotifier {
-  MessageReferenceDirectory(this.w) : store = w.entityDirectory {
+  MessageReferenceDirectory(this.w) : store = w.services.entityDirectory {
     observed = directoryAuthority(w);
     store.addListener(storeChanged);
     w.addListener(changed);

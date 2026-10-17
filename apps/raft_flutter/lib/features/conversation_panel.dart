@@ -143,7 +143,7 @@ class _ConversationPanelState extends State<ConversationPanel> {
     SourceChannelImageRendition rendition,
   ) {
     if (!authorized()) return null;
-    final lease = w.peekAttachmentImage(
+    final lease = w.attachmentMedia.peekImage(
       _imageKey(file, rendition),
       authorized: authorized,
     );
@@ -168,7 +168,7 @@ class _ConversationPanelState extends State<ConversationPanel> {
     final usesThumbnail = _usesThumbnail(file, rendition);
     final thumbnail = file.metadata['thumbnailUrl'];
     final key = _imageKey(file, rendition);
-    final lease = w.acquireAttachmentImage(
+    final lease = w.attachmentMedia.acquireImage(
       key,
       authorized: authorized,
       // The 56px row tile takes whichever version is already on disk; a
@@ -179,7 +179,7 @@ class _ConversationPanelState extends State<ConversationPanel> {
         if (usesThumbnail) {
           url = thumbnail;
         } else {
-          url = await w.attachmentUrl(
+          url = await w.attachmentMedia.url(
             file.id,
             disposition: null,
             channelId: file.channelId,

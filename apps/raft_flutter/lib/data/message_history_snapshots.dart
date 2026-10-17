@@ -68,7 +68,7 @@ class MessageHistorySnapshots {
     required String Function(String?) replyToken,
     required Future<void> Function(String, String, dynamic) write,
   }) {
-    if (!w.cacheWritable ||
+    if (!w.deviceStore.writable ||
         w.channelLoading && w.messageWindows.isContext(id) ||
         !thread && w.channel == null ||
         (thread ? id != w.threadChannelId : id != w.channel!.id) ||
@@ -100,7 +100,7 @@ class MessageHistorySnapshots {
       'windowKind': 'tail',
       'authority': authority,
       'parentChannelId': thread ? w.threadParentChannelId : id,
-      'messages': MessageHistoryPages.snapshotRows(w.cache, rows),
+      'messages': MessageHistoryPages.snapshotRows(w.deviceStore.cache, rows),
       'hasMore': thread ? w.threadHasMore : w.hasMore,
       'historyLimited': thread ? w.threadHistoryLimited : w.historyLimited,
     };
@@ -137,7 +137,7 @@ class MessageHistorySnapshots {
       replyToken(parentId),
     );
     bool current() =>
-        w.cacheWritable &&
+        w.deviceStore.writable &&
         scope ==
             (
               w.client.origin,
@@ -157,7 +157,7 @@ class MessageHistorySnapshots {
       await saved;
     }
 
-    return coalesce && MessageHistoryPages.storage(w.cache) != null
+    return coalesce && MessageHistoryPages.storage(w.deviceStore.cache) != null
         ? HistorySnapshotWrites.schedule(w, (scope, id), writeCopies)
         : HistorySnapshotWrites.writeNow(w, (scope, id), writeCopies);
   }

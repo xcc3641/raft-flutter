@@ -21,6 +21,7 @@ import 'package:raft_ui/recipes.dart'
 import '../data/source_activity_unread_store.dart';
 import '../data/user_error.dart';
 import '../data/workspace_controller.dart';
+import '../data/workspace_services.dart';
 import '../data/search_memory.dart';
 import '../data/activity_follow_state.dart';
 import '../data/activity_done_state.dart';
@@ -894,11 +895,10 @@ class _ResourceViewState extends State<ResourceView> {
   /// list reads the same inboxStore `items` the badge counts, so opening
   /// Activity paints the arrival that lit the badge on the first frame.
   Map<String, dynamic>? sharedInboxSeed() {
-    if (widget.section != 'activity' ||
-        listView != SourceActivityUnreadStore.defaultInboxView) {
+    if (!activityPage || listView != SourceActivityUnreadStore.defaultInboxView) {
       return null;
     }
-    return w.activityUnreadIfBound?.windowSince(inboxSerial);
+    return _services.activityUnreadIfBound?.windowSince(inboxSerial);
   }
 
   /// The Activity badge's store, whose own reads (the retries that wait for
@@ -909,9 +909,8 @@ class _ResourceViewState extends State<ResourceView> {
 
   void bindSharedInbox() {
     sharedInbox?.removeListener(sharedInboxChanged);
-    sharedInbox = widget.section == 'activity'
-        ? (w.activityUnreadIfBound?..addListener(sharedInboxChanged))
-        : null;
+    sharedInbox = activityPage
+        ? (_services.activityUnreadIfBound?..addListener(sharedInboxChanged)) : null;
   }
 
   void sharedInboxChanged() {
@@ -926,6 +925,8 @@ class _ResourceViewState extends State<ResourceView> {
   StreamSubscription<RaftEvent>? events;
   Timer? refreshTimer, catalogTimer;
   WorkspaceController get w => widget.controller;
+  bool get activityPage => widget.section == 'activity';
+  WorkspaceServices get _services => w.services;
 
   /// Source serverTaskPages: the server-wide Tasks page (board and list alike)
   /// walks one cursor per status lane; only a channel's tasks load whole.
@@ -1339,7 +1340,7 @@ class _ResourceViewState extends State<ResourceView> {
 
   void subscribeEvents() {
     final client = w.client;
-    final inbox = widget.section == 'activity' ? w.activityUnreadIfBound : null;
+    final inbox = activityPage ? _services.activityUnreadIfBound : null;
     events = (inbox?.pageEvents ?? client.events).listen((event) {
       if (!mounted || !identical(client, w.client)) return;
       if (SourceActivityUnreadStore.changesAuthority(event.name)) {
@@ -1382,8 +1383,7 @@ class _ResourceViewState extends State<ResourceView> {
         dropSavedMessage(event.payload);
         return;
       }
-      if (widget.section == 'activity' &&
-          (event.name == 'task:updated' || event.name == 'task:created')) {
+      if (activityPage && (event.name == 'task:updated' || event.name == 'task:created')) {
         patchActivityTasks(event.payload);
         return;
       }
@@ -1399,7 +1399,7 @@ class _ResourceViewState extends State<ResourceView> {
         _ => false,
       };
       if (relevant) {
-        if (widget.section == 'activity') patchActivity(event);
+        if (activityPage) patchActivity(event);
         if (widget.section == 'tasks' && patchTasks(event)) return;
         if (inbox?.ownsPageRefresh(
               event,
@@ -1842,7 +1842,7 @@ class _ResourceViewState extends State<ResourceView> {
       subscribeEvents();
     }
     authorityChanged();
-    if (widget.section == 'activity' &&
+    if (activityPage &&
         oldWidget.activitySidebarEnabled != widget.activitySidebarEnabled) {
       ++requestGeneration;
       ++activityFacetRequest;
@@ -2143,7 +2143,7 @@ class _ResourceViewState extends State<ResourceView> {
               if (widget.section != 'tasks') 'offset': append ? rows.length : 0,
             };
       final view = ResourceFilters.viewKey(path, params ?? const {});
-      final sharedSerial = w.activityUnreadIfBound?.windowSerial ?? 0;
+      final sharedSerial = _services.activityUnreadIfBound?.windowSerial ?? 0;
       var value =
           seed ??
           (path == '/channels/inbox'
@@ -5021,7 +5021,7 @@ class _ResourceViewState extends State<ResourceView> {
         // Source ThreadsInbox mutates through threadStore.followedThreads.
         final parentId = row['parentMessageId'];
         if (parentId is String) {
-          w.followedThreads.acknowledge(
+          _services.followedThreads.acknowledge(
             parentMessageId: parentId,
             threadChannelId: id,
             following: action == 'follow',

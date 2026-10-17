@@ -4,11 +4,23 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:raft_client/raft_client.dart';
-import 'package:raft_sync/raft_sync.dart' show canonicalUint64;
+import 'package:raft_sync/raft_sync.dart' show canonicalUint64, ReadStateLedger;
 
 import 'inbox_convergence.dart';
-import 'workspace_controller.dart';
+import 'raft_api_gateway.dart';
 import 'source_read_all_transport.dart';
+
+/// Accepted session facts and notifications consumed by the inbox projection.
+abstract interface class ActivityUnreadAuthority implements Listenable {
+  RaftClient get client;
+  RaftRecord? get server;
+  List<RaftChannel> get channels;
+  List<RaftChannel> get dms;
+  ReadStateLedger get readState;
+  SourceActivityUnreadStore get activityUnread;
+  SourceActivityUnreadStore? get activityUnreadIfBound;
+  Future<dynamic> sharedQuery(String path, {Map<String, dynamic>? query});
+}
 
 /// Current-server Activity attention, owned independently of the Activity page.
 ///
@@ -59,7 +71,7 @@ class SourceActivityUnreadStore extends ChangeNotifier {
     _bind();
   }
 
-  final WorkspaceController workspace;
+  final ActivityUnreadAuthority workspace;
   late final StreamSubscription<RaftEvent> _subscription;
   final _pageEvents = StreamController<RaftEvent>.broadcast(sync: true);
   late final Interceptor _readObserver;
@@ -118,11 +130,11 @@ class SourceActivityUnreadStore extends ChangeNotifier {
       const {'task:updated', 'task:created'}.contains(name);
 
   static bool changesAuthority(String name) => const {
-        'channel:removed',
-        'channel:updated',
-        'channel:members-updated',
-        'channel:authority-updated',
-      }.contains(name);
+    'channel:removed',
+    'channel:updated',
+    'channel:members-updated',
+    'channel:authority-updated',
+  }.contains(name);
 
   /// Process-wide monotonic id of the newest window this store accepted; 0
   /// before any. Pages record the id they last synchronised with.
@@ -135,7 +147,7 @@ class SourceActivityUnreadStore extends ChangeNotifier {
     if (!hasAcceptedWindow || window == null || _windowSerial <= serial) {
       return null;
     }
-    return WorkspaceController.copyDecoded(window) as Map<String, dynamic>;
+    return RaftApiGateway.copyDecoded(window) as Map<String, dynamic>;
   }
 
   String? _currentScope() {
@@ -179,7 +191,7 @@ class SourceActivityUnreadStore extends ChangeNotifier {
     _bind(activate: true);
   }
 
-  static void activateForRooms(WorkspaceController workspace) {
+  static void activateForRooms(ActivityUnreadAuthority workspace) {
     if (workspace.activityUnreadIfBound == null) {
       // A restored session can join before a view or selection borrowed it.
       unawaited(workspace.activityUnread.refresh());
@@ -439,7 +451,7 @@ class SourceActivityUnreadStore extends ChangeNotifier {
     _total = count;
     _projectFullyReadRows();
     if (firstPage) {
-      _window = WorkspaceController.copyDecoded({
+      _window = RaftApiGateway.copyDecoded({
         ...window,
         'items': _rows.take(_firstPageLimit).toList(),
         'totalUnreadCount': _total,

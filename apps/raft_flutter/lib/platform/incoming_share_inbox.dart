@@ -89,6 +89,42 @@ class IncomingShareInbox {
     await tmp.rename(p.join(folder.path, 'envelope.json'));
   }
 
+  /// The hand-off reads and stamps one already-copied envelope. Doing that
+  /// with a chain of async file calls costs one scheduler turn per call, so
+  /// a busy device misses the composer's on-device landing. One directory
+  /// lookup, then the stat and the write stay on this turn.
+  Directory _folderSync(Directory root, String token) {
+    if (!_tokenPattern.hasMatch(token)) {
+      throw const FormatException('Share token');
+    }
+    root.createSync(recursive: true);
+    final folder = Directory(p.join(root.path, token));
+    if (FileSystemEntity.typeSync(folder.path, followLinks: false) ==
+        FileSystemEntityType.link) {
+      throw const FormatException('Invalid inbox folder');
+    }
+    return folder;
+  }
+
+  Map<String, dynamic>? _recordSync(Directory root, String token) {
+    final file = File(p.join(_folderSync(root, token).path, 'envelope.json'));
+    if (!file.existsSync()) return null;
+    final value = jsonDecode(file.readAsStringSync());
+    return value is Map ? Map<String, dynamic>.from(value) : null;
+  }
+
+  void _writeSync(Directory root, String token, Map<String, dynamic> record) {
+    final folder = _folderSync(root, token);
+    final tmp = File(p.join(folder.path, 'envelope.tmp'));
+    tmp.writeAsStringSync(jsonEncode(record), flush: true);
+    tmp.renameSync(p.join(folder.path, 'envelope.json'));
+  }
+
+  void _discardSync(Directory root, String token) {
+    final folder = _folderSync(root, token);
+    if (folder.existsSync()) folder.deleteSync(recursive: true);
+  }
+
   /// Copies [share] into the private inbox. [onProgress] reports the number of
   /// files already safely copied (after each item) and [onBytes] the bytes of
   /// the file being copied, so a caller can show progress while the picker is
@@ -292,7 +328,10 @@ class IncomingShareInbox {
 
   Future<bool> claim(String token, String origin, String principal) =>
       _serial(() async {
-        final record = await _record(token);
+        // Continue awaits this stamp before it can open the composer. One
+        // directory lookup, then the stat and the write stay on this turn.
+        final root = await directory();
+        final record = _recordSync(root, token);
         if (record == null ||
             record['principal'] != null &&
                 (record['principal'] != principal ||
@@ -300,7 +339,7 @@ class IncomingShareInbox {
           return false;
         }
         record.addAll({'origin': origin, 'principal': principal});
-        await _write(token, record);
+        _writeSync(root, token, record);
         return true;
       });
 
@@ -316,7 +355,8 @@ class IncomingShareInbox {
       return null;
     }
     try {
-      final record = await _record(token);
+      final root = await directory();
+      final record = _recordSync(root, token);
       if (record == null ||
           record['origin'] != origin ||
           record['principal'] != principal) {
@@ -327,16 +367,13 @@ class IncomingShareInbox {
           .where((f) => f['file'] == name)
           .firstOrNull;
       if (metadata == null) return null;
-      final folder = await _folder(token);
-      final file = File(p.join(folder.path, name));
-      if (!await file.exists() ||
-          await file.length() != metadata['sizeBytes']) {
+      final file = File(p.join(_folderSync(root, token).path, name));
+      if (!file.existsSync() || file.lengthSync() != metadata['sizeBytes']) {
         return null;
       }
-      final root = await directory();
       if (!p.isWithin(
-        await root.resolveSymbolicLinks(),
-        await file.resolveSymbolicLinks(),
+        root.resolveSymbolicLinksSync(),
+        file.resolveSymbolicLinksSync(),
       )) {
         return null;
       }
@@ -361,12 +398,13 @@ class IncomingShareInbox {
 
   Future<void> bindDestination(String token, String server, String channel) =>
       _serial(() async {
-        final record = await _record(token);
+        final root = await directory();
+        final record = _recordSync(root, token);
         if (record == null) {
           throw const FormatException('Shared content unavailable');
         }
         record.addAll({'server': server, 'channel': channel});
-        await _write(token, record);
+        _writeSync(root, token, record);
       });
 
   Future<void> clearScope(
@@ -393,13 +431,14 @@ class IncomingShareInbox {
   });
 
   Future<void> complete(String token) => _serial(() async {
-    final record = await _record(token);
+    final root = await directory();
+    final record = _recordSync(root, token);
     if (record == null) return;
     record['pending'] = false;
     if ((record['files'] as List).isEmpty) {
-      await _discard(token);
+      _discardSync(root, token);
     } else {
-      await _write(token, record);
+      _writeSync(root, token, record);
     }
   });
 

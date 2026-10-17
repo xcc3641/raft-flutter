@@ -42,7 +42,7 @@ class _SidebarPreferencesState extends ManagementState<SidebarPreferencesView> {
   /// partial view.
   void seedFromLocal() {
     final order = w.sidebarOrder;
-    final directory = w.entityDirectory;
+    final directory = w.services.entityDirectory;
     final viewAgents = w.can('viewAgents');
     if (order.isEmpty ||
         (viewAgents && !directory.state(WorkspaceEntityKind.agents).loaded)) {

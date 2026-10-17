@@ -30,7 +30,7 @@ Future<AttachmentSource> attachmentStreamSource(
   Duration start = Duration.zero,
 }) async {
   Future<Uri> sign({bool refresh = false}) async {
-    final url = await controller.attachmentUrl(
+    final url = await controller.attachmentMedia.url(
       id,
       channelId: channelId,
       coalesce: !refresh,
@@ -46,7 +46,7 @@ Future<AttachmentSource> attachmentStreamSource(
     uri,
     start: start,
     refresh: () {
-      controller.invalidateAttachmentUrl(id);
+      controller.attachmentMedia.invalidateUrl(id);
       return sign(refresh: true);
     },
   );

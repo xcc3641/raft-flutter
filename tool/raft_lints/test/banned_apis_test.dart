@@ -13,6 +13,7 @@ void main() {
     defineReflectiveTests(UnderlineTest);
     defineReflectiveTests(SliderTest);
     defineReflectiveTests(SelectionAreaTest);
+    defineReflectiveTests(BottomSheetTest);
     defineReflectiveTests(IdleWorkTest);
   });
 }
@@ -36,6 +37,10 @@ class TextDecoration { static const underline = TextDecoration(); static const n
 class Slider extends Widget { const Slider(); }
 class SelectionArea extends Widget { const SelectionArea({required Widget child}); }
 class SliderTheme extends Widget { const SliderTheme(); }
+class BottomSheet extends Widget { const BottomSheet(); }
+class DraggableScrollableSheet extends Widget { const DraggableScrollableSheet(); }
+class ModalBottomSheetRoute<T> { ModalBottomSheetRoute(); }
+Future<T?> showModalBottomSheet<T>() async => null;
 ''');
     newPackage('dio').addFile('lib/dio.dart', r'''
 class Dio { Dio(); }
@@ -178,6 +183,39 @@ import 'package:flutter/widgets.dart';
 Widget f(Widget child) => SelectionArea(child: child);
 ''';
     await assertDiagnostics(code, [at(code, 'SelectionArea')]);
+  }
+
+  Future<void> test_other_widgets_are_fine() async {
+    await assertNoDiagnostics(r'''
+import 'package:flutter/widgets.dart';
+Widget f() => const RawImage();
+''');
+  }
+}
+
+@reflectiveTest
+class BottomSheetTest extends AnalysisRuleTest with _Stubs {
+  @override
+  void setUp() {
+    rule = BannedApiRule(_api(sheetRule));
+    stubs();
+    super.setUp();
+  }
+
+  Future<void> test_framework_sheets_are_banned() async {
+    const code = r'''
+import 'package:flutter/widgets.dart';
+Future<void> f() => showModalBottomSheet<void>();
+Widget g() => const BottomSheet();
+Widget h() => const DraggableScrollableSheet();
+class R extends ModalBottomSheetRoute<void> {}
+''';
+    await assertDiagnostics(code, [
+      at(code, 'showModalBottomSheet'),
+      lint(code.indexOf('BottomSheet()'), 11),
+      at(code, 'DraggableScrollableSheet'),
+      lint(code.indexOf('ModalBottomSheetRoute'), 27),
+    ]);
   }
 
   Future<void> test_other_widgets_are_fine() async {

@@ -52,6 +52,7 @@ void main() {
     final cache = DriftWorkspaceCache(
       NativeDatabase.memory(),
       historyBudget: 512 << 10,
+      historyHardLimitEnabled: false,
       automaticHistoryMaintenance: false,
     );
     addTearDown(cache.close);
@@ -158,6 +159,7 @@ void main() {
       final cache = DriftWorkspaceCache(
         NativeDatabase.memory(),
         historyBudget: 512 << 10,
+        historyHardLimitEnabled: false,
         automaticHistoryMaintenance: false,
       );
       addTearDown(cache.close);

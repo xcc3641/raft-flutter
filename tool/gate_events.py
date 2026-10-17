@@ -1,7 +1,7 @@
 """Shared gate event log: one line per event so anyone can `tail -f` the shared gate.
 
 Format: `<UTC ISO time> <EVENT> branch=<branch> sha=<short sha> wt=<worktree> <key=value ...>`.
-Events: WAITING START FAIL-FIRST ABORT PASS FAIL ERROR (+ NOTIFY-FAILED). The log never raises: a
+Events: WAITING START FAIL-FIRST ABORT RETRY FLAKY PASS FAIL ERROR (+ NOTIFY-FAILED). The log never raises: a
 broken log must not break (or hide the result of) a gate run.
 """
 import datetime

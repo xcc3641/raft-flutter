@@ -4,7 +4,8 @@ const _x = Affordance.x,
     _back = Affordance.back,
     _esc = Affordance.esc,
     _scrim = Affordance.scrim,
-    _sys = Affordance.systemBack;
+    _sys = Affordance.systemBack,
+    _drag = Affordance.drag;
 
 /// Dialogs, modals, alerts and confirmations.
 /// Web: components/Modal.tsx (Escape closes unless `closeOnEscape` is false;
@@ -17,16 +18,6 @@ const dialogSurfaces = <CloseSurface>[
     'history-lower-limit-confirm',
     kind: SurfaceKind.dialog,
     web: 'Flutter-only history action; ConfirmDialog.tsx:138-165: X + Esc, no pointer dismissal',
-    phone: {_x, _esc, _sys},
-    fold: {_x, _esc, _sys},
-    desktop: {_x, _esc, _sys},
-    files: ['lib/features/message_history_settings.dart'],
-    status: 'no-web',
-  ),
-  CloseSurface(
-    'history-full-clean-confirm',
-    kind: SurfaceKind.dialog,
-    web: 'Flutter-only storage rebuild; ConfirmDialog.tsx:138-165: X + Esc, no pointer dismissal',
     phone: {_x, _esc, _sys},
     fold: {_x, _esc, _sys},
     desktop: {_x, _esc, _sys},
@@ -75,7 +66,8 @@ const dialogSurfaces = <CloseSurface>[
   CloseSurface(
     'sidebar-section-dialog',
     kind: SurfaceKind.dialog,
-    web: 'SidebarSectionDialog.tsx:30 Modal closeOnBackdrop: X + Esc + backdrop',
+    web:
+        'SidebarSectionDialog.tsx:30 Modal closeOnBackdrop: X + Esc + backdrop',
     phone: {_x, _esc, _scrim, _sys},
     fold: {_x, _esc, _scrim, _sys},
     desktop: {_x, _esc, _scrim, _sys},
@@ -110,7 +102,8 @@ const dialogSurfaces = <CloseSurface>[
     phone: {_x, _esc, _scrim, _sys},
     none: {
       'fold': 'wide layouts show the hover / pinned popover (popover family)',
-      'desktop': 'wide layouts show the hover / pinned popover (popover family)',
+      'desktop':
+          'wide layouts show the hover / pinned popover (popover family)',
     },
     files: ['../../packages/raft_ui/lib/src/runtime_usage_card.dart'],
   ),
@@ -172,7 +165,7 @@ const dialogSurfaces = <CloseSurface>[
     files: [
       'lib/features/add_members_dialog.dart',
       'lib/features/message_action_card.dart',
-          '../../packages/raft_ui/lib/src/add_members_dialog_view.dart',
+      '../../packages/raft_ui/lib/src/add_members_dialog_view.dart',
     ],
   ),
   CloseSurface(
@@ -282,6 +275,21 @@ const dialogSurfaces = <CloseSurface>[
     fix: '',
   ),
   CloseSurface(
+    'composer-expanded-editor',
+    kind: SurfaceKind.dialog,
+    web: 'no Web surface: MessageInput has no expand mode. Flutter-only (GitHub #153): one route whose form follows the window width (RaftPresentationPolicy.editor): a tall bottom sheet below 768 (collapse button, Esc, scrim, back, drag the handle down) and a centered dialog from 768 (collapse button, Esc, scrim, back); every close keeps the draft',
+    phone: {_x, _esc, _scrim, _sys, _drag},
+    fold: {_x, _esc, _scrim, _sys},
+    desktop: {_x, _esc, _scrim, _sys},
+    files: [
+      '../../packages/raft_ui/lib/src/composer_expand.dart',
+      '../../packages/raft_ui/lib/src/composer_expansion_state.dart',
+      '../../packages/raft_ui/lib/src/presentation.dart',
+    ],
+    status: 'no-web',
+    fix: '',
+  ),
+  CloseSurface(
     'community-agreement',
     kind: SurfaceKind.dialog,
     web: 'CommunityAgreementDialog.tsx:49,59 Modal (no backdrop close) + X',
@@ -330,7 +338,7 @@ const dialogSurfaces = <CloseSurface>[
     files: [
       'lib/features/provider_edit_dialog.dart',
       'lib/features/provider_views.dart',
-          '../../packages/raft_ui/lib/src/provider_edit_view.dart',
+      '../../packages/raft_ui/lib/src/provider_edit_view.dart',
     ],
   ),
   CloseSurface(
@@ -364,7 +372,8 @@ const dialogSurfaces = <CloseSurface>[
     phone: {_esc, _scrim, _sys},
     none: {
       'fold': 'wide layouts open the server switcher popover (server-switcher)',
-      'desktop': 'wide layouts open the server switcher popover (server-switcher)',
+      'desktop':
+          'wide layouts open the server switcher popover (server-switcher)',
     },
     files: ['lib/features/workspace_view.dart'],
     status: 'no-web',

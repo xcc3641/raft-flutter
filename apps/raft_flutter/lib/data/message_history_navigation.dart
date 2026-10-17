@@ -1,5 +1,7 @@
+import 'message_history.dart';
 import 'message_history_pages.dart';
 import 'message_history_positions.dart';
+import 'message_history_summaries.dart';
 import 'message_window_snapshot.dart';
 import 'workspace_controller.dart';
 import 'workspace_message_windows.dart';
@@ -7,11 +9,12 @@ import 'user_error.dart';
 
 /// Paging commands share the receiver's existing request and boundary owners.
 class MessageHistoryNavigation {
-  static Future<void> page(
+  static Future<bool> page(
     WorkspaceController w, {
     required bool thread,
     required bool newer,
     BigInt? gapBefore,
+    bool silent = false,
     required MessageWindowRequest Function(String) requestFor,
     required void Function(String, dynamic) summaries,
   }) async {
@@ -24,10 +27,12 @@ class MessageHistoryNavigation {
         w.loadingOlder ||
         gapBefore == null && !more ||
         current.isEmpty) {
-      return;
+      return false;
     }
-    if (gapBefore != null && !current.any((row) => row.seq == gapBefore)) {
-      return;
+    if (!silent &&
+        gapBefore != null &&
+        !current.any((row) => row.seq == gapBefore)) {
+      return false;
     }
     final request = requestFor(id);
     w.loadingOlder = true;
@@ -42,11 +47,11 @@ class MessageHistoryNavigation {
         after: newer ? current.last.seq : null,
         gap: gapBefore != null,
       );
-      if (!request.current) return;
+      if (!request.current) return false;
       final rows = acceptedWindowRows(page['messages'], id);
       w.messageWindows.acceptRows(request, id, rows);
-      await MessageHistoryPages.record(w, request, page);
-      if (!request.current) return;
+      if (!await MessageHistoryPages.record(w, request, page)) return false;
+      if (!request.current) return false;
       final limited = page['historyLimited'] == true;
       final hasMore =
           !limited &&
@@ -65,17 +70,27 @@ class MessageHistoryNavigation {
         w.historyLimited = limited;
         w.hasMore = hasMore;
       }
-      if (!thread) summaries(id, page['threadSummariesByParentMessageId']);
-      MessageHistoryPages.storage(w.cache)?.memory
+      if (!thread) {
+        final carried = page['threadSummariesByParentMessageId'];
+        summaries(
+          id,
+          page is MessageHistoryPage && page.local
+              ? MessageHistorySummaries.unheld(w, id, carried)
+              : carried,
+        );
+      }
+      MessageHistoryPages.storage(w.deviceStore.cache)?.memory
           .direction(w, id, older: !newer);
       await w.saveHistoryWindow(id, thread: thread);
+      return true;
     } catch (cause) {
-      if (request.current) {
+      if (request.current && !silent) {
         w.error = userErrorText(
           cause,
           where: newer ? 'load newer messages' : 'load older messages',
         );
       }
+      return false;
     } finally {
       if (request.current) {
         w.loadingOlder = false;
@@ -107,12 +122,12 @@ class MessageHistoryNavigation {
     final request = w.messageWindows.request(
       thread: thread,
       allowed: () =>
-          w.cacheWritable &&
+          w.deviceStore.writable &&
           revision == w.navigationRevision &&
           seal == w.messageHistoryTicket('') &&
           selectedId == (thread ? w.threadChannelId : w.channel?.id),
     );
-    MessageHistoryPages.storage(w.cache)?.memory
+    MessageHistoryPages.storage(w.deviceStore.cache)?.memory
         .direction(w, selectedId, older: false);
     try {
       await MessageHistoryPositions.clear(

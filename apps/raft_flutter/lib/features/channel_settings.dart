@@ -1132,7 +1132,7 @@ class _ChannelSettingsState extends State<ChannelSettings> {
           presence: agent
               ? channelMemberPresence(
                   m,
-                  directory: w.entityDirectory.agent('${m['id']}'),
+                  directory: w.services.entityDirectory.agent('${m['id']}'),
                 )
               : null,
         ),

@@ -52,14 +52,19 @@ class LocalMessageHistoryPage {
     required this.hasMore,
     required this.historyLimited,
     required this.verifiedAt,
+    this.summaries = const {},
   }) : rows = List.unmodifiable(rows);
   final List<Map<String, dynamic>> rows;
   final bool hasMore, historyLimited;
   final DateTime verifiedAt;
+
+  /// Reply previews of the parents in [rows], by parent message id.
+  final Map<String, dynamic> summaries;
   Map<String, dynamic> get page => {
     'messages': rows,
     'historyLimited': historyLimited,
     'hasMore': hasMore,
+    if (summaries.isNotEmpty) 'threadSummariesByParentMessageId': summaries,
   };
 }
 
@@ -88,6 +93,7 @@ class MessageHistoryPage extends MapBase<String, dynamic> {
   final bool focused;
   final String? target;
   final DateTime? verifiedAt;
+
   /// Receiver-owned rows that existed before this response was presented.
   final Map<String, Map<String, dynamic>> heldBeforeAdmission;
   String get queryKey => historyQueryKey(
@@ -160,6 +166,13 @@ abstract interface class MessageHistoryStorage {
   );
   Future<int> migrateLegacy(MessageHistoryScope scope, {int limit = 4});
 
+  /// Reply previews follow their parent rows: stored only for a live row,
+  /// and removed with it. The network page remains the authority.
+  Future<void> saveSummaries(
+    MessageHistoryScope scope,
+    Map<String, dynamic> summaries,
+  );
+
   /// Orders receiver events, including asynchronous parent-scope resolution.
   /// This queue is separate from the database queue to avoid nested writes.
   HistoryReceiverQueue get receiver;
@@ -168,6 +181,13 @@ abstract interface class MessageHistoryStorage {
     String principal,
     String server,
     String channel,
+  );
+
+  /// Oldest retained body per authorized conversation, for reconnect checks.
+  Future<List<(MessageHistoryScope, BigInt)>> savedRanges(
+    String origin,
+    String principal,
+    String server,
   );
   Future<BigInt> resumeSequence(MessageHistoryScope scope);
   Future<void> checkpoint(
@@ -201,11 +221,14 @@ abstract interface class MessageHistoryStorage {
 
   /// Commit after the receiver admitted the response through its scope ticket.
   Future<void> acceptPage(MessageHistoryPage page);
+  /// [live] marks rows that arrived on a connected socket: each one extends
+  /// the saved tail it follows instead of leaving a gap before it.
   Future<bool> acceptEvents(
     MessageHistoryScope scope,
     Iterable<Map<String, dynamic>> rows, {
     bool updateOnly = false,
     int? requestedRevision,
+    bool live = false,
   });
 
   /// Compatibility snapshots are imported without inventing continuity.

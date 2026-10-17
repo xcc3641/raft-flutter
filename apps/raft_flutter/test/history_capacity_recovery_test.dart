@@ -24,6 +24,7 @@ void main() {
     final db = DriftWorkspaceCache(
           NativeDatabase.memory(),
           historyBudget: 128 << 10,
+          historyHardLimitEnabled: false,
         ),
         cap = db.messageHistory.capacity,
         owner = Object();
@@ -54,6 +55,7 @@ void main() {
       final db = DriftWorkspaceCache(
             NativeDatabase.memory(),
             historyBudget: 128 << 10,
+            historyHardLimitEnabled: false,
           ),
           cap = db.messageHistory.capacity;
       addTearDown(db.close);

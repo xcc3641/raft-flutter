@@ -72,6 +72,9 @@ enum RaftGlyph {
   /// lucide `blocks` 0.575.0.
   /// Web: components/agent/AgentDetailPanel.tsx:45 (+4 more).
   blocks(_blocksV0_575_0, 'blocks', '0.575.0'),
+  /// lucide `bold` 0.575.0.
+  /// Flutter-only glyph (message composer Markdown toolbar); no Web import uses it.
+  bold(_boldV0_575_0, 'bold', '0.575.0'),
   /// lucide `bookmark` 0.575.0.
   /// Web: components/layout/LeftRail.tsx:9 (+5 more).
   bookmark(_bookmarkV0_575_0, 'bookmark', '0.575.0'),
@@ -258,6 +261,9 @@ enum RaftGlyph {
   /// lucide `hash` 0.575.0.
   /// Web: components/agent/AgentDetailPanel.tsx:38 (+20 more).
   hash(_hashV0_575_0, 'hash', '0.575.0'),
+  /// lucide `heading` 0.575.0.
+  /// Flutter-only glyph (message composer Markdown toolbar); no Web import uses it.
+  heading(_headingV0_575_0, 'heading', '0.575.0'),
   /// lucide `circle-question-mark` 0.575.0.
   /// Web: components/agent/AgentDetailPanel.tsx:43 (+1 more).
   helpCircle(_circleQuestionMarkV0_575_0, 'circle-question-mark', '0.575.0'),
@@ -281,6 +287,9 @@ enum RaftGlyph {
   /// Web: components/LocalizedToastProvider.tsx:2 (+4 more).
   /// raft-ui: raft-ui@0.5.27/dist/index.mjs:15047 (+1 more).
   info(_infoV0_575_0, 'info', '0.575.0'),
+  /// lucide `italic` 0.575.0.
+  /// Flutter-only glyph (message composer Markdown toolbar); no Web import uses it.
+  italic(_italicV0_575_0, 'italic', '0.575.0'),
   /// lucide `key-round` 0.575.0.
   /// Web: components/auth/EmailVerificationPage.tsx:6 (+5 more).
   keyRound(_keyRoundV0_575_0, 'key-round', '0.575.0'),
@@ -314,6 +323,9 @@ enum RaftGlyph {
   /// lucide `list-checks` 0.575.0.
   /// Web: components/message/SelectModeToolbar.tsx:2.
   listChecks(_listChecksV0_575_0, 'list-checks', '0.575.0'),
+  /// lucide `list-ordered` 0.575.0.
+  /// Flutter-only glyph (message composer Markdown toolbar); no Web import uses it.
+  listOrdered(_listOrderedV0_575_0, 'list-ordered', '0.575.0'),
   /// lucide `list-todo` 0.575.0.
   /// Web: components/message/ChatPanel.tsx:7.
   listTodo(_listTodoV0_575_0, 'list-todo', '0.575.0'),
@@ -371,6 +383,9 @@ enum RaftGlyph {
   /// lucide `minimize` 0.575.0.
   /// Legacy Flutter name; no Web import uses it.
   minimize(_minimizeV0_575_0, 'minimize', '0.575.0'),
+  /// lucide `minimize-2` 0.575.0.
+  /// Flutter-only glyph (message composer Markdown toolbar); no Web import uses it.
+  minimize2(_minimize2V0_575_0, 'minimize-2', '0.575.0'),
   /// lucide `minus` 1.48.0.
   /// raft-ui: raft-ui@0.5.27/dist/index.mjs:4.
   minus(_minusV1_48_0, 'minus', '1.48.0'),
@@ -473,9 +488,15 @@ enum RaftGlyph {
   /// lucide `star` 0.575.0.
   /// Web: components/search/MessageSearchPage.tsx:8.
   star(_starV0_575_0, 'star', '0.575.0'),
+  /// lucide `strikethrough` 0.575.0.
+  /// Flutter-only glyph (message composer Markdown toolbar); no Web import uses it.
+  strikethrough(_strikethroughV0_575_0, 'strikethrough', '0.575.0'),
   /// lucide `sun` 0.575.0.
   /// Legacy Flutter name; no Web import uses it.
   sun(_sunV0_575_0, 'sun', '0.575.0'),
+  /// lucide `table` 0.575.0.
+  /// Flutter-only glyph (message composer Markdown toolbar); no Web import uses it.
+  table(_tableV0_575_0, 'table', '0.575.0'),
   /// lucide `tag` 0.575.0.
   /// Web: components/settings/SettingsPanel.tsx:51.
   tag(_tagV0_575_0, 'tag', '0.575.0'),
@@ -662,6 +683,10 @@ const _bellV0_575_0 = <_LucideNode>[
 const _blocksV0_575_0 = <_LucideNode>[
   _LucideNode.path('M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2'),
   _LucideNode(_LucideKind.rect, [14.0, 2.0, 8.0, 8.0, 1.0, 1.0]),
+];
+// bold.js lucide-react 0.575.0 sha256 0e92bdd9a390c5f1
+const _boldV0_575_0 = <_LucideNode>[
+  _LucideNode.path('M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8'),
 ];
 // book-open-text.js lucide-react 0.575.0 sha256 e0b0bef96928d825
 const _bookOpenTextV0_575_0 = <_LucideNode>[
@@ -1007,6 +1032,12 @@ const _hashV0_575_0 = <_LucideNode>[
   _LucideNode(_LucideKind.line, [10.0, 3.0, 8.0, 21.0]),
   _LucideNode(_LucideKind.line, [16.0, 3.0, 14.0, 21.0]),
 ];
+// heading.js lucide-react 0.575.0 sha256 d9152ccdf897d45e
+const _headingV0_575_0 = <_LucideNode>[
+  _LucideNode.path('M6 12h12'),
+  _LucideNode.path('M6 20V4'),
+  _LucideNode.path('M18 20V4'),
+];
 // house.js lucide-react 0.575.0 sha256 10459f2700c362de
 const _houseV0_575_0 = <_LucideNode>[
   _LucideNode.path('M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8'),
@@ -1045,6 +1076,12 @@ const _infoV0_575_0 = <_LucideNode>[
   _LucideNode(_LucideKind.circle, [12.0, 12.0, 10.0]),
   _LucideNode.path('M12 16v-4'),
   _LucideNode.path('M12 8h.01'),
+];
+// italic.js lucide-react 0.575.0 sha256 4b7862e638045a49
+const _italicV0_575_0 = <_LucideNode>[
+  _LucideNode(_LucideKind.line, [19.0, 4.0, 10.0, 4.0]),
+  _LucideNode(_LucideKind.line, [14.0, 20.0, 5.0, 20.0]),
+  _LucideNode(_LucideKind.line, [15.0, 4.0, 9.0, 20.0]),
 ];
 // key-round.js lucide-react 0.575.0 sha256 f31c3deb287a9a04
 const _keyRoundV0_575_0 = <_LucideNode>[
@@ -1112,6 +1149,15 @@ const _listChecksV0_575_0 = <_LucideNode>[
   _LucideNode.path('M13 19h8'),
   _LucideNode.path('m3 17 2 2 4-4'),
   _LucideNode.path('m3 7 2 2 4-4'),
+];
+// list-ordered.js lucide-react 0.575.0 sha256 f29830d7b2dd32c7
+const _listOrderedV0_575_0 = <_LucideNode>[
+  _LucideNode.path('M11 5h10'),
+  _LucideNode.path('M11 12h10'),
+  _LucideNode.path('M11 19h10'),
+  _LucideNode.path('M4 4h1v5'),
+  _LucideNode.path('M4 9h2'),
+  _LucideNode.path('M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02'),
 ];
 // list-todo.js lucide-react 0.575.0 sha256 9b41b0ce3b268763
 const _listTodoV0_575_0 = <_LucideNode>[
@@ -1226,6 +1272,13 @@ const _messageSquareTextV0_575_0 = <_LucideNode>[
 // message-square.js lucide-react 0.575.0 sha256 ff73c985a7baab13
 const _messageSquareV0_575_0 = <_LucideNode>[
   _LucideNode.path('M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z'),
+];
+// minimize-2.js lucide-react 0.575.0 sha256 c6f53e5d5d49fb54
+const _minimize2V0_575_0 = <_LucideNode>[
+  _LucideNode.path('m14 10 7-7'),
+  _LucideNode.path('M20 10h-6V4'),
+  _LucideNode.path('m3 21 7-7'),
+  _LucideNode.path('M4 14h6v6'),
 ];
 // minimize.js lucide-react 0.575.0 sha256 c32b28ad47b65039
 const _minimizeV0_575_0 = <_LucideNode>[
@@ -1428,6 +1481,12 @@ const _squareV0_575_0 = <_LucideNode>[
 const _starV0_575_0 = <_LucideNode>[
   _LucideNode.path('M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z'),
 ];
+// strikethrough.js lucide-react 0.575.0 sha256 fcda6a99a3940a50
+const _strikethroughV0_575_0 = <_LucideNode>[
+  _LucideNode.path('M16 4H9a3 3 0 0 0-2.83 4'),
+  _LucideNode.path('M14 12a4 4 0 0 1 0 8H6'),
+  _LucideNode(_LucideKind.line, [4.0, 12.0, 20.0, 12.0]),
+];
 // sun.js lucide-react 0.575.0 sha256 d0c7ac00302264cc
 const _sunV0_575_0 = <_LucideNode>[
   _LucideNode(_LucideKind.circle, [12.0, 12.0, 4.0]),
@@ -1439,6 +1498,13 @@ const _sunV0_575_0 = <_LucideNode>[
   _LucideNode.path('M20 12h2'),
   _LucideNode.path('m6.34 17.66-1.41 1.41'),
   _LucideNode.path('m19.07 4.93-1.41 1.41'),
+];
+// table.js lucide-react 0.575.0 sha256 872ec5542ec067f2
+const _tableV0_575_0 = <_LucideNode>[
+  _LucideNode.path('M12 3v18'),
+  _LucideNode(_LucideKind.rect, [3.0, 3.0, 18.0, 18.0, 2.0, 2.0]),
+  _LucideNode.path('M3 9h18'),
+  _LucideNode.path('M3 15h18'),
 ];
 // tag.js lucide-react 0.575.0 sha256 f4c91e4f009c4d0d
 const _tagV0_575_0 = <_LucideNode>[

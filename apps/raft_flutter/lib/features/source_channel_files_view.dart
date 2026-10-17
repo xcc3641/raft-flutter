@@ -331,7 +331,7 @@ class SourceChannelFilesProjectionView extends StatelessWidget {
             ),
           );
         }
-        if (store.error != null) {
+        if (store.error != null && store.files.isEmpty) {
           return Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -386,6 +386,7 @@ class SourceChannelFilesProjectionView extends StatelessWidget {
               if (event.depth == 0 &&
                   event.metrics.extentAfter < recipe.fetchRemainingExtent &&
                   store.nextCursor != null &&
+                  store.error == null &&
                   !store.loading &&
                   !store.loadingMore) {
                 unawaited(store.load(more: true));
@@ -411,17 +412,35 @@ class SourceChannelFilesProjectionView extends StatelessWidget {
                       16,
                     ),
                     child: Center(
-                      child: store.loadingMore
-                          ? Text(
-                              raftText(context, 'Loading more files…'),
-                              style: RaftTypography.mono(t),
-                            )
-                          : RaftButton(
-                              label: raftText(context, 'Load more'),
-                              variant: RaftControlVariant.outline,
-                              size: RaftButtonRecipeSize.sm,
-                              onPressed: () => store.load(more: true),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (store.error != null)
+                            Padding(
+                              padding: EdgeInsets.only(bottom: recipe.listGap),
+                              child: Text(
+                                raftText(context, 'Could not load more files.'),
+                                style: RaftTypography.body(
+                                  t,
+                                  size: 14,
+                                  color: t.colors['danger'],
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
+                          store.loadingMore
+                              ? Text(
+                                  raftText(context, 'Loading more files…'),
+                                  style: RaftTypography.mono(t),
+                                )
+                              : RaftButton(
+                                  label: raftText(context, 'Load more'),
+                                  variant: RaftControlVariant.outline,
+                                  size: RaftButtonRecipeSize.sm,
+                                  onPressed: () => store.load(more: true),
+                                ),
+                        ],
+                      ),
                     ),
                   );
                 }

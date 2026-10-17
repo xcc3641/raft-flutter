@@ -98,7 +98,7 @@ Future<List<ChannelMemberCandidate>> loadChannelMemberCandidates(
 List<ChannelMemberCandidate>? cachedChannelMemberCandidates(
   WorkspaceController w,
 ) {
-  final d = w.entityDirectory;
+  final d = w.services.entityDirectory;
   if (!d.state(WorkspaceEntityKind.agents).loaded ||
       !d.state(WorkspaceEntityKind.members).loaded) {
     return null;
@@ -117,12 +117,12 @@ List<ChannelMemberCandidate>? cachedChannelMemberCandidates(
 /// without directory access, or a failed read). Owners call [dispose].
 class ChannelCandidateFeed extends ChangeNotifier {
   ChannelCandidateFeed(this.w) {
-    w.entityDirectory.addListener(_sync);
+    w.services.entityDirectory.addListener(_sync);
     final cached = cachedChannelMemberCandidates(w);
     if (cached != null) {
       value = cached;
       ready = true;
-      w.entityDirectory.ensure(_kinds);
+      w.services.entityDirectory.ensure(_kinds);
     } else {
       unawaited(_cold());
     }
@@ -148,7 +148,7 @@ class ChannelCandidateFeed extends ChangeNotifier {
   }
 
   Future<void> _cold() async {
-    final d = w.entityDirectory;
+    final d = w.services.entityDirectory;
     await Future.wait([for (final kind in _kinds) d.refresh(kind)]);
     if (_disposed || ready) return;
     try {
@@ -163,7 +163,7 @@ class ChannelCandidateFeed extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    w.entityDirectory.removeListener(_sync);
+    w.services.entityDirectory.removeListener(_sync);
     super.dispose();
   }
 }

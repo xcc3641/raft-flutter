@@ -3,7 +3,34 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:raft_client/raft_client.dart';
 
-import 'workspace_controller.dart';
+/// Real URI identity, independent of the asynchronously accepted parent record.
+@immutable
+class WorkspaceThreadIdentity {
+  const WorkspaceThreadIdentity({
+    required this.parentChannelId,
+    required this.parentMessageId,
+    this.focusedMessageId,
+  });
+  final String parentChannelId, parentMessageId;
+  final String? focusedMessageId;
+}
+
+/// Thread presentation and context navigation needed by in-thread search.
+abstract interface class ThreadSearchAuthority {
+  RaftClient get client;
+  String? get threadChannelId;
+  WorkspaceThreadIdentity? get threadIdentity;
+  RaftMessage? get presentedThreadParent;
+  List<RaftMessage> get replies;
+  bool get threadHasMore;
+  Future<void> openThreadIdentity({
+    required String parentChannelId,
+    required String parentMessageId,
+    String? focusedMessageId,
+    String? initialThreadChannelId,
+    bool navigate = true,
+  });
+}
 
 /// Web ThreadPanel `THREAD_SEARCH_HYDRATION_DEBOUNCE_MS`.
 const threadSearchHydrationDebounce = Duration(milliseconds: 250);
@@ -35,7 +62,7 @@ List<String> threadSearchMatches(Iterable<RaftMessage> messages, String query) {
 /// one thread. The scrolling to the active match is the mounted timeline's.
 class ThreadSearch extends ChangeNotifier {
   ThreadSearch(this.w);
-  final WorkspaceController w;
+  final ThreadSearchAuthority w;
 
   String? _threadId;
   bool _open = false;

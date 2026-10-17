@@ -38,14 +38,14 @@ VideoShape? attachmentShape(
   Map<String, dynamic> metadata,
 ) =>
     attachmentDeclaredShape(metadata) ??
-    w.playerSessions.shapes[attachmentMediaKey(metadata)];
+    w.attachmentMedia.playerSessions.shapes[attachmentMediaKey(metadata)];
 
 AttachmentImageStoreKey _shapeKey(
   WorkspaceController w,
   Map<String, dynamic> metadata,
   String kind,
   String channelId,
-) => w.attachmentCacheKey(metadata, kind, channelId: channelId);
+) => w.attachmentMedia.cacheKey(metadata, kind, channelId: channelId);
 
 /// Reads the stored shape of [metadata] into the session (no-op when there is
 /// one). [kind] is `image-shape` or `video-shape`.
@@ -56,14 +56,14 @@ Future<void> readStoredShape(
   required String channelId,
   required bool Function() authorized,
 }) async {
-  final disk = w.attachmentDiskCache;
+  final disk = w.attachmentMedia.diskCache;
   if (disk == null || attachmentShape(w, metadata) != null) return;
   try {
     final bytes = await disk.read(_shapeKey(w, metadata, kind, channelId));
     if (bytes == null || !authorized()) return;
     final stored = VideoShape.fromBytes(bytes);
     if (stored != null) {
-      w.playerSessions.rememberShape(attachmentMediaKey(metadata), stored);
+      w.attachmentMedia.playerSessions.rememberShape(attachmentMediaKey(metadata), stored);
     }
   } on Object {
     // Not stored: the shape comes with the first decode.
@@ -79,8 +79,8 @@ void learnShape(
   required String channelId,
   bool persist = true,
 }) {
-  w.playerSessions.rememberShape(attachmentMediaKey(metadata), shape);
-  final disk = w.attachmentDiskCache;
+  w.attachmentMedia.playerSessions.rememberShape(attachmentMediaKey(metadata), shape);
+  final disk = w.attachmentMedia.diskCache;
   if (persist && disk != null) {
     unawaited(
       disk

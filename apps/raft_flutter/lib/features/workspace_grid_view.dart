@@ -381,7 +381,7 @@ class _ConversationState extends State<_Conversation> {
                 child: Column(
                   children: [
                     ListenableBuilder(
-                      listenable: w.threadFollowers,
+                      listenable: w.services.threadFollowers,
                       builder: (context, _) => RaftThreadHeader(
                         presentation: RaftThreadPresentation.side,
                         followers: w.threadChannelId == null
@@ -397,7 +397,7 @@ class _ConversationState extends State<_Conversation> {
                               ),
                         followersVisible:
                             w.threadChannelId != null &&
-                            w.threadFollowers.visible(w.threadChannelId!),
+                            w.services.threadFollowers.visible(w.threadChannelId!),
                         backLabel: raftText(context, 'Close thread'),
                         closeLabel: raftText(context, 'Close thread'),
                         jumpLabel: raftText(context, 'Jump to beginning'),

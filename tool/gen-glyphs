@@ -51,6 +51,13 @@ LEGACY = [
     'ellipsis', 'laptop', 'loaderCircle', 'maximize', 'menu', 'minimize', 'moon',
     'palette', 'reply', 'slidersHorizontal', 'squareCheck', 'sun', 'volumeX',
 ]
+# Glyphs only Flutter product code draws (no Web import): the message composer's
+# Markdown toolbar and its collapse control. Resolved like LEGACY through the
+# pinned 0.575.0 export map; vendor them with `tool/gen-glyphs --vendor-added DIR`
+# (DIR = a lucide-react 0.575.0 package) or a full `--import-sources`.
+FLUTTER_ADDED = [
+    'bold', 'heading', 'italic', 'listOrdered', 'minimize2', 'strikethrough', 'table',
+]
 # Whole-icon fill (`<Bookmark fill="currentColor">` in Web, see citations).
 FILLED = {
     'bookmarkFilled': ('Bookmark', ['packages/web/src/components/message/MessageItem.tsx:4915',
@@ -274,6 +281,12 @@ def import_sources(raft_source: Path, raft_ui: Path | None):
         if key is None:
             raise GlyphError(f'legacy name {legacy} has no {WEB_LUCIDE} export {export}')
         resolved['legacy'][export] = key
+    for added in FLUTTER_ADDED:
+        export = added[0].upper() + added[1:]
+        key = need('web', export)
+        if key is None:
+            raise GlyphError(f'flutter glyph {added} has no {WEB_LUCIDE} export {export}')
+        resolved.setdefault('flutter', {})[export] = key
     doc = {
         'about': 'Vendored by `tool/gen-glyphs --import-sources`. Do not edit; regenerate.',
         'sources': {
@@ -290,6 +303,29 @@ def import_sources(raft_source: Path, raft_ui: Path | None):
     VENDOR.write_text(json.dumps(doc, indent=1, sort_keys=False) + '\n')
     print(f'vendored {len(icons)} icon geometries '
           f'(web names {len(resolved["web"])}, raft-ui names {len(resolved["raftUi"])}) -> {VENDOR.relative_to(ROOT)}')
+
+
+def vendor_added(pkg: Path):
+    """Add FLUTTER_ADDED geometries from a lucide-react WEB_LUCIDE package to the vendored JSON."""
+    pkg = Path(os.path.realpath(pkg))
+    if pkg_version(pkg) != WEB_LUCIDE:
+        raise GlyphError(f'{pkg} is {pkg_version(pkg)}, pinned {WEB_LUCIDE}')
+    doc = json.loads(VENDOR.read_text())
+    exports = export_map(pkg)
+    resolved = doc['resolved']['flutter'] = {}
+    for added in FLUTTER_ADDED:
+        export = added[0].upper() + added[1:]
+        icon = exports.get(export)
+        if icon is None:
+            raise GlyphError(f'flutter glyph {added} has no {WEB_LUCIDE} export {export}')
+        key = f'{icon}@{WEB_LUCIDE}'
+        if key not in doc['icons']:
+            f = icon_file(pkg, icon)
+            doc['icons'][key] = {'icon': icon, 'version': WEB_LUCIDE, 'sha256': sha256(f), 'nodes': read_icon_nodes(f)}
+        resolved[export] = key
+    doc['icons'] = dict(sorted(doc['icons'].items()))
+    VENDOR.write_text(json.dumps(doc, indent=1, sort_keys=False) + '\n')
+    print(f'vendored {len(resolved)} Flutter-only glyphs -> {VENDOR.relative_to(ROOT)}')
 
 
 def _git_head(path: Path):
@@ -322,7 +358,7 @@ def build_model(doc):
 
     def add(name, key, **kw):
         e = entries.setdefault(name, {'name': name, 'key': key, 'filled': False, 'web': [], 'raftUi': [],
-                                      'legacy': False, 'citations': []})
+                                      'legacy': False, 'flutter': False, 'citations': []})
         if e['key'] != key:
             raise GlyphError(f'{name}: conflicting geometry {e["key"]} vs {key}')
         for k, v in kw.items():
@@ -344,6 +380,10 @@ def build_model(doc):
         name = lower_camel(export)
         if name not in entries:
             add(name, key, legacy=True)
+    for export, key in doc['resolved'].get('flutter', {}).items():
+        name = lower_camel(export)
+        if name not in entries:
+            add(name, key, flutter=True)
     for name, (export, cites) in FILLED.items():
         add(name, doc['resolved']['legacy'][export], filled=True, citations=cites)
     ordered = [entries[n] for n in sorted(entries, key=lambda n: (n.lower(), n))]
@@ -426,6 +466,8 @@ def render(doc):
             doc_lines.append(f"raft-ui: {e['raftUi'][0]}{more}.")
         if e['legacy']:
             doc_lines.append('Legacy Flutter name; no Web import uses it.')
+        if e['flutter']:
+            doc_lines.append('Flutter-only glyph (message composer Markdown toolbar); no Web import uses it.')
         if e['filled']:
             doc_lines.append(f"Filled with currentColor as in {', '.join(c.removeprefix('packages/web/src/') for c in e['citations'])}.")
         for d in doc_lines:
@@ -471,6 +513,8 @@ def main(argv=None):
     p.add_argument('--check', action='store_true', help='fail if glyphs.g.dart is stale')
     p.add_argument('--list', action='store_true', help='print the enum table')
     p.add_argument('--import-sources', action='store_true')
+    p.add_argument('--vendor-added', type=Path, metavar='LUCIDE_DIR',
+                   help='vendor the Flutter-only glyphs from a lucide-react %s package' % WEB_LUCIDE)
     p.add_argument('--raft-source', type=Path)
     p.add_argument('--raft-ui', type=Path, help='raft-ui package dir (default: Web node_modules/raft-ui)')
     args = p.parse_args(argv)
@@ -479,12 +523,15 @@ def main(argv=None):
             if not args.raft_source:
                 p.error('--import-sources needs --raft-source')
             import_sources(args.raft_source, args.raft_ui)
+        if args.vendor_added:
+            vendor_added(args.vendor_added)
         doc = load_vendor()
         if args.list:
             entries, _ = build_model(doc)
             for e in entries:
                 icon = doc['icons'][e['key']]
-                src = 'web' if e['web'] else 'raft-ui' if e['raftUi'] else 'filled' if e['filled'] else 'legacy'
+                src = ('web' if e['web'] else 'raft-ui' if e['raftUi'] else 'filled' if e['filled']
+                       else 'flutter' if e['flutter'] else 'legacy')
                 print(f"{e['name']:24} {icon['icon']:24} {icon['version']:8} {src:8} {len(e['web'])} web / {len(e['raftUi'])} raft-ui")
             return 0
         text = render(doc)

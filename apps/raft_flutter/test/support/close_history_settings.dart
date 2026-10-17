@@ -10,6 +10,12 @@ import 'close_surface.dart';
 const _account = HistoryAccount('https://history.invalid', 'close-test');
 
 class _Capacity implements HistoryCapacity {
+  @override
+  Future<void> opened(
+    HistoryAccount account,
+    String server,
+    String channel,
+  ) async {}
   int mutations = 0;
   @override
   Future<HistoryDiskUsage> usage(HistoryAccount account) async =>
@@ -67,9 +73,8 @@ class _Capacity implements HistoryCapacity {
 /// Opens each real settings action, rather than a duplicate confirm widget.
 Future<SurfaceProbe> historySettingsConfirmation(
   WidgetTester t,
-  Size size, {
-  required bool rebuild,
-}) async {
+  Size size,
+) async {
   await t.pumpWidget(const SizedBox.shrink());
   t.view.physicalSize = size;
   t.view.devicePixelRatio = 1;
@@ -87,24 +92,20 @@ Future<SurfaceProbe> historySettingsConfirmation(
     ),
   );
   await frames(t, 10);
-  final action = find.byKey(Key(rebuild ? 'history-clean' : 'history-budget'));
+  final action = find.byKey(const Key('history-budget'));
   await t.ensureVisible(action);
   await frames(t, 5);
   await t.tap(action);
   await frames(t, 10);
-  if (!rebuild) {
-    await t.tap(find.text('512 MiB').last);
-    await frames(t, 10);
-  }
-  final surface = find.byKey(
-    ValueKey(rebuild ? 'history-full-clean-dialog' : 'history-lower-dialog'),
-  );
+  await t.tap(find.text('512 MiB').last);
+  await frames(t, 10);
+  final surface = find.byKey(const ValueKey('history-lower-dialog'));
   return SurfaceProbe(
     isOpen: () {
       expect(
         capacity.mutations,
         0,
-        reason: 'Dismissal must not lower the quota or rebuild storage',
+        reason: 'Dismissal must not lower the quota',
       );
       return surface.evaluate().isNotEmpty;
     },

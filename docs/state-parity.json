@@ -706,13 +706,13 @@
      "state": "partial",
      "variant": "load more in flight / load-more error",
      "web": "yes",
-     "flutter": "partial",
+     "flutter": "yes",
      "parityCase": [
       "components.conversation.files.desktop.more",
       "components.conversation.files.mobile.more"
      ],
      "status": "gap",
-     "justification": "\"Load more\" button case exists; the \"Loading more files…\" row and the \"Could not load more files.\" line (message.channelFilesPanel.loadMoreError) have no case and the error line has no Flutter string.",
+     "justification": "Flutter retains loaded files and offers same-page retry with an inline load-more error. Existing parity cases cover the Load more button only; dedicated in-flight and error cases are still missing.",
      "size": "S",
      "gapKind": "case-missing"
     }
@@ -2802,7 +2802,7 @@
      "flutter": "yes",
      "parityCase": [],
      "status": "na",
-     "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, explicit loading, retry and three themes at phone width."
+     "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, quiet loading/offline states, terminal-error retry and three themes at phone width; history_quiet_gap_view_test.dart verifies recovery and reopening."
     },
     {
      "state": "empty",
@@ -2811,7 +2811,7 @@
      "flutter": "yes",
      "parityCase": [],
      "status": "na",
-     "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, explicit loading, retry and three themes at phone width."
+     "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, quiet loading/offline states, terminal-error retry and three themes at phone width; history_quiet_gap_view_test.dart verifies recovery and reopening."
     },
     {
      "state": "error",
@@ -2820,7 +2820,7 @@
      "flutter": "yes",
      "parityCase": [],
      "status": "na",
-     "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, explicit loading, retry and three themes at phone width."
+     "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, quiet loading/offline states, terminal-error retry and three themes at phone width; history_quiet_gap_view_test.dart verifies recovery and reopening."
     },
     {
      "state": "partial",
@@ -2829,7 +2829,7 @@
      "flutter": "yes",
      "parityCase": [],
      "status": "na",
-     "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, explicit loading, retry and three themes at phone width."
+     "justification": "Native-only saved message history; history_gaps_test.dart and message_history_gaps_test.dart verify indexed coverage, quiet loading/offline states, terminal-error retry and three themes at phone width; history_quiet_gap_view_test.dart verifies recovery and reopening."
     }
    ]
   }

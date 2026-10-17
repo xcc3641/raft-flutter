@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:raft_ui/raft_ui.dart' show RaftHotImages, RaftImageBytes;
 
+import '../data/user_activity.dart';
 import 'memory_budgets.dart';
 
 /// Why rebuildable memory is released.
@@ -64,6 +65,9 @@ class RaftMemoryRelease with WidgetsBindingObserver {
   void install() {
     if (_installed) return;
     _installed = true;
+    // Before the first activity query. A click during startup must still
+    // count, or a desktop reader at the bottom leaves a live message unread.
+    RaftUserActivity.install();
     _restoreImageCache = _budgets().applyImageCache(_imageCache());
     _removeAvatarReporter = addReporter('avatars', () {
       final hot = RaftHotImages.instance, bytes = RaftImageBytes.instance;
@@ -132,6 +136,8 @@ class RaftMemoryRelease with WidgetsBindingObserver {
         _timer?.cancel();
         _timer = null;
         _backgrounded = false;
+        // The startup call can miss when no binding exists yet.
+        RaftUserActivity.install();
       case AppLifecycleState.inactive:
         break;
     }

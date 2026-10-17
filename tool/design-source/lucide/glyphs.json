@@ -1225,6 +1225,15 @@
    "Sun": "sun@0.575.0",
    "VolumeX": "volume-x@0.575.0",
    "Bookmark": "bookmark@0.575.0"
+  },
+  "flutter": {
+   "Bold": "bold@0.575.0",
+   "Heading": "heading@0.575.0",
+   "Italic": "italic@0.575.0",
+   "ListOrdered": "list-ordered@0.575.0",
+   "Minimize2": "minimize-2@0.575.0",
+   "Strikethrough": "strikethrough@0.575.0",
+   "Table": "table@0.575.0"
   }
  },
  "icons": {
@@ -1672,6 +1681,19 @@
       "width": "8",
       "height": "8",
       "rx": "1"
+     }
+    }
+   ]
+  },
+  "bold@0.575.0": {
+   "icon": "bold",
+   "version": "0.575.0",
+   "sha256": "0e92bdd9a390c5f15884da3cfdb47154b4870ad0c7f0d759ba51d094b2fdf053",
+   "nodes": [
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"
      }
     }
    ]
@@ -3337,6 +3359,31 @@
     }
    ]
   },
+  "heading@0.575.0": {
+   "icon": "heading",
+   "version": "0.575.0",
+   "sha256": "d9152ccdf897d45e9dbf5dc1a4628adf5b6df85a4db69635bb371dd7cad687f1",
+   "nodes": [
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M6 12h12"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M6 20V4"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M18 20V4"
+     }
+    }
+   ]
+  },
   "house@0.575.0": {
    "icon": "house",
    "version": "0.575.0",
@@ -3580,6 +3627,40 @@
      "tag": "path",
      "attrs": {
       "d": "M12 8h.01"
+     }
+    }
+   ]
+  },
+  "italic@0.575.0": {
+   "icon": "italic",
+   "version": "0.575.0",
+   "sha256": "4b7862e638045a49be95b03910d9b437751409aa49e240c7380b4e315bd1b7f1",
+   "nodes": [
+    {
+     "tag": "line",
+     "attrs": {
+      "x1": "19",
+      "x2": "10",
+      "y1": "4",
+      "y2": "4"
+     }
+    },
+    {
+     "tag": "line",
+     "attrs": {
+      "x1": "14",
+      "x2": "5",
+      "y1": "20",
+      "y2": "20"
+     }
+    },
+    {
+     "tag": "line",
+     "attrs": {
+      "x1": "15",
+      "x2": "9",
+      "y1": "4",
+      "y2": "20"
      }
     }
    ]
@@ -3908,6 +3989,49 @@
      "tag": "path",
      "attrs": {
       "d": "m3 7 2 2 4-4"
+     }
+    }
+   ]
+  },
+  "list-ordered@0.575.0": {
+   "icon": "list-ordered",
+   "version": "0.575.0",
+   "sha256": "f29830d7b2dd32c71aada3853ff15598cf619492637e0e2bbd06b333117dd96d",
+   "nodes": [
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M11 5h10"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M11 12h10"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M11 19h10"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M4 4h1v5"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M4 9h2"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02"
      }
     }
    ]
@@ -4406,6 +4530,37 @@
      "tag": "path",
      "attrs": {
       "d": "M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"
+     }
+    }
+   ]
+  },
+  "minimize-2@0.575.0": {
+   "icon": "minimize-2",
+   "version": "0.575.0",
+   "sha256": "c6f53e5d5d49fb54b8fa298938cb006c7e9ecd39fe6951c4d3ba6e64ad8a0b26",
+   "nodes": [
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "m14 10 7-7"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M20 10h-6V4"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "m3 21 7-7"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M4 14h6v6"
      }
     }
    ]
@@ -5319,6 +5474,34 @@
     }
    ]
   },
+  "strikethrough@0.575.0": {
+   "icon": "strikethrough",
+   "version": "0.575.0",
+   "sha256": "fcda6a99a3940a504f2c387ede8d3ebbb6ab1a1fa86b53a7f74cf08e7c31aed6",
+   "nodes": [
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M16 4H9a3 3 0 0 0-2.83 4"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M14 12a4 4 0 0 1 0 8H6"
+     }
+    },
+    {
+     "tag": "line",
+     "attrs": {
+      "x1": "4",
+      "x2": "20",
+      "y1": "12",
+      "y2": "12"
+     }
+    }
+   ]
+  },
   "sun@0.575.0": {
    "icon": "sun",
    "version": "0.575.0",
@@ -5378,6 +5561,41 @@
      "tag": "path",
      "attrs": {
       "d": "m19.07 4.93-1.41 1.41"
+     }
+    }
+   ]
+  },
+  "table@0.575.0": {
+   "icon": "table",
+   "version": "0.575.0",
+   "sha256": "872ec5542ec067f2062bed6e57912c1f062642cb2efabe47cd83d11b53b6b7ae",
+   "nodes": [
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M12 3v18"
+     }
+    },
+    {
+     "tag": "rect",
+     "attrs": {
+      "width": "18",
+      "height": "18",
+      "x": "3",
+      "y": "3",
+      "rx": "2"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M3 9h18"
+     }
+    },
+    {
+     "tag": "path",
+     "attrs": {
+      "d": "M3 15h18"
      }
     }
    ]

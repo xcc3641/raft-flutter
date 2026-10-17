@@ -5,9 +5,30 @@ Independent checks (host tests, analysis, sharded Dart tests) run concurrently.
 Dart test files are split into balanced shards, one `flutter test` process each.
 Theme-parametrized Dart tests run the default theme plus one sampled variant per
 file; `--all-themes` (or RAFT_TEST_ALL_THEMES=1) runs the full theme matrix.
-Nothing is retried: a failing or timed-out test fails the gate and is listed in
-`.local/check-summary.txt`. Knobs: RAFT_CHECK_SHARDS, RAFT_CHECK_JOBS (flutter
-test `-j` per shard), RAFT_CHECK_SHARD_TIMEOUT_MINUTES (whole-shard watchdog).
+A failing or timed-out test is listed in `.local/check-summary.txt`. Knobs:
+RAFT_CHECK_SHARDS, RAFT_CHECK_JOBS (flutter test `-j` per shard),
+RAFT_CHECK_SHARD_TIMEOUT_MINUTES (whole-shard watchdog).
+
+Flaky tests do not force a whole re-run. When the ONLY failing checks are Dart test
+shards (analysis, lints, the structure audit, host tests and pub get are never
+retried), the failed test files plus files that never finished are re-run alone with
+`flutter test <file>`, up to RAFT_CHECK_RETRIES attempts each (default 3, 0 = no
+retry), stopping at the first pass. A file that passes on a retry is a flake: the
+run may pass, and the final JSON lists it as
+"flaky": [{"file", "tests": [failed test names of the first run], "errors": [their first-run failure messages], "attempts": n}]
+(n = retry attempts used) while the summary prints "FLAKY (passed on retry)". A
+file that fails every attempt keeps the run failed. More than 6 files to retry
+(real breakage), an early stop (max failures, compile error, stall) or a failure
+without a test file means no retry at all.
+
+An identical code tree is not checked twice. A full pass on a clean worktree
+(`git status --porcelain` empty) is recorded under
+${RAFT_CHECK_CACHE:-~/.cache/raft-check}/passed/<tree>.json, keyed by
+`git rev-parse HEAD^{tree}` (with time, HEAD commit and the final JSON; a pass with
+flakes is recorded too). `--reuse` prints "tree <hash> already passed ..." plus the
+stored JSON with "reused": true and exits 0 without running anything, when the
+worktree is clean and that tree has a recorded pass (an `--all-themes` run only
+reuses an all-themes pass). A dirty worktree never reuses and runs normally.
 
 The gate fails fast so a broken branch does not hold the shared lock for a full
 run: the shards' output is watched while they run, and every process this run
@@ -16,6 +37,8 @@ tests have failed (default 3, 0 = never stop early), or when no shard printed
 anything for RAFT_CHECK_STALL_MINUTES (default 10, 0 = off). Each step is appended
 to /tmp/raft-flutter-gate-events.log (tool/gate_events.py), with a terminal
 PASS/FAIL/ERROR line on every path; RAFT_GATE_NOTIFY_TARGET also sends failures.
+
+Usage: tool/check-project [--all-themes] [--reuse]
 """
 import codecs
 import concurrent.futures
@@ -46,6 +69,9 @@ SLOWEST_TESTS = 20
 DEFAULT_SHARD_TIMEOUT_MINUTES = 60
 DEFAULT_MAX_FAILURES = 3
 DEFAULT_STALL_MINUTES = 10
+DEFAULT_RETRIES = 3
+MAX_RETRY_FILES = 6  # more failed files than this is real breakage, not flakiness
+DEFAULT_RETRY_TIMEOUT_MINUTES = 20  # one single-file retry attempt
 STARTUP_TIMEOUT_SECONDS = 180  # longest one shard may hold the startup slot before the next one starts anyway
 STARTUP_POLL_SECONDS = 0.1
 POLL_SECONDS = 0.5
@@ -113,9 +139,23 @@ def plan_parallelism(cpu, load1=0.0, env=None, platform=None):
         return int(raw)
 
     eff = effective_cpus(cpu, load1)
-    shards = positive('RAFT_CHECK_SHARDS') or (1 if platform == 'darwin' else max(1, min(8, eff // 3)))
+    # A busy machine must not fall back to one shard: one shard runs every file
+    # in a row and outlives the shard watchdog. Keep a floor tied to the CPU
+    # count (not the load) and let -j absorb the contention instead.
+    floor = max(1, min(3, cpu // 4))
+    shards = positive('RAFT_CHECK_SHARDS') or (1 if platform == 'darwin' else max(floor, min(8, eff // 3)))
     jobs = positive('RAFT_CHECK_JOBS') or max(2, min(4 if shards > 1 else 8, eff // shards))
     return shards, jobs
+
+
+def shard_timeout_seconds(weight, jobs, override=None):
+    """Whole-shard watchdog: the default, or longer for a shard whose measured
+    work (`weight` file-seconds over `jobs` workers) needs more, with 2.5x
+    headroom for a loaded machine. An explicit override always wins."""
+    if override:
+        return float(override) * 60
+    expected = (weight or 0) / max(1, jobs)
+    return max(DEFAULT_SHARD_TIMEOUT_MINUTES * 60, 2.5 * expected)
 
 
 def partition(files, weights, shards, fallback=None):
@@ -236,7 +276,7 @@ def slowest_tests(results, count=SLOWEST_TESTS):
     return [{'name': r['name'], 'file': r['file'], 'seconds': r['seconds']} for r in real[:count]]
 
 
-def format_summary(shards, failures, totals, slowest, limit=None, themes=None, stop=None):
+def format_summary(shards, failures, totals, slowest, limit=None, themes=None, stop=None, flaky=(), retry_failed=()):
     """Human-readable gate summary; failures are listed by test name (first `limit` if given)."""
     lines = [f"Dart tests: {totals['passed']} passed, {totals['skipped']} skipped, {len(failures)} failed across {len(shards)} shard(s)" + (f' (themes: {themes}).' if themes else '.')]
     if stop:
@@ -245,6 +285,16 @@ def format_summary(shards, failures, totals, slowest, limit=None, themes=None, s
     for shard in shards:
         state = 'ok' if shard['passed'] else 'STOPPED' if shard.get('stopped') else 'FAILED'
         lines.append(f"  shard {shard['index']}: {state} {shard['seconds']:.0f}s, {len(shard['files'])} files (log {shard['log']})")
+    if flaky:
+        lines.append('FLAKY (passed on retry):')
+        for item in flaky:
+            names = '; '.join(item['tests']) or '(file did not finish)'
+            lines.append(f"  {item['file']} (retry attempt {item['attempts']}): {names}")
+            for error in item.get('errors', ()):
+                lines.append(f"    first run: {error}")
+    if retry_failed:
+        lines.append('Still failing after retries:')
+        lines.extend(f"  {item['file']} ({item['attempts']} retry attempt(s))" for item in retry_failed)
     if failures:
         lines.append('Failed tests:')
         for f in failures[:limit]:
@@ -593,6 +643,183 @@ def collect_shard(shard):
     return parse_test_events(lines, to_repo_path)
 
 
+PLACEHOLDER_NAMES = ('(file never ran)', '(load/compile error)')
+
+
+def retry_decision(failures, other_checks_ok, stop, retries, limit=MAX_RETRY_FILES):
+    """Which test files to re-run alone: {'files': [...], 'skip': None} or {'files': [], 'skip': reason}.
+
+    Only a run whose sole failures are Dart test files qualifies: every other check
+    passed, nothing stopped it early, each failure names a real file, and at most
+    `limit` files failed (more is real breakage).
+    """
+    files = []
+    for failure in failures:
+        if failure['file'] not in files:
+            files.append(failure['file'])
+
+    def skip(reason):
+        return {'files': [], 'skip': reason}
+
+    if retries <= 0:
+        return skip('retries are off (RAFT_CHECK_RETRIES=0)')
+    if stop:
+        return skip(f"the run stopped early ({stop['reason']})")
+    if not other_checks_ok:
+        return skip('a check other than the Dart test shards failed')
+    if not failures:
+        return skip('no failed test to retry')
+    if any(not f['file'] or f['file'] == '?' or f['name'] == '(load/compile error)' for f in failures):
+        return skip('a failure is not attributed to a test file')
+    if len(files) > limit:
+        return skip(f'{len(files)} test files failed (more than {limit}); that is breakage, not a flake')
+    return {'files': files, 'skip': None}
+
+
+def failed_test_names(failures, file):
+    """Names of the first run's failed tests in `file` (placeholders for whole-file failures dropped)."""
+    names = []
+    for failure in failures:
+        if failure['file'] == file and failure['name'] not in PLACEHOLDER_NAMES and failure['name'] not in names:
+            names.append(failure['name'])
+    return names
+
+
+def first_run_errors(failures, file, limit=3, width=300):
+    """The first run's failure messages in `file`, so a flake keeps the evidence of how it failed."""
+    errors = []
+    for failure in failures:
+        message = (failure.get('error') or '').strip()
+        if failure['file'] == file and message and message not in errors:
+            errors.append(message if len(message) <= width else message[:width] + '…')
+    return errors[:limit]
+
+
+def retry_files(files, failures, retries, run_once):
+    """Re-run each file alone, up to `retries` attempts, stopping at its first pass.
+
+    `run_once(file, attempt)` returns True when that single-file run passed.
+    Returns (flaky, still_failing): flaky entries are
+    {'file', 'tests' (first run's failed tests), 'attempts' (retry attempts used)}.
+    """
+    flaky, still_failing = [], []
+    for file in files:
+        for attempt in range(1, retries + 1):
+            if run_once(file, attempt):
+                flaky.append({'file': file, 'tests': failed_test_names(failures, file), 'errors': first_run_errors(failures, file), 'attempts': attempt})
+                break
+        else:
+            still_failing.append({'file': file, 'attempts': retries})
+    return flaky, still_failing
+
+
+def retry_passed(code, log_text, parsed, planned):
+    """A single-file retry passed: clean exit, the reporter's success line, no failed or unloaded test."""
+    return code == 0 and has_pass_marker(log_text) and not summarize_shard(parsed)['failed'] and not unfinished_files(planned, parsed)
+
+
+def retry_timeout_seconds(override=None):
+    return float(override) * 60 if override else DEFAULT_RETRY_TIMEOUT_MINUTES * 60
+
+
+def run_retry_once(file, attempt, jobs, env, timeout):
+    """One `flutter test <file>` with the shards' flags and the JSON reporter; True when it passed."""
+    source = root / file
+    if not source.is_file():
+        return False
+    slug = re.sub(r'[^A-Za-z0-9]+', '-', file).strip('-')[-80:]
+    log = local / f'retry-{slug}-{attempt}.txt'
+    events = local / f'retry-{slug}-{attempt}.json'
+    events.unlink(missing_ok=True)
+    relative = pathlib.Path(os.path.relpath(source, app_dir)).as_posix()
+    args = [*tool_command('flutter'), 'test', relative, '--no-pub', '-j', str(jobs), '--reporter', 'expanded', '--file-reporter', f'json:{events}']
+    code = run_logged(args, app_dir, log, env, timeout)
+    try:
+        lines = events.read_text(encoding='utf-8', errors='replace').splitlines()
+    except OSError:
+        lines = []
+    log_text = log.read_text(encoding='utf-8', errors='replace') if log.exists() else ''
+    return retry_passed(code, log_text, parse_test_events(lines, to_repo_path), [file])
+
+
+# ---- reuse of a pass for an identical tree -------------------------------------------------
+
+def cache_root(env=None):
+    env = os.environ if env is None else env
+    return pathlib.Path(env.get('RAFT_CHECK_CACHE') or pathlib.Path.home() / '.cache' / 'raft-check')
+
+
+def git_text(*args, cwd=None):
+    return subprocess.check_output(['git', *args], cwd=cwd or root, text=True, stderr=subprocess.DEVNULL).strip()
+
+
+def clean_tree_hash(cwd=None):
+    """`git rev-parse HEAD^{tree}` when the worktree is clean (nothing in `git status --porcelain`), else None."""
+    try:
+        if git_text('status', '--porcelain', cwd=cwd):
+            return None
+        return git_text('rev-parse', 'HEAD^{tree}', cwd=cwd) or None
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def passed_record_path(tree, env=None):
+    return cache_root(env) / 'passed' / f'{tree}.json'
+
+
+def read_pass_record(tree, env=None):
+    record = read_json(passed_record_path(tree, env))
+    ok = isinstance(record, dict) and record.get('tree') == tree and isinstance(record.get('result'), dict) and record['result'].get('passed') is True
+    return record if ok else None
+
+
+def pass_covers(record, themes):
+    """A recorded all-themes pass covers a sampled request; a sampled pass does not cover all themes."""
+    return record.get('themes', 'sampled') == 'all' or themes == 'sampled'
+
+
+def record_pass(tree, commit, result, themes, engineering_run=None, env=None, now=None):
+    """Remember a full pass of `tree`; never raises (a cache that cannot be written only costs a re-run)."""
+    try:
+        existing = read_pass_record(tree, env)
+        if existing and not pass_covers({'themes': themes}, existing.get('themes', 'sampled')):
+            return None  # keep the stronger all-themes record
+        path = passed_record_path(tree, env)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stamp = (now or time.gmtime())
+        record = {'tree': tree, 'time': time.strftime('%Y-%m-%dT%H:%M:%SZ', stamp), 'commit': commit, 'themes': themes,
+                  'result': result, 'engineeringRun': engineering_run}
+        temporary = path.with_name(f'{path.name}.{os.getpid()}.tmp')
+        temporary.write_text(json.dumps(record, indent=2), encoding='utf-8')
+        os.replace(temporary, path)
+        return path
+    except OSError as error:
+        print(f'check-project: could not record the pass for reuse: {error}', file=sys.stderr)
+        return None
+
+
+def reusable_pass(themes, cwd=None, env=None):
+    """The recorded pass to reuse for the current clean tree, else None (dirty tree, no record, weaker themes)."""
+    tree = clean_tree_hash(cwd)
+    record = read_pass_record(tree, env) if tree else None
+    return record if record and pass_covers(record, themes) else None
+
+
+def reuse_message(record):
+    return f"check-project: tree {record['tree']} already passed at {record.get('time', '?')} on {record.get('commit', '?')}; reusing"
+
+
+def parse_args(argv):
+    """(all_themes, reuse); --help prints the docstring."""
+    known = {'--all-themes', '--reuse'}
+    if '--help' in argv or '-h' in argv:
+        print(__doc__)
+        raise SystemExit(0)
+    if any(arg not in known for arg in argv):
+        raise SystemExit(f'check-project: unknown arguments {argv}; the options are --all-themes and --reuse.')
+    return '--all-themes' in argv, '--reuse' in argv
+
+
 def write_aggregate_log(shards, summary_text, passed):
     """`all-project-tests.txt` keeps the marker line downstream tools check for."""
     with (local / 'all-project-tests.txt').open('w', encoding='utf-8') as out:
@@ -655,7 +882,7 @@ def run_gate(check_env, emit, started):
     sizes = {f: (app_dir / f).stat().st_size for f in files if (app_dir / f).is_file()}
     shard_count, jobs = plan_parallelism(cpu, load)
     plan = partition(files, history_weights(root), shard_count, sizes)
-    shard_timeout = float(os.environ.get('RAFT_CHECK_SHARD_TIMEOUT_MINUTES') or DEFAULT_SHARD_TIMEOUT_MINUTES) * 60
+    timeout_override = os.environ.get('RAFT_CHECK_SHARD_TIMEOUT_MINUTES')
     max_failures = int(env_number('RAFT_CHECK_MAX_FAILURES', DEFAULT_MAX_FAILURES))
     stall_minutes = env_number('RAFT_CHECK_STALL_MINUTES', DEFAULT_STALL_MINUTES)
     print(f'check-project: {len(files)} test files in {len(plan)} shard(s) x -j{jobs} on {cpu} CPUs (load {load:.1f}); themes: {themes_mode(check_env)}.', file=sys.stderr)
@@ -725,7 +952,7 @@ def run_gate(check_env, emit, started):
         lints_future = pool.submit(raft_lints)
         startup_gate = StartupGate()
         shard_logs, shard_events = fresh_shard_outputs(len(plan))
-        shard_futures = [pool.submit(run_shard, i, bucket['files'], jobs, check_env, shard_timeout, startup_gate) for i, bucket in enumerate(plan)]
+        shard_futures = [pool.submit(run_shard, i, bucket['files'], jobs, check_env, shard_timeout_seconds(bucket['weight'], jobs, timeout_override), startup_gate) for i, bucket in enumerate(plan)]
         watch = GateWatch([[repo_path(f) for f in bucket['files']] for bucket in plan], time.monotonic(), max_failures, stall_minutes, emit, to_repo_path)
         try:
             stop = supervise([*shard_futures, host_future, analyze_future, lints_future], shard_logs, shard_events, watch, emit)
@@ -765,6 +992,26 @@ def run_gate(check_env, emit, started):
     if watch.compile and not any(f['file'] == watch.compile['file'] for f in failures):
         failures.append({'name': '(load/compile error)', 'file': watch.compile['file'], 'status': 'failed', 'shard': watch.compile['shard'],
                          'error': watch.compile['lines'][0] if watch.compile['lines'] else 'failed to load'})
+    flaky, retry_failed = [], []
+    if not all(s['passed'] for s in shards) and shards:
+        retries = int(env_number('RAFT_CHECK_RETRIES', DEFAULT_RETRIES))
+        other_ok = all(ok for key, ok in results.items() if not key.startswith('test-shard-'))
+        decision = retry_decision(failures, other_ok, stop, retries)
+        if decision['files']:
+            retry_timeout = retry_timeout_seconds(timeout_override)
+            print(f"check-project: retrying {len(decision['files'])} failed test file(s) alone, up to {retries} attempt(s) each.", file=sys.stderr)
+            emit('RETRY', files=len(decision['files']), attempts=retries)
+            flaky, retry_failed = retry_files(decision['files'], failures, retries, lambda file, attempt: run_retry_once(file, attempt, jobs, check_env, retry_timeout))
+            for item in flaky:
+                emit('FLAKY', file=item['file'], attempts=item['attempts'])
+            flaky_files = {item['file'] for item in flaky}
+            failures = [f for f in failures if f['file'] not in flaky_files]  # a flake is reported as such, not as a failure
+            for shard in shards:
+                if not shard['passed'] and not any(f['shard'] == shard['index'] for f in failures):
+                    shard['passed'] = True
+                    results[f"test-shard-{shard['index']}.txt"] = True
+        elif failures or not other_ok:
+            print(f"check-project: not retrying: {decision['skip']}.", file=sys.stderr)
     tests_passed = all(s['passed'] for s in shards) and bool(shards)
     results['all-project-tests.txt'] = tests_passed
     ordered = {key: results[key] for key in ['workspace-pub-get.txt', 'structure-audit.txt', 'host-collector-tests.txt', 'bindings-generator-pub-get.txt', 'raft-lints-pub-get.txt', 'all-project-tests.txt', 'analyze-all.txt', 'raft-lints.txt']}
@@ -772,7 +1019,7 @@ def run_gate(check_env, emit, started):
     results = ordered
 
     slowest = slowest_tests(all_results)
-    summary_text = format_summary(shards, failures, totals, slowest, themes=themes_mode(check_env), stop=stop)
+    summary_text = format_summary(shards, failures, totals, slowest, themes=themes_mode(check_env), stop=stop, flaky=flaky, retry_failed=retry_failed)
     (local / 'check-summary.txt').write_text(summary_text, encoding='utf-8')
     write_aggregate_log(shards, summary_text, tests_passed)
     previous = read_json(local / 'check-durations.json').get('files', {})
@@ -781,25 +1028,29 @@ def run_gate(check_env, emit, started):
     (local / 'check-durations.json').write_text(json.dumps({
         'sourceHash': source_hash, 'wallSeconds': round(time.monotonic() - started, 1), 'shards': len(shards), 'jobsPerShard': jobs,
         'slowestTests': slowest, 'files': dict(sorted(merged.items()))}, indent=2), encoding='utf-8')
-    sys.stderr.write(format_summary(shards, failures, totals, slowest, limit=40, themes=themes_mode(check_env), stop=stop))
+    sys.stderr.write(format_summary(shards, failures, totals, slowest, limit=40, themes=themes_mode(check_env), stop=stop, flaky=flaky, retry_failed=retry_failed))
 
     changed = stamp() != source_hash
     ok = all(results.values()) and not changed and not stop
-    (local / 'engineering-run.json').write_text(json.dumps({
+    run_record = {
         'sourceHash': source_hash, 'completed': ok, 'themes': themes_mode(check_env), 'checks': results,
         'shards': [{'index': s['index'], 'passed': s['passed'], 'exitCode': s['code'], 'seconds': round(s['seconds'], 1), 'files': len(s['files']), 'log': s['log'],
                     'startup': {'result': s['startup'][0], 'seconds': round(s['startup'][1], 1)} if s.get('startup') else None} for s in shards],
         'stoppedEarly': {'reason': stop['reason'], 'message': stop['message'], 'lines': stop['lines']} if stop else None,
-        'failedTests': [{'shard': f['shard'], 'file': f['file'], 'name': f['name']} for f in failures]}, indent=2))
-    print(json.dumps({'passed': ok, 'sourceChanged': changed, 'checks': results}))
-    return {'ok': ok, 'failures': failures, 'stop': stop, 'changed': changed, 'failed_checks': [k for k, v in results.items() if not v]}
+        'failedTests': [{'shard': f['shard'], 'file': f['file'], 'name': f['name']} for f in failures],
+        'flaky': flaky}
+    (local / 'engineering-run.json').write_text(json.dumps(run_record, indent=2))
+    result = {'passed': ok, 'sourceChanged': changed, 'checks': results, **({'flaky': flaky} if flaky else {})}
+    print(json.dumps(result))
+    return {'ok': ok, 'failures': failures, 'stop': stop, 'changed': changed, 'failed_checks': [k for k, v in results.items() if not v],
+            'flaky': flaky, 'result': result, 'run_record': run_record}
 
 
 def finish(emit, started, outcome):
     """Terminal PASS/FAIL event (and notification for FAIL unless ABORT already sent one)."""
     seconds = f'{time.monotonic() - started:.0f}s'
     if outcome['ok']:
-        emit('PASS', duration=seconds, failures=0)
+        emit('PASS', duration=seconds, failures=0, **({'flaky': len(outcome['flaky'])} if outcome.get('flaky') else {}))
         return
     failures, stop = outcome['failures'], outcome['stop']
     notify = None
@@ -855,10 +1106,24 @@ def with_run_tmp(env, path):
 
 def main():
     check_env = dict(os.environ, PYTHONUTF8='1', RAFT_PROJECT_GATE='1')
-    if '--all-themes' in sys.argv[1:]:
+    all_themes, reuse = parse_args(sys.argv[1:])
+    if all_themes:
         check_env['RAFT_TEST_ALL_THEMES'] = '1'
-    elif sys.argv[1:]:
-        raise SystemExit(f'check-project: unknown arguments {sys.argv[1:]}; the only option is --all-themes.')
+    themes = themes_mode(check_env)
+    if reuse:
+        record = reusable_pass(themes)
+        if record:
+            emit, started = gate_events.Events(root), time.monotonic()
+            print(reuse_message(record))
+            if isinstance(record.get('engineeringRun'), dict):  # tool/prepare-handoff reads the run record next to the result line
+                local.mkdir(exist_ok=True)
+                (local / 'engineering-run.json').write_text(json.dumps(record['engineeringRun'], indent=2))
+            emit('PASS', duration='0s', failures=0, reused=record['tree'])
+            gate_events.flush_notifications()
+            print(json.dumps({**record['result'], 'reused': True}))
+            sys.exit(0)
+        print('check-project: --reuse found no recorded pass for this clean tree (or the worktree is dirty); running the checks.', file=sys.stderr)
+    start_tree = clean_tree_hash()
     emit, started = gate_events.Events(root), time.monotonic()
     gate_events.raise_on_signals()
     log = str(root / '.local')
@@ -867,6 +1132,8 @@ def main():
     try:
         outcome = run_gate(check_env, emit, started)
         finish(emit, started, outcome)
+        if outcome['ok'] and start_tree and clean_tree_hash() == start_tree:  # only a clean tree that stayed clean is worth remembering
+            record_pass(start_tree, git_text('rev-parse', 'HEAD'), outcome['result'], themes, outcome.get('run_record'))
     except BaseException as error:  # every other path still ends with a terminal event
         kill_children()
         if isinstance(error, SystemExit) and error.code in (0, None):

@@ -70,7 +70,7 @@ class _MemberProfileViewState extends ManagementState<MemberProfileView> {
     // Accepted live membership still wins over the last detail projection.
     profile = {
       ...fields['profile'] as Map<String, dynamic>,
-      ...?w.entityDirectory.member(widget.userId),
+      ...?w.services.entityDirectory.member(widget.userId),
     };
     return true;
   }
@@ -78,8 +78,8 @@ class _MemberProfileViewState extends ManagementState<MemberProfileView> {
   @override
   void initState() {
     super.initState();
-    profile = w.entityDirectory.member(widget.userId) ?? {};
-    w.entityDirectory.addListener(directoryChanged);
+    profile = w.services.entityDirectory.member(widget.userId) ?? {};
+    w.services.entityDirectory.addListener(directoryChanged);
     startManagement();
   }
 
@@ -87,19 +87,19 @@ class _MemberProfileViewState extends ManagementState<MemberProfileView> {
   void didUpdateWidget(MemberProfileView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != w) {
-      oldWidget.controller.entityDirectory.removeListener(directoryChanged);
-      w.entityDirectory.addListener(directoryChanged);
+      oldWidget.controller.services.entityDirectory.removeListener(directoryChanged);
+      w.services.entityDirectory.addListener(directoryChanged);
       rebindManagementController();
-      profile = {...profile, ...?w.entityDirectory.member(widget.userId)};
+      profile = {...profile, ...?w.services.entityDirectory.member(widget.userId)};
     } else if (oldWidget.userId != widget.userId) {
       refreshAuthority();
-      profile = {...profile, ...?w.entityDirectory.member(widget.userId)};
+      profile = {...profile, ...?w.services.entityDirectory.member(widget.userId)};
     }
   }
 
   void directoryChanged() {
     if (!mounted) return;
-    final failure = w.entityDirectory.state(WorkspaceEntityKind.members).error;
+    final failure = w.services.entityDirectory.state(WorkspaceEntityKind.members).error;
     if (failure is RaftApiException && [401, 403].contains(failure.status)) {
       setState(() {
         profile = {};
@@ -108,7 +108,7 @@ class _MemberProfileViewState extends ManagementState<MemberProfileView> {
       });
       return;
     }
-    final live = w.entityDirectory.member(widget.userId);
+    final live = w.services.entityDirectory.member(widget.userId);
     if (live != null) {
       setState(() => profile = {...profile, ...live});
       saveSnapshot();
@@ -117,7 +117,7 @@ class _MemberProfileViewState extends ManagementState<MemberProfileView> {
 
   @override
   void dispose() {
-    w.entityDirectory.removeListener(directoryChanged);
+    w.services.entityDirectory.removeListener(directoryChanged);
     super.dispose();
   }
 
@@ -146,7 +146,7 @@ class _MemberProfileViewState extends ManagementState<MemberProfileView> {
       throw const FormatException('Invalid member profile response.');
     }
     if (accepts(generation, request)) {
-      final failure = w.entityDirectory
+      final failure = w.services.entityDirectory
           .state(WorkspaceEntityKind.members)
           .error;
       if (failure is RaftApiException && [401, 403].contains(failure.status)) {
@@ -156,7 +156,7 @@ class _MemberProfileViewState extends ManagementState<MemberProfileView> {
       // fallback detail projection; preserve detail-only fields.
       profile = {
         ...Map<String, dynamic>.from(value),
-        ...?w.entityDirectory.member(widget.userId),
+        ...?w.services.entityDirectory.member(widget.userId),
       };
       detailLoaded = true;
       // `useServerFeatureFlag(server_guest_v0)` feeds the role options
@@ -207,7 +207,7 @@ class _MemberProfileViewState extends ManagementState<MemberProfileView> {
     serverGuestEnabled: guestEnabled,
   );
 
-  int get _ownerCount => w.entityDirectory
+  int get _ownerCount => w.services.entityDirectory
       .rows(WorkspaceEntityKind.members)
       .where((m) => m['role'] == 'owner')
       .length;
@@ -339,7 +339,7 @@ class _MemberProfileViewState extends ManagementState<MemberProfileView> {
   /// Live agent activity (`agent:activity`) else the summary's status: the
   /// created-agent row's StatusDot (`computeAgentDisplayState`).
   String? _createdActivity(Map a) {
-    final row = w.entityDirectory.agent('${a['id']}');
+    final row = w.services.entityDirectory.agent('${a['id']}');
     final activity = row?['activity'];
     if (activity is String) return activity;
     return (row?['status'] ?? a['status']) == 'active' ? 'online' : 'offline';

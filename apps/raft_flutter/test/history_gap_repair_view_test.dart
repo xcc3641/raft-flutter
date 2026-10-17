@@ -17,7 +17,7 @@ import 'history_memory_viewport_test.dart' show drainIo;
 void main() {
   for (final empty in [false, true]) {
     testWidgets(
-      'gap button clears after ${empty ? 'empty' : 'duplicate-only'} response and stays clear offline after reopening',
+      'automatic gap status clears after ${empty ? 'empty' : 'duplicate-only'} response and stays clear offline after reopening',
       (t) async {
         SharedPreferences.setMockInitialValues({});
         t.view.physicalSize = const Size(900, 800);
@@ -60,7 +60,7 @@ void main() {
 
         try {
           await mount();
-          expect(find.text('Load this gap'), findsOneWidget);
+          expect(find.text('Load this gap'), findsNothing);
           final loaded = Completer<void>();
           void finished() {
             if (!w.loadingOlder &&
@@ -72,9 +72,8 @@ void main() {
 
           w.addListener(finished);
           try {
-            await t.tap(find.text('Load this gap'));
             await drainIo(t, client.beforeArrived.future);
-            expect(find.text('Loading...'), findsOneWidget);
+            expect(find.text('Loading missing messages…'), findsNothing);
             if (empty) {
               client.arrivals.add(
                 RaftEvent('message:updated', {

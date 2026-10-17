@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_flutter/features/chat_view.dart';
-import 'package:raft_flutter/features/mobile_settings_owner.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -23,8 +22,6 @@ void main() {
           '${thread ? 'thread' : 'channel'} $family tall=$tall direct=$direct: older page keeps the reading position',
           (tester) async {
             SharedPreferences.setMockInitialValues({});
-            MobileSettingsPreference.instance.setEnabled(direct);
-            addTearDown(MobileSettingsPreference.instance.resetForTest);
             tester.view.physicalSize = const Size(1280, 800);
             tester.view.devicePixelRatio = 1;
             addTearDown(tester.view.reset);

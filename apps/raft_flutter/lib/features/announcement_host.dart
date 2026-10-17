@@ -67,17 +67,17 @@ class _AnnouncementHostState extends State<AnnouncementHost>
   void _bind(WorkspaceController controller) {
     _bound = controller;
     controller.addListener(_changed);
-    controller.announcements.addListener(_changed);
-    controller.announcementGate.addListener(_changed);
+    controller.services.announcements.addListener(_changed);
+    controller.services.announcementGate.addListener(_changed);
     _serverId = null;
-    unawaited(controller.announcements.load());
+    unawaited(controller.services.announcements.load());
     _changed();
   }
 
   void _unbind(WorkspaceController controller, {bool disposing = false}) {
     controller.removeListener(_changed);
-    controller.announcements.removeListener(_changed);
-    controller.announcementGate.removeListener(_changed);
+    controller.services.announcements.removeListener(_changed);
+    controller.services.announcementGate.removeListener(_changed);
     _removeRoute(deferred: disposing);
     _notified.clear();
     _setupReads.clear();
@@ -95,7 +95,7 @@ class _AnnouncementHostState extends State<AnnouncementHost>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(w.announcements.load());
+      unawaited(w.services.announcements.load());
     }
   }
 
@@ -120,7 +120,7 @@ class _AnnouncementHostState extends State<AnnouncementHost>
   }
 
   void _sync() {
-    final gate = w.announcementGate, store = w.announcements;
+    final gate = w.services.announcementGate, store = w.services.announcements;
     final serverId = w.server?.id;
     if (serverId != _serverId) {
       // Web: the previous server's gate unmounts (its live reading goes).
@@ -158,7 +158,7 @@ class _AnnouncementHostState extends State<AnnouncementHost>
   /// content): read the projection the Web gate would have read.
   Future<void> _readSetup(String serverId) async {
     if (!_setupReads.add(serverId)) return;
-    final controller = w, gate = w.announcementGate;
+    final controller = w, gate = w.services.announcementGate;
     Map<String, dynamic>? projection;
     try {
       final result = await controller.client.get(
@@ -181,7 +181,7 @@ class _AnnouncementHostState extends State<AnnouncementHost>
   void _present(Announcement a) {
     final navigator = Navigator.maybeOf(context, rootNavigator: true);
     if (navigator == null) return;
-    final store = w.announcements;
+    final store = w.services.announcements;
     final route = raftModalRoute<void>(
       settings: RouteSettings(name: 'announcement:${a.id}'),
       builder: (context) => RaftAnnouncementModal(

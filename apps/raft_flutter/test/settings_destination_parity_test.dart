@@ -20,8 +20,6 @@ import 'package:raft_flutter/platform/client_release_notes.dart';
 import 'package:raft_flutter/platform/native_notifications.dart';
 import 'package:raft_ui/raft_ui.dart';
 
-import 'package:raft_flutter/features/mobile_settings_owner.dart';
-
 import 'flutter_test_config.dart' show leakDebt;
 import 'workspace_source_location_contract_test.dart' show frames, pageFixture;
 import 'support/app_services_fixture.dart';
@@ -201,11 +199,6 @@ void main() {
   // Leak debt (other): see docs/development.md, Leak tracking.
   leakDebt(const ['ValueNotifier<bool>']);
 
-  for (final direct in [false, true]) {
-    group(direct ? 'direct settings' : 'current settings', () {
-      setUp(() => MobileSettingsPreference.instance.setEnabled(direct));
-      tearDown(MobileSettingsPreference.instance.resetForTest);
-
   testWidgets(
     'Settings destinations match between the desktop and the phone '
     'shell',
@@ -276,6 +269,4 @@ void main() {
       TargetPlatform.macOS,
     }),
   );
-    });
-  }
 }

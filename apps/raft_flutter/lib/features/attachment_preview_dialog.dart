@@ -396,7 +396,7 @@ class _AttachmentPreviewDialogState extends State<AttachmentPreviewDialog>
         // opens the attachment's URL itself.
         final owner =
             widget.channelId ?? widget.metadata['channelId'] as String?;
-        final acquired = widget.controller.playerSessions.acquire(
+        final acquired = widget.controller.attachmentMedia.playerSessions.acquire(
           attachmentMediaKey(widget.metadata),
           scope: widget.controller.attachmentImageScope,
           channelId: owner,
@@ -482,7 +482,7 @@ class _AttachmentPreviewDialogState extends State<AttachmentPreviewDialog>
   /// the preview closed first; the caller owns the lease.
   Future<SharedFileLease?> fetchOriginal() async {
     final owner = widget.channelId ?? widget.metadata['channelId'] as String?;
-    Future<String> resolveUrl() => widget.controller.attachmentUrl(
+    Future<String> resolveUrl() => widget.controller.attachmentMedia.url(
       '${widget.metadata['id']}',
       channelId: owner,
     );
@@ -492,16 +492,16 @@ class _AttachmentPreviewDialogState extends State<AttachmentPreviewDialog>
     // (no request, not even for the signed URL) and are kept after the
     // first download. Video is streamed (above).
     return files.loadCached(
-      cache: widget.controller.attachmentDiskCache,
-      key: widget.controller.attachmentCacheKey(
+      cache: widget.controller.attachmentMedia.diskCache,
+      key: widget.controller.attachmentMedia.cacheKey(
         widget.metadata,
         'file',
         channelId: owner ?? '',
       ),
       resolveUrl: resolveUrl,
       refreshUrl: () {
-        widget.controller.invalidateAttachmentUrl('${widget.metadata['id']}');
-        return widget.controller.attachmentUrl(
+        widget.controller.attachmentMedia.invalidateUrl('${widget.metadata['id']}');
+        return widget.controller.attachmentMedia.url(
           '${widget.metadata['id']}',
           channelId: owner,
           refresh: true,
@@ -655,7 +655,7 @@ class _AttachmentPreviewDialogState extends State<AttachmentPreviewDialog>
 
   /// The document preview stored by an earlier open of this attachment.
   Future<(Map<String, dynamic>, bool)?> readStoredDocument() async {
-    final cache = widget.controller.attachmentDiskCache;
+    final cache = widget.controller.attachmentMedia.diskCache;
     if (cache == null) return null;
     try {
       final bytes = await cache.readPreview(documentKey);
@@ -677,7 +677,7 @@ class _AttachmentPreviewDialogState extends State<AttachmentPreviewDialog>
   }
 
   Future<void> storeDocument(Map<String, dynamic> data, bool truncated) async {
-    final cache = widget.controller.attachmentDiskCache;
+    final cache = widget.controller.attachmentMedia.diskCache;
     if (cache == null) return;
     try {
       await cache.writePreview(
@@ -692,7 +692,7 @@ class _AttachmentPreviewDialogState extends State<AttachmentPreviewDialog>
   }
 
   AttachmentImageStoreKey get documentKey =>
-      widget.controller.attachmentCacheKey(
+      widget.controller.attachmentMedia.cacheKey(
         widget.metadata,
         'preview',
         channelId:
@@ -730,12 +730,12 @@ class _AttachmentPreviewDialogState extends State<AttachmentPreviewDialog>
 
   Future<bool> detectHdr() async {
     final key = attachmentMediaKey(widget.metadata);
-    final verdicts = widget.controller.playerSessions.hdrVerdicts;
+    final verdicts = widget.controller.attachmentMedia.playerSessions.hdrVerdicts;
     final known = verdicts[key];
     if (known != null) return known;
     final owner = widget.channelId ?? widget.metadata['channelId'] as String?;
     final url = AttachmentFiles.attachmentUri(
-      await widget.controller.attachmentUrl(
+      await widget.controller.attachmentMedia.url(
         '${widget.metadata['id']}',
         channelId: owner,
         coalesce: true,
@@ -781,7 +781,7 @@ class _AttachmentPreviewDialogState extends State<AttachmentPreviewDialog>
       await shared.player.pause();
       pausedPlaying = base.playing;
       final owner = widget.channelId ?? widget.metadata['channelId'] as String?;
-      final native = widget.controller.playerSessions.acquire(
+      final native = widget.controller.attachmentMedia.playerSessions.acquire(
         '${attachmentMediaKey(widget.metadata)}|hdr',
         scope: widget.controller.attachmentImageScope,
         channelId: owner,

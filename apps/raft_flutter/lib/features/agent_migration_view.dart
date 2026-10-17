@@ -164,7 +164,7 @@ class _AgentMigrationState extends ManagementState<AgentMigrationView> {
     _poll = null;
     if (ref is String && ref == _watchedRef && phase != null) {
       _watchedRef = null;
-      w.entityDirectory.reloadAgents();
+      w.services.entityDirectory.reloadAgents();
     }
   }
 

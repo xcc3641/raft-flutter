@@ -122,7 +122,7 @@ class _ServerSetupGateState extends ManagementState<ServerSetupGate> {
         scheduleReload();
       }
     });
-    _directory = w.entityDirectory..addListener(directoryChanged);
+    _directory = w.services.entityDirectory..addListener(directoryChanged);
     _seenRevisions = directoryRevisions();
     _signature = setupSignature();
   }
@@ -140,14 +140,14 @@ class _ServerSetupGateState extends ManagementState<ServerSetupGate> {
   /// The directory's scoped counters for what setup reads: computers and
   /// agents. Members, presence and activity never move them.
   (int, int) directoryRevisions() =>
-      (w.entityDirectory.computerRevision, w.entityDirectory.agentRevision);
+      (w.services.entityDirectory.computerRevision, w.services.entityDirectory.agentRevision);
 
   /// Source ServerSetupProjectionGate re-reads the projection when the
   /// machines' id/status/runtimes change. Agent creation moves the
   /// create-agent step, so the agent id set is part of the signature too.
   /// Activity, presence and session patches leave it unchanged.
   String setupSignature() {
-    final directory = w.entityDirectory;
+    final directory = w.services.entityDirectory;
     final machines = [
       for (final m in directory.rows(WorkspaceEntityKind.computers))
         '${m['id']}:${m['status']}:'
@@ -180,7 +180,7 @@ class _ServerSetupGateState extends ManagementState<ServerSetupGate> {
       _directory?.removeListener(directoryChanged);
       _signal?.removeListener(reload);
       if (_announcementServer != null) {
-        oldWidget.controller.announcementGate.detach(_announcementServer!);
+        oldWidget.controller.services.announcementGate.detach(_announcementServer!);
         _announcementServer = null;
       }
       rebindManagementController();
@@ -195,7 +195,7 @@ class _ServerSetupGateState extends ManagementState<ServerSetupGate> {
   void _attachAnnouncementGate() {
     final id = w.server?.id;
     if (id == _announcementServer) return;
-    final gate = w.announcementGate;
+    final gate = w.services.announcementGate;
     if (_announcementServer != null) gate.detach(_announcementServer!);
     _announcementServer = id;
     if (id != null) gate.attach(id);
@@ -205,13 +205,13 @@ class _ServerSetupGateState extends ManagementState<ServerSetupGate> {
   /// first read (no projection) reads as blocked.
   void _reportAnnouncementGate(String serverId) {
     if (w.server?.id != serverId) return;
-    w.announcementGate.report(serverId, projection);
+    w.services.announcementGate.report(serverId, projection);
   }
 
   @override
   void dispose() {
     if (_announcementServer != null) {
-      w.announcementGate.detach(_announcementServer!);
+      w.services.announcementGate.detach(_announcementServer!);
     }
     _signal?.removeListener(reload);
     events?.cancel();

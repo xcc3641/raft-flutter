@@ -195,7 +195,7 @@ class PublishTests(Common):
 class MainFlowTests(Common):
     """main() with the gate and git helpers faked: the PR is published only after a passing gate."""
 
-    def run_main(self, passed, script=None, *extra):
+    def run_main(self, passed, script=None, *extra, preflight=True):
         root = self.tmp / 'repo'
         (root / '.local').mkdir(parents=True)
         (root / '.local/engineering-run.json').write_text(json.dumps({'themes': 'sampled', 'sourceHash': '0123456789abcdef'}))
@@ -206,10 +206,14 @@ class MainFlowTests(Common):
                                **(script or {})})
         gate = done([], 0 if passed else 1, json.dumps({'passed': passed}))
         events = mock.MagicMock()
+        self.order = []
+        self.preflight = mock.MagicMock(side_effect=lambda base: self.order.append('preflight') or preflight)
+        self.gate = mock.MagicMock(side_effect=lambda *a, **k: self.order.append('gate') or gate)
         patches = [
+            mock.patch.object(ph, 'run_preflight', self.preflight),
             mock.patch.object(ph, 'root', root),
             mock.patch.object(ph, 'git', lambda *a, **k: 'cindy/x' if a[0] == 'branch' else ('' if a[0] in ('status', 'fetch') else 'abc1234')),
-            mock.patch.object(ph, 'run_gate', lambda *a, **k: gate),
+            mock.patch.object(ph, 'run_gate', self.gate),
             mock.patch.object(ph.gate_events, 'Events', lambda r: events),
             mock.patch.object(ph.gate_events, 'identity', lambda r: ('cindy/x', 'abc1234')),
             mock.patch.object(ph.gate_events, 'raise_on_signals', lambda: None),
@@ -238,6 +242,52 @@ class MainFlowTests(Common):
         self.assertEqual(code, 1)
         self.assertEqual(fake.commands('git', 'push'), [])
         self.assertEqual(fake.commands('gh', 'pr', 'create'), [])
+
+    def test_preflight_runs_against_the_base_before_the_gate(self):
+        fake, code = self.run_main(True)
+        self.preflight.assert_called_once_with('origin/cindy/integration')
+        self.assertEqual(self.order, ['preflight', 'gate'])
+        self.assertEqual(code, 0)
+
+    def test_failing_preflight_stops_before_the_gate_and_publishes_nothing(self):
+        fake, code = self.run_main(True, None, preflight=False)
+        self.assertIn('preflight failed', str(code))
+        self.gate.assert_not_called()
+        self.assertEqual(fake.commands('git', 'push'), [])
+        self.assertEqual(fake.commands('gh', 'pr', 'create'), [])
+
+    def test_skip_preflight_goes_straight_to_the_gate(self):
+        fake, code = self.run_main(True, None, '--skip-preflight', preflight=False)
+        self.assertEqual(code, 0)
+        self.preflight.assert_not_called()
+        self.gate.assert_called_once()
+
+    def test_no_check_does_not_run_preflight(self):
+        self.patch_run({('gh', 'auth', 'status'): (0, '')})
+        argv = mock.patch.object(sys, 'argv', ['prepare-handoff', '--no-check', '--base', 'origin/x'])
+        argv.start()
+        self.addCleanup(argv.stop)
+        preflight = mock.MagicMock(return_value=True)
+        for patcher in (mock.patch.object(ph, 'run_preflight', preflight),
+                        mock.patch.object(ph, 'git', lambda *a, **k: ''),
+                        mock.patch.object(ph.gate_events, 'Events', lambda r: mock.MagicMock()),
+                        mock.patch.object(ph.pathlib.Path, 'home', lambda: self.tmp)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        ph.main()
+        preflight.assert_not_called()
+
+
+class RunPreflightTests(Common):
+    def test_runs_the_script_with_the_base_and_reports_its_exit_code(self):
+        fake = self.patch_run()
+        self.assertTrue(ph.run_preflight('origin/cindy/integration'))
+        command = fake.calls[0]
+        self.assertEqual(command[0], sys.executable)
+        self.assertTrue(command[1].endswith('tool/preflight'))
+        self.assertEqual(command[2:], ['--base', 'origin/cindy/integration'])
+        self.patch_run({(sys.executable,): (1, '')})
+        self.assertFalse(ph.run_preflight('origin/cindy/integration'))
 
 
 if __name__ == '__main__':

@@ -32,7 +32,7 @@ class ThreadActions extends StatefulWidget {
 
 class _ThreadActionsState extends State<ThreadActions> {
   WorkspaceController get w => widget.controller;
-  FollowedThreadsStore get store => w.followedThreads;
+  FollowedThreadsStore get store => w.services.followedThreads;
   late final int generation;
   late final StreamSubscription<RaftEvent> subscription;
   // The failed write. Bound to the thread it was for (this State can be

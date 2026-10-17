@@ -75,7 +75,9 @@ class _RowsState extends State<_Rows> {
               ? RaftMessageRowContext.thread
               : RaftMessageRowContext.main,
           author: 'Cindy',
-          timestamp: '14:31',
+          timestamp: '10/15 14:31',
+          continuationTimestamp: '14:31',
+          timestampTooltip: 'Oct 15, 2026, 14:31',
           continuation: true,
           content: const Text(
             'Same sender continuation; the avatar and name are omitted.',

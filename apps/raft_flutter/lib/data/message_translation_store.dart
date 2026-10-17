@@ -6,7 +6,7 @@ import 'package:raft_client/raft_client.dart';
 
 import 'cause_notice.dart';
 import 'user_error.dart';
-import 'workspace_controller.dart';
+import 'workspace_cache.dart';
 
 /// raft-shared `SUPPORTED_TRANSLATION_LANGUAGES` (value → English label).
 const messageTranslationLanguages = <String, String>{
@@ -173,7 +173,21 @@ class _ServerGate {
   final bool enabled, available, canManage;
 }
 
-/// Web `useTranslationStore`, owned by [WorkspaceController.translations]: settings for the
+/// The session and device facts needed by message translations.
+abstract interface class MessageTranslationAuthority {
+  RaftClient get client;
+  RaftRecord? get server;
+  WorkspaceCache? get cache;
+  Future<List<Map<String, dynamic>>> readDeviceTranslations(String serverId);
+  void writeDeviceTranslations(
+    String serverId,
+    List<Map<String, dynamic>> entries,
+  );
+  Future<dynamic> readTranslationGate(String serverId);
+  void saveTranslationGate(String serverId, Map<String, dynamic>? gate);
+}
+
+/// Web `useTranslationStore`, owned by the workspace session: settings for the
 /// selected server, the translation cache keyed by message id, and the
 /// batched `/message-translations:batch` requests. Like Web the cache
 /// survives channel and server switches, an entry is current only for its
@@ -227,7 +241,7 @@ class MessageTranslationStore extends ChangeNotifier {
     'content_invalid',
   };
 
-  final WorkspaceController w;
+  final MessageTranslationAuthority w;
   StreamSubscription<RaftEvent>? _events;
   Object? _identity;
   int _epoch = 0, _batch = 0;
@@ -511,7 +525,7 @@ class MessageTranslationStore extends ChangeNotifier {
   /// (action card, forwarded bundle) have no translatable body.
   bool _translatable(RaftMessage message) {
     if (message.string('messageType') == 'system') return false;
-    if (WorkspaceController.isPendingSend(message)) return false;
+    if (message.json['pendingSend'] == true) return false;
     final metadata = message.json['actionMetadata'];
     return metadata is! Map ||
         !const {'action-card', 'forwarded-bundle'}.contains(metadata['kind']);
@@ -754,8 +768,8 @@ class MessageTranslationStore extends ChangeNotifier {
   }
 
   /// Restores the selected server's saved gate and entries, once per server
-  /// and session. Entries already in memory are fresher and kept. Awaited by
-  /// [WorkspaceController.selectServer] before the cached channels paint.
+  /// and session. Entries already in memory are fresher and kept. The workspace
+  /// awaits this when selecting the server, before the cached channels paint.
   Future<void> restore() async {
     _adopt();
     final server = _serverId, role = w.server?.string('role');
@@ -829,7 +843,7 @@ class MessageTranslationStore extends ChangeNotifier {
     _persist ??= Timer(persistDelay, flushDevice);
   }
 
-  /// Writes the changed entries now (see [WorkspaceController.flushCache]).
+  /// Writes the changed entries now, as part of the workspace's cache flush.
   void flushDevice() {
     _persist?.cancel();
     _persist = null;

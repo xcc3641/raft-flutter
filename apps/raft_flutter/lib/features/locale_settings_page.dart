@@ -25,7 +25,7 @@ class _LocaleSettingsPageState extends ManagementState<LocaleSettingsPage> {
   WorkspaceController get w => widget.controller;
   @override
   String get authority => '${w.client.generation}|${w.client.user?.id}';
-  late MessageTranslationStore translations = w.translations;
+  late MessageTranslationStore translations = w.services.translations;
   @override
   void initState() {
     super.initState();
@@ -43,9 +43,9 @@ class _LocaleSettingsPageState extends ManagementState<LocaleSettingsPage> {
   @override
   void didUpdateWidget(covariant LocaleSettingsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(translations, w.translations)) {
+    if (!identical(translations, w.services.translations)) {
       translations.removeListener(translationChanged);
-      translations = w.translations..addListener(translationChanged);
+      translations = w.services.translations..addListener(translationChanged);
       translations.ensureSettings();
     }
   }

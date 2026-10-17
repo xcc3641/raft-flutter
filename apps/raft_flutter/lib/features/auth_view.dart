@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../platform/oauth_broker.dart';
 import '../platform/local_network_access.dart';
+import '../platform/app_services.dart';
 import '../platform/system_bars.dart';
 
 import 'package:raft_client/raft_client.dart';
@@ -93,6 +94,10 @@ class AuthView extends StatefulWidget {
 }
 
 class _AuthState extends State<AuthView> {
+  LocalNetworkAccess get networkAccess =>
+      AppServicesScope.maybeReadOf(context)?.localNetwork ??
+      const LocalNetworkAccess();
+
   late final base = TextEditingController(text: widget.origin);
   final email = TextEditingController(),
       password = TextEditingController(),
@@ -126,10 +131,7 @@ class _AuthState extends State<AuthView> {
           sessionStore: MemorySessionStore(),
         );
     try {
-      await const LocalNetworkAccess().ensure(
-        client.origin,
-        request: requestPermission,
-      );
+      await networkAccess.ensure(client.origin, request: requestPermission);
       if (!mounted || request != providerRequest) return;
       final data = await client.request(
         'GET',
@@ -184,7 +186,7 @@ class _AuthState extends State<AuthView> {
 
     active.helpUrl.addListener(helpChanged);
     try {
-      await const LocalNetworkAccess().ensure(base.text.trim(), request: true);
+      await networkAccess.ensure(base.text.trim(), request: true);
       if (!mounted) return;
       final handoff = await active.begin(client, provider);
       if (mounted) {
@@ -241,7 +243,7 @@ class _AuthState extends State<AuthView> {
           sessionStore: MemorySessionStore(),
         );
     try {
-      await const LocalNetworkAccess().ensure(base.text.trim(), request: true);
+      await networkAccess.ensure(base.text.trim(), request: true);
       if (!mounted) return null;
       return await client.request('POST', path, data: data, authorized: false);
     } finally {

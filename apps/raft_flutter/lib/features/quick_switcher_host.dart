@@ -150,7 +150,7 @@ class QuickSwitcherHost {
   List<Map<String, dynamic>> _computers = const [];
 
   QuickSwitcherData data() {
-    final directory = w.entityDirectory;
+    final directory = w.services.entityDirectory;
     final principal = w.client.user?.id;
     final machines = w.can('viewMachines');
     if (machines) directory.ensure(const [WorkspaceEntityKind.computers]);
@@ -240,7 +240,7 @@ class QuickSwitcherHost {
     final seeded = seed(entry, channelId: channelId);
     // Conversations the server-level lists have not delivered yet start now;
     // settled kinds are reused as they are.
-    w.entityDirectory.ensureAuthors();
+    w.services.entityDirectory.ensureAuthors();
     final created = RawDialogRoute<void>(
       barrierDismissible: true,
       barrierColor: RaftQuickSwitcherLayer.barrierColor,
@@ -248,7 +248,7 @@ class QuickSwitcherHost {
       transitionDuration: Duration.zero,
       pageBuilder: (_, _, _) => RaftQuickSwitcherLayer(
         child: QuickSwitcher(
-          listenable: Listenable.merge([w, w.entityDirectory, recents]),
+          listenable: Listenable.merge([w, w.services.entityDirectory, recents]),
           data: data,
           clock: clock,
           seed: seeded,

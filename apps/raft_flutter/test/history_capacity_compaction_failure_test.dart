@@ -9,6 +9,7 @@ class VacuumFailureCache extends DriftWorkspaceCache {
     : super(
         NativeDatabase.memory(),
         historyBudget: 128 << 10,
+        historyHardLimitEnabled: false,
         automaticHistoryMaintenance: false,
       );
   bool failVacuum = false;

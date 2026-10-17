@@ -44,7 +44,7 @@ class ProfileSidePanel extends StatelessWidget {
         key: key,
         controller: w,
         computers: false,
-        initial: w.entityDirectory.agent(profile.id) ?? {'id': profile.id},
+        initial: w.services.entityDirectory.agent(profile.id) ?? {'id': profile.id},
         initialTab: AgentDetailTab.values.firstWhere(
           (tab) => tab.name == agentTab,
           orElse: () => AgentDetailTab.profile,

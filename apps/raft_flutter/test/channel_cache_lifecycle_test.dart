@@ -312,7 +312,7 @@ void main() {
 
   group('unread counts move per event', () {
     test(
-      'message:new counts locally; own, duplicate, edits and unjoined do not',
+      '[BP-READ-017][BP-READ-018][BP-READ-019] message:new counts locally; own, duplicate, edits and unjoined do not',
       () async {
         final (w, a, client) = await _login();
         addTearDown(w.dispose);

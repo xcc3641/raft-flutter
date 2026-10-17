@@ -30,7 +30,7 @@ class DesktopInboxNotifications {
   Future<void>? delivering;
 
   Object? activeIdentity(WorkspaceController? w) {
-    final activity = w?.activityUnreadIfBound;
+    final activity = w?.services.activityUnreadIfBound;
     if (w == null ||
         activity?.scope == null ||
         !notifications.enabled ||
@@ -67,7 +67,7 @@ class DesktopInboxNotifications {
   void sync() {
     if (closed) return;
     final w = workspace;
-    final activity = w?.activityUnreadIfBound;
+    final activity = w?.services.activityUnreadIfBound;
     if (!identical(activity, _activity)) {
       _activity?.removeListener(inboxChanged);
       _activity = activity?..addListener(inboxChanged);
@@ -121,7 +121,7 @@ class DesktopInboxNotifications {
         final since = DateTime.tryParse('${state?['since']}');
         if (since == null || !valid(w, revision)) continue;
         final candidates = <BackgroundInboxAlert>[];
-        for (final row in w.activityUnreadIfBound?.acceptedRows ?? const []) {
+        for (final row in w.services.activityUnreadIfBound?.acceptedRows ?? const []) {
           final alert = BackgroundInboxAlert.fromRow(
             row,
             w.client.serverId!,
@@ -150,7 +150,7 @@ class DesktopInboxNotifications {
         var count = 0;
         for (final alert in candidates) {
           if (!valid(w, revision)) break;
-          final stillUnread = w.activityUnreadIfBound?.acceptedRows.any(
+          final stillUnread = w.services.activityUnreadIfBound?.acceptedRows.any(
             (latest) =>
                 BackgroundInboxAlert.fromRow(
                   latest,

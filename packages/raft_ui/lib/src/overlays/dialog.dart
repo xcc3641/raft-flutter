@@ -523,7 +523,7 @@ class RaftDialogRoute<T> extends PopupRoute<T> {
   final bool dismissible;
   final String? label;
 
-  /// Opened over another Modal's black/60 scrim (see [_DialogBarrier]).
+  /// Opened over another Modal's black/60 scrim (see [RaftDialogBarrier]).
   final bool overModal;
 
   @override
@@ -536,7 +536,7 @@ class RaftDialogRoute<T> extends PopupRoute<T> {
   Duration get transitionDuration => const Duration(milliseconds: 150);
 
   @override
-  Widget buildModalBarrier() => _DialogBarrier(
+  Widget buildModalBarrier() => RaftDialogBarrier(
     animation: animation!,
     dismissible: dismissible,
     label: barrierLabel,
@@ -575,8 +575,10 @@ class RaftDialogRoute<T> extends PopupRoute<T> {
   }
 }
 
-class _DialogBarrier extends StatelessWidget {
-  const _DialogBarrier({
+/// The scrim behind a dialog, side panel or sheet: `layer-backdrop` fading in,
+/// with the elegant 2px blur. One scrim for every floating window.
+class RaftDialogBarrier extends StatelessWidget {
+  const RaftDialogBarrier({
     required this.animation,
     required this.dismissible,
     required this.label,

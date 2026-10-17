@@ -19,6 +19,9 @@ enum Affordance {
 
   /// The Android system back gesture / hardware Back.
   systemBack,
+
+  /// Dragging the sheet's handle down (bottom sheets).
+  drag,
 }
 
 enum SurfaceKind { panel, page, dialog, drawer, popup, viewer, toast }
@@ -77,6 +80,7 @@ class SurfaceProbe {
     this.x,
     this.back,
     this.scrim,
+    this.dragHandle,
   });
 
   /// True while the surface is on screen.
@@ -87,6 +91,9 @@ class SurfaceProbe {
 
   /// A global point outside the surface that the scrim covers.
   final Offset? scrim;
+
+  /// The drag handle of a bottom sheet.
+  final Finder? dragHandle;
 }
 
 /// Opens a surface at [size] and describes it. Called once per affordance.
@@ -136,6 +143,19 @@ Future<void> expectCloses(
       await frames(t, 20);
     case Affordance.systemBack:
       await t.binding.handlePopRoute();
+      await frames(t, 20);
+    case Affordance.drag:
+      expect(probe.dragHandle, isNotNull, reason: '$label - no handle finder');
+      expect(
+        probe.dragHandle!.hitTestable(),
+        findsWidgets,
+        reason: '$label - no visible drag handle',
+      );
+      await t.fling(
+        probe.dragHandle!.hitTestable().first,
+        const Offset(0, 500),
+        2000,
+      );
       await frames(t, 20);
   }
   expect(probe.isOpen(), isFalse, reason: '$label - the surface stayed open');

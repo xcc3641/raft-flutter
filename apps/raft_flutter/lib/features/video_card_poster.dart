@@ -92,7 +92,7 @@ class VideoCardPoster {
   Size _box = const Size(448, 252);
   double _dpr = 1;
 
-  PlayerSessions get _sessions => controller.playerSessions;
+  PlayerSessions get _sessions => controller.attachmentMedia.playerSessions;
   Map<String, dynamic> get _meta => metadata();
   String get _mediaKey => attachmentMediaKey(_meta);
 
@@ -124,7 +124,7 @@ class VideoCardPoster {
     failed = _sessions.frameFailed.contains(_mediaKey);
     final url = attachmentThumbnailUrl(_meta);
     try {
-      final lease = controller.acquireAttachmentImage(
+      final lease = controller.attachmentMedia.acquireImage(
         key,
         authorized: authorized,
         bestAvailable: true,
@@ -188,7 +188,7 @@ class VideoCardPoster {
     ),
   );
 
-  AttachmentImageStoreKey _shapeKey() => controller.attachmentCacheKey(
+  AttachmentImageStoreKey _shapeKey() => controller.attachmentMedia.cacheKey(
     _meta,
     'video-shape',
     channelId: channelId(),
@@ -207,7 +207,7 @@ class VideoCardPoster {
       return;
     }
     final key = _frameKey();
-    final stored = await controller.attachmentStored(key);
+    final stored = await controller.attachmentMedia.stored(key);
     if (disposed || epoch != _epoch) return;
     if (stored) {
       _acquireFrame(key);
@@ -221,7 +221,7 @@ class VideoCardPoster {
   Future<void> _readShape() async {
     if (_shapeRead) return;
     _shapeRead = true;
-    final disk = controller.attachmentDiskCache;
+    final disk = controller.attachmentMedia.diskCache;
     if (disk == null || _sessions.shapes[_mediaKey] != null) return;
     try {
       final bytes = await disk.read(_shapeKey());
@@ -252,7 +252,7 @@ class VideoCardPoster {
       if (!disposed) onChanged();
     }
     if (persist) {
-      final disk = controller.attachmentDiskCache;
+      final disk = controller.attachmentMedia.diskCache;
       if (disk != null) {
         unawaited(disk.write(_shapeKey(), learnt.toBytes()).catchError((Object _) {}));
       }
@@ -296,7 +296,7 @@ class VideoCardPoster {
     }
     _releaseLease();
     try {
-      final lease = controller.acquireAttachmentImage(
+      final lease = controller.attachmentMedia.acquireImage(
         key,
         authorized: authorized,
         load: _extract,

@@ -410,7 +410,7 @@ class MessagePresentation extends StatelessWidget {
         }
         if (uri.scheme == 'computer' && w.can('viewMachines')) {
           // The workspace directory already holds the machines read.
-          final directory = w.entityDirectory;
+          final directory = w.services.entityDirectory;
           final known = directory.state(WorkspaceEntityKind.computers).loaded
               ? directory.computer(uri.path)
               : null;

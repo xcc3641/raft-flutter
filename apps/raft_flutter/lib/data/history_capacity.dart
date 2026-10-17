@@ -27,6 +27,7 @@ class HistoryDiskUsage {
     this.reclaimableAccountBytes = 0,
     this.reservedWalBytes = 0,
     this.protectedFull = false,
+    this.hardFull = false,
   });
   final int budget,
       accountBytes,
@@ -37,24 +38,26 @@ class HistoryDiskUsage {
       rows,
       reservedWalBytes;
   final int reclaimableAccountBytes;
-  final bool pendingCompaction, protectedFull;
+  final bool pendingCompaction, protectedFull, hardFull;
   int get budgetCharge => accountBytes + reservedWalBytes;
   int get retainedCharge => budgetCharge - reclaimableAccountBytes;
   bool get overBudget => budget != 0 && budgetCharge > budget;
 
-  HistoryDiskUsage withProtectedFull(bool value) => HistoryDiskUsage(
-    budget: budget,
-    accountBytes: accountBytes,
-    databaseBytes: databaseBytes,
-    walBytes: walBytes,
-    indexBytes: indexBytes,
-    freeBytes: freeBytes,
-    rows: rows,
-    pendingCompaction: pendingCompaction,
-    reservedWalBytes: reservedWalBytes,
-    reclaimableAccountBytes: reclaimableAccountBytes,
-    protectedFull: value,
-  );
+  HistoryDiskUsage withProtectedFull(bool value, {bool? hardFull}) =>
+      HistoryDiskUsage(
+        budget: budget,
+        accountBytes: accountBytes,
+        databaseBytes: databaseBytes,
+        walBytes: walBytes,
+        indexBytes: indexBytes,
+        freeBytes: freeBytes,
+        rows: rows,
+        pendingCompaction: pendingCompaction,
+        reservedWalBytes: reservedWalBytes,
+        reclaimableAccountBytes: reclaimableAccountBytes,
+        protectedFull: value,
+        hardFull: hardFull ?? this.hardFull,
+      );
 }
 
 /// Bodies currently needed by a reader or an unconfirmed local operation.
@@ -102,6 +105,7 @@ class HistoryCompactionSpaceRequired implements Exception {
 abstract interface class HistoryCapacity {
   Future<HistoryDiskUsage> usage(HistoryAccount account);
   Future<void> setBudget(HistoryAccount account, int bytes);
+  Future<void> opened(HistoryAccount account, String server, String channel);
   Future<bool> isKept(HistoryAccount account, String server, String channel);
   Future<void> keep(
     HistoryAccount account,

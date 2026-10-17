@@ -35,7 +35,10 @@ bool isLocalNetworkAddress(InternetAddress address) {
 /// Android LAN access is checked before connecting to a self-hosted server.
 /// Passive restoration never opens a system prompt; explicit sign-in may do so.
 class LocalNetworkAccess {
-  const LocalNetworkAccess();
+  const LocalNetworkAccess({this.lookup = InternetAddress.lookup});
+
+  /// Tests provide their fixture's addresses without querying the host DNS.
+  final Future<List<InternetAddress>> Function(String host) lookup;
   static const _channel = MethodChannel('app.raft/local-network');
 
   Future<void> ensure(String origin, {bool request = false}) async {
@@ -49,9 +52,8 @@ class LocalNetworkAccess {
       local = isLocalNetworkAddress(literal);
     } else if (!local && host != 'localhost') {
       try {
-        local = (await InternetAddress.lookup(
-          host,
-        ).timeout(const Duration(seconds: 5))).any(isLocalNetworkAddress);
+        local = (await lookup(host).timeout(const Duration(seconds: 5)))
+            .any(isLocalNetworkAddress);
       } on SocketException {
         return; // The client reports DNS failures through normal request errors.
       } on TimeoutException {

@@ -93,7 +93,7 @@ class _SystemNotificationBellState extends State<SystemNotificationBell>
     store.addListener(updated);
     w.addListener(changed);
     entities = WorkspaceEntitySelection(
-      w.entityDirectory,
+      w.services.entityDirectory,
       (d) => (
         d.authorRevision,
         d.computerRevision,
@@ -138,7 +138,7 @@ class _SystemNotificationBellState extends State<SystemNotificationBell>
   /// Machines and agents from the workspace's shared entity directory, which
   /// is itself fenced by server-level identity.
   SystemNotificationEntities directoryEntities() {
-    final directory = w.entityDirectory;
+    final directory = w.services.entityDirectory;
     final machinesAllowed = w.can('viewMachines'),
         agentsAllowed = machinesAllowed && w.can('viewAgents');
     for (final (kind, allowed) in [

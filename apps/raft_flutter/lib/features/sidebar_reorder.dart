@@ -203,18 +203,21 @@ RaftGlyph sidebarSectionGlyph(SidebarGroup group) => switch (group.id) {
 /// persists the new `sectionOrder` through the optimistic
 /// [WorkspaceController.updateSidebarOrder]. [onHeldInPlace] (the header's
 /// menu) opens when the press is released without the pointer travelling.
+/// [count] is the number painted on the header; the Channels section can hide
+/// rows that [SidebarGroup.entries] still contains.
 Widget sidebarSectionDragHeader({
   required SidebarGroup group,
   required WorkspaceController w,
   required String label,
   required Widget header,
+  int? count,
   ValueChanged<Offset>? onHeldInPlace,
 }) => SidebarSectionDragHeader(
   key: ValueKey('sidebar-section-drag-${group.id}'),
   id: group.id,
   order: sidebarSectionOrder(w.sidebarOrder),
   label: label,
-  count: group.entries.length,
+  count: count ?? group.entries.length,
   glyph: sidebarSectionGlyph(group),
   onHeldInPlace: onHeldInPlace,
   onMove: (from, to) {
@@ -279,7 +282,7 @@ class _SectionDragHeaderState extends State<SidebarSectionDragHeader> {
           final below =
               incoming != null &&
               widget.order.indexOf(incoming) < widget.order.indexOf(id);
-          final edge = BorderSide(color: t.accent, width: 2);
+          final edge = BorderSide(color: t.accent, width: t.border);
           return _SectionDraggable(
             data: id,
             onHeldInPlace: widget.onHeldInPlace,
@@ -336,22 +339,20 @@ class _SectionDragCard extends StatelessWidget {
           color: t.popover,
           borderRadius: BorderRadius.circular(t.radius),
           border: Border.all(color: t.line),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x29000000),
-              blurRadius: 12,
-              offset: Offset(0, 4),
-            ),
-          ],
+          boxShadow: t.shadows,
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          padding: recipe.inset,
           child: DefaultTextStyle(
             style: recipe.title.copyWith(color: recipe.foreground),
             child: Row(
               children: [
-                RaftIcon(glyph, size: 14, color: recipe.foreground),
-                const SizedBox(width: 8),
+                RaftIcon(
+                  glyph,
+                  size: RaftSidebarSectionMetrics.actionGlyph,
+                  color: recipe.foreground,
+                ),
+                const SizedBox(width: RaftSidebarSectionMetrics.inlineGap),
                 Flexible(
                   child: Text(
                     label.toUpperCase(),
@@ -360,7 +361,7 @@ class _SectionDragCard extends StatelessWidget {
                   ),
                 ),
                 if (count != null) ...[
-                  const SizedBox(width: 4),
+                  const SizedBox(width: RaftSidebarSectionMetrics.inlineGap),
                   Text('$count', style: recipe.count),
                 ],
               ],
@@ -470,6 +471,86 @@ Widget sidebarRowsSliver(
         proxyDecorator: raftSidebarReorderProxy,
       );
 
+/// The rows of a custom section, reordered when the section sorts manually.
+Widget sidebarCustomRows(
+  SidebarGroup group,
+  WorkspaceController w,
+  RaftNavItem Function(SidebarEntry entry, bool reorderable) row,
+) => sidebarRowsSliver(
+  group.entries,
+  onReorder: sidebarReorderCallback(group, group.entries, w),
+  row: row,
+);
+
+/// [header] wrapped as a draggable section when [group] is present. A header
+/// with no group stays as the shell built it.
+Widget sidebarDragSectionHeader({
+  required SidebarGroup? group,
+  required WorkspaceController w,
+  required String label,
+  required Widget header,
+  required Future<void> Function(Offset at, SidebarGroup group) onOpenMenu,
+}) {
+  if (group == null) return header;
+  return sidebarSectionDragHeader(
+    group: group,
+    w: w,
+    label: label,
+    header: header,
+    onHeldInPlace: (at) => onOpenMenu(at, group),
+  );
+}
+
+/// A system group in the scrolling sidebar. The shell still chooses the kind,
+/// copy, disclosure and row; this owner attaches the section and row drags.
+Widget sidebarSystemGroupSliver({
+  required SidebarGroup group,
+  required List<SidebarEntry> entries,
+  required WorkspaceController w,
+  required String label,
+  required RaftChatSidebarGroupKind kind,
+  required bool expanded,
+  required bool hideEmpty,
+  required bool loading,
+  required String emptyLabel,
+  required ValueChanged<bool> onExpandedChanged,
+  required Widget? attention,
+  required List<RaftSidebarSectionAction> actions,
+  required ValueChanged<Offset> onOpenMenu,
+  required RaftNavItem Function(SidebarEntry entry, bool reorderable) row,
+}) {
+  final reorder = sidebarReorderCallback(group, entries, w);
+  return RaftChatSidebarGroup.sliver(
+    key: ValueKey('sidebar-group-${group.id}'),
+    headerKey: ValueKey('sidebar-section-${group.id}'),
+    disclosureKey: ValueKey('sidebar-disclosure-${group.id}'),
+    kind: kind,
+    label: label,
+    count: entries.length,
+    expanded: expanded,
+    hideEmpty: hideEmpty,
+    loading: loading,
+    emptyLabel: emptyLabel,
+    onExpandedChanged: onExpandedChanged,
+    attention: attention,
+    actions: actions,
+    onContextMenu: onOpenMenu,
+    contextMenuOnLongPress: false,
+    wrapHeader: (header) => sidebarSectionDragHeader(
+      group: group,
+      w: w,
+      label: label,
+      header: header,
+      count: entries.length,
+      onHeldInPlace: onOpenMenu,
+    ),
+    itemBuilder: (context, index) =>
+        sidebarListRow(entries, index, reorder, row),
+    findChildIndexCallback: (key) => sidebarEntryIndex(entries, key),
+    onReorderItem: reorder,
+  );
+}
+
 /// A reorderable sidebar row: a long press (press and hold with a mouse)
 /// lifts it. The row's own long-press menu ([RaftNavItem.onContextMenu]
 /// with `contextMenuOnLongPress: false`) opens when it is released without
@@ -520,8 +601,14 @@ class _HeldDrag implements Drag {
 
   @override
   void end(DragEndDetails details) {
+    // A short release is the menu, not a drop. Cancelling keeps the list and
+    // the section target from committing a move the pointer barely started.
+    if (travel < kTouchSlop) {
+      drag.cancel();
+      onHeldInPlace?.call(origin);
+      return;
+    }
     drag.end(details);
-    if (travel < kTouchSlop) onHeldInPlace?.call(origin);
   }
 
   @override

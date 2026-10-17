@@ -81,15 +81,15 @@ class _ManagedAgentFormHostState extends State<_ManagedAgentFormHost> {
   int ticket = 0;
 
   bool get directoryLoaded =>
-      w.entityDirectory.state(WorkspaceEntityKind.computers).loaded;
+      w.services.entityDirectory.state(WorkspaceEntityKind.computers).loaded;
 
   @override
   void initState() {
     super.initState();
-    w.entityDirectory.addListener(adopt);
+    w.services.entityDirectory.addListener(adopt);
     if (directoryLoaded) {
       machines = filtered(
-        w.entityDirectory.rows(WorkspaceEntityKind.computers),
+        w.services.entityDirectory.rows(WorkspaceEntityKind.computers),
       );
     }
     load();
@@ -97,7 +97,7 @@ class _ManagedAgentFormHostState extends State<_ManagedAgentFormHost> {
 
   @override
   void dispose() {
-    w.entityDirectory.removeListener(adopt);
+    w.services.entityDirectory.removeListener(adopt);
     super.dispose();
   }
 
@@ -110,7 +110,7 @@ class _ManagedAgentFormHostState extends State<_ManagedAgentFormHost> {
   void adopt() {
     if (!mounted || !directoryLoaded) return;
     final next = filtered(
-      w.entityDirectory.rows(WorkspaceEntityKind.computers),
+      w.services.entityDirectory.rows(WorkspaceEntityKind.computers),
     );
     setState(() {
       machines = next;
@@ -122,7 +122,7 @@ class _ManagedAgentFormHostState extends State<_ManagedAgentFormHost> {
     final mine = ++ticket;
     if (mounted && failure != null) setState(() => failure = null);
     // Quiet revalidation of the copy shown (or the first read).
-    await w.entityDirectory.refresh(WorkspaceEntityKind.computers);
+    await w.services.entityDirectory.refresh(WorkspaceEntityKind.computers);
     if (!mounted || mine != ticket || machines != null) return;
     try {
       final result = await w.query('/servers/${w.server!.id}/machines');

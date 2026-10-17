@@ -15,6 +15,8 @@ import 'proxy/transport_stub.dart'
     if (dart.library.io) 'proxy/transport_io.dart';
 import 'session_policy.dart';
 
+part 'channel_read_dispatch.dart';
+
 abstract interface class SessionStore {
   Future<Session?> read(String origin);
   Future<void> write(String origin, Session? session);
@@ -85,6 +87,7 @@ class RaftApiException implements Exception {
 Map<String, dynamic> _errorDetails(Map? body) {
   const keys = {
     'code',
+    'retryable',
     'conversionJob',
     'conversionCommand',
     'uploadScope',
@@ -247,6 +250,16 @@ class RaftClient {
   /// 429 answers a request waits out (honouring `Retry-After`) before the
   /// caller sees the error.
   static const rateLimitRetries = 2;
+
+  /// Reads served from RisingWave that Web retries once when the server
+  /// answers 503 `rw_overloaded` (Web `getWithRwOverloadRetry`).
+  static const rwOverloadRetriedPaths = {
+    '/channels/unread',
+    '/channels/inbox',
+    '/servers/unread-summary',
+  };
+  static const rwOverloadDefaultRetryAfter = Duration(seconds: 2);
+  static const rwOverloadMaxRetryAfter = Duration(seconds: 10);
   final Map<String, ({Future<dynamic> flight, DateTime at})> _singleFlight = {};
 
   /// A read already in flight is joined only while it is this young: one that
@@ -1056,6 +1069,7 @@ class RaftClient {
     // decides to retry; the session check has its own recovery timer, which
     // honours Retry-After); nothing else waits behind a closed account bucket.
     final waits = authorized && !path.startsWith('/auth/');
+    var overloadRetried = false;
     for (var attempt = 0; ; attempt++) {
       try {
         if (limits.isNotEmpty) {
@@ -1094,6 +1108,24 @@ class RaftClient {
         );
       } on RaftApiException catch (e) {
         final wait = e.retryAfter;
+        if (!overloadRetried &&
+            e.status == 503 &&
+            wait != null &&
+            method == 'GET' &&
+            rwOverloadRetriedPaths.contains(path) &&
+            cancellation?.cancelled != true) {
+          // Web getWithRwOverloadRetry: these reads come from RisingWave. A
+          // first load after a saturated pool has nothing to keep, so retry
+          // once after the server's hint; more would add load while it is behind.
+          overloadRetried = true;
+          await _sleep(wait);
+          if (_closed ||
+              authentication != _authenticationGeneration ||
+              workspace != (workspaceScoped ? _generation : 0)) {
+            throw const RaftApiException.staleScope();
+          }
+          continue;
+        }
         if (e.status != 429 ||
             !waits ||
             wait == null ||
@@ -1159,25 +1191,45 @@ class RaftClient {
       }
     }
     final sentAccessToken = authorized ? _session?.accessToken : null;
+    final requestHeaders = <String, dynamic>{
+      ...?headers,
+      if (authorized && _session != null)
+        'Authorization': 'Bearer ${_session!.accessToken}',
+      if (authorized && workspaceScoped && serverId != null)
+        'X-Server-Id': serverId,
+    };
     try {
-      final response = await http.request<dynamic>(
+      // Evaluating this call hands a channel read to the adapter before the
+      // await yields. Other requests keep Dio's own chain.
+      final Response<dynamic> response = _channelReadStaysOnThisTurn(
+        http,
+        method,
         path,
         data: data,
-        queryParameters: query,
-        cancelToken: cancellation?._token,
         onSendProgress: onSendProgress,
-        options: Options(
-          method: method,
-          receiveTimeout: receiveTimeout,
-          headers: {
-            ...?headers,
-            if (authorized && _session != null)
-              'Authorization': 'Bearer ${_session!.accessToken}',
-            if (authorized && workspaceScoped && serverId != null)
-              'X-Server-Id': serverId,
-          },
-        ),
-      );
+      )
+          ? await _dispatchChannelRead(
+              http,
+              method: method,
+              path: path,
+              data: data,
+              query: query,
+              headers: requestHeaders,
+              receiveTimeout: receiveTimeout,
+              cancelToken: cancellation?._token,
+            )
+          : await http.request<dynamic>(
+              path,
+              data: data,
+              queryParameters: query,
+              cancelToken: cancellation?._token,
+              onSendProgress: onSendProgress,
+              options: Options(
+                method: method,
+                receiveTimeout: receiveTimeout,
+                headers: requestHeaders,
+              ),
+            );
       governor.observe(
         ServerRateLimits.forRequest(method, path),
         response.headers,
@@ -1253,6 +1305,19 @@ class RaftClient {
           ServerRateLimits.forRequest(method, path),
           e.response?.headers,
         );
+        if (status == 503 &&
+            body is Map &&
+            body['code'] == 'rw_overloaded' &&
+            body['retryable'] == true) {
+          // Web overloadRetry.rwOverloadRetryDelayMs: the server's hint, 2 s
+          // when it sent none, never more than 10 s.
+          final hint = retryAfterOf(e.response?.headers, governor.now());
+          retryAfter = hint == null
+              ? rwOverloadDefaultRetryAfter
+              : hint > rwOverloadMaxRetryAfter
+              ? rwOverloadMaxRetryAfter
+              : hint;
+        }
       }
       throw RaftApiException.response(
         body is Map
@@ -1476,7 +1541,11 @@ class RaftClient {
       // again; a revoked session is then told apart by the handshake, which
       // asks the refresh endpoint, not by this event.
       if (reason == 'io server disconnect' && _session != null) {
-        _scheduleSocketRetry(socket, epoch);
+        _scheduleSocketRetry(
+          socket,
+          epoch,
+          delay: serverDisconnectReconnectDelay(),
+        );
       }
     });
     socket.onConnectError((error) async {
@@ -1521,9 +1590,24 @@ class RaftClient {
     socket.connect();
   }
 
-  void _scheduleSocketRetry(io.Socket socket, int epoch) {
+  /// Web `scheduleServerDisconnectReconnect`: a deploy drains every socket at
+  /// once, so the first reconnect after a server-initiated disconnect is
+  /// spread over 1-5 s (0.5x to 2.5x the first backoff step) instead of every
+  /// client returning at the same instant.
+  Duration serverDisconnectReconnectDelay() {
+    final base = recoveryBackoff.isEmpty
+        ? const Duration(seconds: 2)
+        : recoveryBackoff.first;
+    return Duration(
+      microseconds:
+          (base.inMicroseconds * (0.5 + 2 * governor.random.nextDouble()))
+              .round(),
+    );
+  }
+
+  void _scheduleSocketRetry(io.Socket socket, int epoch, {Duration? delay}) {
     _authRetry?.cancel();
-    final delay = recoveryBackoff.isEmpty
+    delay ??= recoveryBackoff.isEmpty
         ? const Duration(seconds: 2)
         : recoveryBackoff[math.min(_socketRetries, recoveryBackoff.length - 1)];
     _socketRetries++;

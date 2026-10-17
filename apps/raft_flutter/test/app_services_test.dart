@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/platform/app_update.dart';
+import 'package:raft_flutter/platform/local_network_access.dart';
 
 import 'support/tracked_app_update.dart';
 
@@ -40,6 +41,34 @@ class _UpdateConsumerState extends State<_UpdateConsumer> {
 }
 
 void main() {
+  testWidgets('replaced network services reach inherited consumers', (t) async {
+    final first = LocalNetworkAccess(lookup: (_) async => []);
+    final second = LocalNetworkAccess(lookup: (_) async => []);
+    LocalNetworkAccess? seen;
+    var builds = 0;
+    final child = Builder(
+      builder: (context) {
+        seen = AppServicesScope.of(context).localNetwork;
+        builds++;
+        return const SizedBox();
+      },
+    );
+    Future<void> mount(LocalNetworkAccess access) => t.pumpWidget(
+      AppServicesScope(
+        services: AppServices.updatesDisabledForTestOrPreview(
+          localNetwork: access,
+        ),
+        child: child,
+      ),
+    );
+    await mount(first);
+    expect(seen, same(first));
+    await mount(second);
+    expect(seen, same(second));
+    expect(builds, 2);
+    await t.pumpWidget(const SizedBox());
+  });
+
   testWidgets('missing scope fails with an actionable error', (t) async {
     await t.pumpWidget(
       Builder(

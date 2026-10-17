@@ -22,7 +22,7 @@ Future<AttachmentPreviewGate> readAttachmentPreviewGate(
 ) async {
   final identity = pageIdentity(w);
   try {
-    final enabled = await w.attachmentPreviewEnabled();
+    final enabled = await w.attachmentMedia.previewEnabled();
     rememberServerFlag(w, _gateFlag, enabled, identity);
     return enabled
         ? AttachmentPreviewGate.enabled

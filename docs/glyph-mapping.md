@@ -23,11 +23,12 @@ tool/gen-glyphs --check    # stale check (also tool/tests/test_gen_glyphs.py)
 tool/gen-glyphs --list     # enum name, lucide icon, build, users
 ```
 
-The output has **175 `RaftGlyph` values** and **167 geometries**:
+The output has **183 `RaftGlyph` values** and **175 geometries**:
 
 - **152 Web names.** One value per Web import name, in lowerCamel (`CheckSquare` → `checkSquare`, `Home` → `home`, `Image as ImageIcon` → `image`). A call site reads like the Web import it mirrors. Aliases share one geometry.
 - **raft-ui names.** These carry 1.48.0 geometry. Of the 14 names raft-ui imports, 13 have byte-identical geometry in both builds. The 14th, `CheckCircle2`, differs between builds: in 1.48.0 the tick is `m16 9-5.5 5.5L8 12`, in 0.575.0 it is `m9 12 2 2 4-4`. So it gets a second value, `checkCircle2RaftUi`, which `RaftNotificationCenter` now uses for the success status (raft-ui `DEFAULT_STATUS_ICON`, index.mjs:15048). `minus` is imported only by raft-ui.
 - **20 legacy names.** These pre-generator names (`ellipsis`, `squareCheck`, `menu`, ...) are kept so existing code compiles. They resolve through the 0.575.0 export map. No Web file imports them, so treat them as candidates for review.
+- **7 Flutter-only names** (`FLUTTER_ADDED` in `tool/gen-glyphs`: `bold`, `italic`, `strikethrough`, `heading`, `listOrdered`, `table`, `minimize2`). The message composer's Markdown toolbar and its collapse control draw them; no Web file imports them. Vendor with `tool/gen-glyphs --vendor-added <lucide-react 0.575.0 dir>`.
 - **`bookmarkFilled`.** `bookmark` drawn with whole-icon `fill="currentColor"`, as Web does in MessageItem.tsx:4915 and SavedPanel.tsx:146. For any other glyph, use `RaftIcon(glyph, filled: true)` (e.g. Web `<Play fill="currentColor">`).
 
 Compared with the hand-picked set, all 88 old names keep identical geometry

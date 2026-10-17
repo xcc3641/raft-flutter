@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -16,12 +17,21 @@ import 'package:raft_flutter/main.dart';
 import 'package:raft_flutter/platform/content_coordinator.dart';
 import 'package:raft_flutter/platform/background_notifications.dart';
 import 'package:raft_flutter/platform/app_update.dart' show AppUpdateService;
+import 'package:raft_flutter/platform/local_network_access.dart';
 import 'package:raft_flutter/platform/native_sharing.dart';
 import 'package:raft_ui/raft_ui.dart';
 import 'package:raft_ui/test_themes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'message_presentation_test.dart' show MessageAdapter;
+
+// This fixture routes HTTP in memory; its permission probe uses the same
+// synthetic public network instead of resolving fixture.invalid on the host.
+Future<List<InternetAddress>> _fixtureAddresses(String host) async => [
+  InternetAddress('203.0.113.1'),
+];
+
+const _fixtureNetwork = LocalNetworkAccess(lookup: _fixtureAddresses);
 
 class RootAdapter extends MessageAdapter {
   final statuses = <String, int>{};
@@ -362,8 +372,10 @@ class RootFixture {
     await t.pumpWidget(
       RaftApp(
         services: appUpdate == null
-            ? const AppServices.updatesDisabledForTestOrPreview()
-            : AppServices.withUpdates(appUpdate),
+            ? const AppServices.updatesDisabledForTestOrPreview(
+                localNetwork: _fixtureNetwork,
+              )
+            : AppServices.withUpdates(appUpdate, localNetwork: _fixtureNetwork),
         sessionStore: sessions,
         initialLocation: uri ?? Uri(path: '/'),
         nativeContent: contentOverride ?? content,

@@ -270,6 +270,8 @@ class RaftMessageRow extends StatefulWidget {
     required this.author,
     required this.timestamp,
     required this.content,
+    this.continuationTimestamp,
+    this.timestampTooltip,
     this.avatar,
     this.metadata,
     this.subtitle,
@@ -294,6 +296,13 @@ class RaftMessageRow extends StatefulWidget {
     this.semanticsActions = const [],
   });
   final String author, timestamp;
+
+  /// Clock-only label for the narrow continuation gutter. The complete
+  /// [timestamp] remains available to the header and accessibility label.
+  final String? continuationTimestamp;
+
+  /// Complete date and time, shown when the continuation clock is hovered.
+  final String? timestampTooltip;
   final RaftMessageRowContext rowContext;
 
   /// Compact accessibility: when set (e.g. "Alice, 10:01 AM"), the row is one
@@ -649,6 +658,8 @@ class _RaftMessageRowState extends State<RaftMessageRow> {
     );
     // Compact rows announce author, metadata and time in their own label.
     final compact = widget.semanticsLabel != null;
+    final gutterClock = widget.continuationTimestamp ?? widget.timestamp;
+    final fullTimestamp = widget.timestampTooltip ?? widget.timestamp;
     final wrapHeader = RaftScaled.grows(context);
     final header = ClipRect(
       clipper: const _HeaderInlineClip(),
@@ -806,13 +817,36 @@ class _RaftMessageRowState extends State<RaftMessageRow> {
                                       clipBehavior: Clip.none,
                                       children: [
                                         Positioned(
+                                          left: 0,
                                           right: 4,
-                                          top: 4,
+                                          top: 0,
+                                          bottom: 0,
                                           child: ExcludeSemantics(
                                             excluding: compact,
-                                            child: Text(
-                                              widget.timestamp,
-                                              style: recipe.continuationTime,
+                                            child: RaftTooltip(
+                                              message: fullTimestamp,
+                                              enabled:
+                                                  fullTimestamp != gutterClock,
+                                              excludeFromSemantics: compact,
+                                              // Keep the tooltip anchor as tall
+                                              // as the gutter even when the
+                                              // clock scales down to its width.
+                                              child: Padding(
+                                                padding: const EdgeInsets.only(
+                                                  top: 4,
+                                                ),
+                                                child: FittedBox(
+                                                  fit: BoxFit.scaleDown,
+                                                  alignment: Alignment.topRight,
+                                                  child: Text(
+                                                    gutterClock,
+                                                    maxLines: 1,
+                                                    softWrap: false,
+                                                    style:
+                                                        recipe.continuationTime,
+                                                  ),
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ),

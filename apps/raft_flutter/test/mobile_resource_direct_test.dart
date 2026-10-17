@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_flutter/features/mobile_resource_direct.dart';
-import 'package:raft_flutter/features/mobile_settings_owner.dart';
 import 'package:raft_flutter/features/resource_view.dart';
 
 import 'app_global_server_selector_test.dart' show RootFixture;
@@ -13,8 +12,6 @@ Future<void> settle(WidgetTester t) async {
 }
 
 void main() {
-  tearDown(MobileSettingsPreference.instance.resetForTest);
-
   testWidgets('the open tasks page reads the workspace on the first entry', (
     t,
   ) async {
@@ -27,8 +24,6 @@ void main() {
 
   for (final route in ['tasks', 'saved']) {
     testWidgets('direct $route ignores messages and presence', (t) async {
-      MobileSettingsPreference.instance.resetForTest();
-      MobileSettingsPreference.instance.setEnabled(true);
       final f = RootFixture();
       await f.mount(t, 'elegant-light', 390, uri: Uri.parse('/s/alpha/$route'));
       await settle(t);
@@ -99,8 +94,6 @@ void main() {
   });
 
   testWidgets('direct tasks layout follows the window width', (t) async {
-    MobileSettingsPreference.instance.resetForTest();
-    MobileSettingsPreference.instance.setEnabled(true);
     final f = RootFixture();
     await f.mount(t, 'elegant-light', 390, uri: Uri.parse('/s/alpha/tasks'));
     await settle(t);
@@ -114,8 +107,6 @@ void main() {
   });
 
   testWidgets('a covered tasks list is not mounted', (t) async {
-    MobileSettingsPreference.instance.resetForTest();
-    MobileSettingsPreference.instance.setEnabled(true);
     final f = RootFixture();
     await f.mount(t, 'elegant-light', 390, uri: Uri.parse('/s/alpha/tasks'));
     await settle(t);
@@ -136,8 +127,6 @@ void main() {
   testWidgets('a wide window keeps the tasks page on its own controller', (
     t,
   ) async {
-    MobileSettingsPreference.instance.resetForTest();
-    MobileSettingsPreference.instance.setEnabled(true);
     final f = RootFixture();
     await f.mount(t, 'elegant-light', 1280, uri: Uri.parse('/s/alpha/tasks'));
     await settle(t);

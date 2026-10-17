@@ -62,5 +62,21 @@ class ClosureTests(unittest.TestCase):
         self.assertEqual(self.select('apps/raft_flutter/lib/nothing_imports_me.dart'), [])
 
 
+class RankingTests(unittest.TestCase):
+    def test_tests_are_ordered_by_import_distance_then_name(self):
+        ranked = at.ranked_affected_tests({'apps/raft_flutter/lib/leaf.dart'}, SOURCES, ROOTS)
+        self.assertEqual(ranked, [(1, 'apps/raft_flutter/test/leaf_only_test.dart'), (2, 'apps/raft_flutter/test/mid_test.dart')])
+
+    def test_a_changed_test_is_closest_and_ranking_selects_the_same_tests_as_affected_tests(self):
+        changed = {'apps/raft_flutter/lib/leaf.dart', 'apps/raft_flutter/test/unrelated_test.dart'}
+        ranked = at.ranked_affected_tests(changed, SOURCES, ROOTS)
+        self.assertEqual(ranked[0], (0, 'apps/raft_flutter/test/unrelated_test.dart'))
+        self.assertEqual(sorted(name for _, name in ranked), at.affected_tests(changed, SOURCES, ROOTS))
+
+    def test_distance_follows_the_part_library_and_export_chain(self):
+        ranked = at.ranked_affected_tests({'packages/raft_ui/lib/src/widget_part.dart'}, SOURCES, ROOTS)
+        self.assertEqual(ranked, [(3, 'packages/raft_ui/test/widget_test.dart'), (4, 'apps/raft_flutter/test/mid_test.dart')])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -13,7 +13,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:raft_flutter/platform/app_services.dart';
 import 'package:raft_flutter/data/workspace_controller.dart';
 import 'package:raft_flutter/features/chat_view.dart';
-import 'package:raft_flutter/features/mobile_settings_owner.dart';
 import 'package:raft_flutter/main.dart' as app;
 import 'package:raft_flutter/platform/native_sharing.dart';
 import 'package:raft_ui/raft_ui.dart';
@@ -43,15 +42,12 @@ void main() {
   leakDebt(const ['_NativePicture']);
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  for (final direct in [false, true]) {
-    for (final thread in [false, true]) {
-      testWidgets(
-        'keyboard frames do not rebuild the ${thread ? 'thread' : 'channel'} page when direct is $direct',
-        (tester) async {
-          MobileSettingsPreference.instance.setEnabled(direct);
-          addTearDown(MobileSettingsPreference.instance.resetForTest);
-          // A 2.6x phone with a gesture bar, like the Android reference device.
-          tester.view.devicePixelRatio = 2.6;
+  for (final thread in [false, true]) {
+    testWidgets(
+      'keyboard frames do not rebuild the ${thread ? 'thread' : 'channel'} page',
+      (tester) async {
+        // A 2.6x phone with a gesture bar, like the Android reference device.
+        tester.view.devicePixelRatio = 2.6;
         tester.view.physicalSize = const Size(1080, 2400);
         tester.view.padding = const FakeViewPadding(top: 120, bottom: 63);
         tester.view.viewPadding = const FakeViewPadding(top: 120, bottom: 63);
@@ -205,9 +201,8 @@ void main() {
         debugPrint(report.join('\n'));
         await tester.pumpWidget(const SizedBox());
         await tester.pump(const Duration(seconds: 1));
-        },
-        timeout: const Timeout(Duration(minutes: 4)),
-      );
-    }
+      },
+      timeout: const Timeout(Duration(minutes: 4)),
+    );
   }
 }

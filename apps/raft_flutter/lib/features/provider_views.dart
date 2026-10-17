@@ -286,7 +286,7 @@ class _ProviderConnectionsState
   /// read, else the machines list) and the provider's model names.
   Future<({List<Map<String, dynamic>> candidates, List<String> models})>
   _verificationInputs(Map<String, dynamic> connection) async {
-    final directory = w.entityDirectory;
+    final directory = w.services.entityDirectory;
     final local = directory.state(WorkspaceEntityKind.computers).loaded;
     final machines = local
         ? directory.rows(WorkspaceEntityKind.computers)
